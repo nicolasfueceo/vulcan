@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from vulcan.agents import FeatureAgent
-from vulcan.evaluation import FeatureEvaluator
+from vulcan.evaluation.recommendation_evaluator import RecommendationEvaluator
 from vulcan.features import FeatureExecutor
 from vulcan.types import (
     ActionContext,
@@ -18,6 +18,8 @@ from vulcan.types import (
     FeatureDefinition,
     FeatureEvaluation,
     FeatureSet,
+    FeatureType,
+    MCTSAction,
     VulcanConfig,
 )
 from vulcan.utils import ExperimentTracker, PerformanceTracker, get_vulcan_logger
@@ -78,7 +80,7 @@ class ProgressiveEvolutionOrchestrator:
         # Core components
         self.feature_agent = FeatureAgent(config)
         self.feature_executor = FeatureExecutor(config)
-        self.feature_evaluator = FeatureEvaluator(config)
+        self.feature_evaluator = RecommendationEvaluator(config)
         self.experiment_tracker: Optional[ExperimentTracker] = None
 
         # Performance tracking
@@ -256,11 +258,11 @@ class ProgressiveEvolutionOrchestrator:
 
         for i in range(count):
             try:
-                # Build action context
+                # Build action context with proper FeatureSet
                 action_context = ActionContext(
                     current_features=self._get_population_features(),
                     performance_history=self._get_recent_evaluations(),
-                    available_actions=["generate"],
+                    available_actions=[MCTSAction.ADD],  # Use proper MCTSAction enum
                     max_features=count,
                     max_cost=100.0,
                 )
@@ -308,11 +310,16 @@ class ProgressiveEvolutionOrchestrator:
                 # Select parent feature (bias towards better performers)
                 parent = self._select_parent_feature()
 
-                # Build mutation context
+                # Build mutation context with proper FeatureSet
+                parent_feature_set = FeatureSet(
+                    features=[parent.feature],
+                    action_taken=MCTSAction.MUTATE,
+                )
+
                 action_context = ActionContext(
-                    current_features=[parent.feature],
+                    current_features=parent_feature_set,
                     performance_history=self._get_recent_evaluations(),
-                    available_actions=["mutate"],
+                    available_actions=[MCTSAction.MUTATE],  # Use proper MCTSAction enum
                     max_features=1,
                     max_cost=50.0,
                 )
@@ -357,7 +364,7 @@ class ProgressiveEvolutionOrchestrator:
         for candidate in candidates:
             try:
                 # Execute feature with automatic repair
-                success, error = await self._execute_with_repair(
+                success, error, feature_results = await self._execute_with_repair(
                     candidate, data_context
                 )
 
@@ -367,7 +374,7 @@ class ProgressiveEvolutionOrchestrator:
 
                     evaluation = await self.feature_evaluator.evaluate_feature_set(
                         feature_set=feature_set,
-                        feature_results={candidate.feature.name: {}},  # Simplified
+                        feature_results=feature_results,  # Pass actual feature execution results
                         data_context=data_context,
                         iteration=self.current_generation,
                     )
@@ -397,7 +404,7 @@ class ProgressiveEvolutionOrchestrator:
 
     async def _execute_with_repair(
         self, candidate: FeatureCandidate, data_context: DataContext
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[Dict]]:
         """Execute feature with automatic code repair on failure."""
         for attempt in range(self.max_repair_attempts + 1):
             try:
@@ -408,7 +415,7 @@ class ProgressiveEvolutionOrchestrator:
                     target_split="validation",
                 )
 
-                return True, None  # Success!
+                return True, None, results  # Success! Return the results
 
             except Exception as e:
                 error_msg = str(e)
@@ -431,7 +438,7 @@ class ProgressiveEvolutionOrchestrator:
                         candidate.repair_attempts += 1
                         continue  # Try again with repaired feature
 
-                return False, error_msg
+                return False, error_msg, None
 
     async def _repair_feature(
         self, feature: FeatureDefinition, error_msg: str, data_context: DataContext
@@ -489,11 +496,25 @@ class ProgressiveEvolutionOrchestrator:
 
     def _get_feature_key(self, feature: FeatureDefinition) -> str:
         """Generate unique key for feature to prevent duplicates."""
-        return f"{feature.name}_{hash(feature.implementation)}"
+        # Create a unique key based on feature type and implementation
+        if feature.feature_type == FeatureType.CODE_BASED:
+            implementation = feature.code or ""
+        elif feature.feature_type == FeatureType.LLM_BASED:
+            implementation = feature.llm_prompt or ""
+        elif feature.feature_type == FeatureType.HYBRID:
+            implementation = f"{feature.llm_prompt}_{feature.preprocessing_code}_{feature.postprocessing_code}"
+        else:
+            implementation = ""
 
-    def _get_population_features(self) -> List[FeatureDefinition]:
-        """Get features from current population."""
-        return [candidate.feature for candidate in self.population]
+        return f"{feature.name}_{hash(implementation)}"
+
+    def _get_population_features(self) -> FeatureSet:
+        """Get features from current population as a FeatureSet."""
+        features = [candidate.feature for candidate in self.population]
+        return FeatureSet(
+            features=features,
+            action_taken=MCTSAction.ADD,  # Default action
+        )
 
     def _get_recent_evaluations(self) -> List[FeatureEvaluation]:
         """Get recent feature evaluations."""
@@ -567,6 +588,19 @@ class ProgressiveEvolutionOrchestrator:
         self, data_context: DataContext, execution_time: float
     ) -> Dict[str, Any]:
         """Generate final evolution results."""
+        # Safe calculation of average success rate to avoid division by zero
+        avg_success_rate = 0.0
+        if self.generation_history:
+            success_rates = []
+            for stats in self.generation_history:
+                if stats.total_features > 0:
+                    success_rates.append(
+                        stats.successful_features / stats.total_features
+                    )
+
+            if success_rates:
+                avg_success_rate = sum(success_rates) / len(success_rates)
+
         return {
             "best_score": self.best_score,
             "total_generations": self.current_generation,
@@ -579,17 +613,19 @@ class ProgressiveEvolutionOrchestrator:
             "total_features_generated": sum(
                 stats.total_features for stats in self.generation_history
             ),
-            "avg_success_rate": sum(
-                stats.successful_features / stats.total_features
-                for stats in self.generation_history
-            )
-            / len(self.generation_history)
-            if self.generation_history
-            else 0.0,
+            "avg_success_rate": avg_success_rate,
         }
 
     async def get_evolution_visualization_data(self) -> Dict[str, Any]:
         """Get evolution data for visualization."""
+        # Ensure action_rewards always has the expected structure for frontend
+        action_rewards_data = {
+            "generate_new": self.action_rewards.get(EvolutionAction.GENERATE_NEW, []),
+            "mutate_existing": self.action_rewards.get(
+                EvolutionAction.MUTATE_EXISTING, []
+            ),
+        }
+
         return {
             "population": [
                 {
@@ -615,10 +651,7 @@ class ProgressiveEvolutionOrchestrator:
                 }
                 for stats in self.generation_history
             ],
-            "action_rewards": {
-                action.value: rewards[-10:]  # Last 10 rewards
-                for action, rewards in self.action_rewards.items()
-            },
+            "action_rewards": action_rewards_data,
             "best_candidate": {
                 "feature_name": self.best_candidate.feature.name,
                 "score": self.best_candidate.score,

@@ -66,7 +66,9 @@ result = df.groupby('user_id')['authors'].apply(lambda x: len(set(x)))
 ```
 
 For llm_based features: Provide a clear prompt that can extract numerical values from text.
-For hybrid features: This will be handled by the executor with proper LLM integration."""
+For hybrid features: This will be handled by the executor with proper LLM integration.
+
+IMPORTANT: Generate features that are DIFFERENT from existing features. Avoid simple variations of the same concept."""
 
 FEATURE_GENERATION_USER_PROMPT = """Current Context:
 - Action: {action}
@@ -74,6 +76,9 @@ FEATURE_GENERATION_USER_PROMPT = """Current Context:
 - Performance history: {performance_summary}
 - Data schema: {data_schema}
 - Available text columns: {text_columns}
+
+EXISTING FEATURES (DO NOT DUPLICATE):
+{existing_features_detail}
 
 Data Statistics:
 - Number of users: {n_users}
@@ -83,11 +88,18 @@ Data Statistics:
 {action_specific_prompt}
 
 Requirements:
-1. Generate a feature that addresses gaps in current feature set
-2. Consider computational cost vs. potential benefit
-3. Provide clear implementation following the required patterns
-4. Explain reasoning behind the feature choice
+1. Generate a feature that is SUBSTANTIALLY DIFFERENT from existing features
+2. Explore new aspects of user behavior not covered by current features
+3. Consider computational cost vs. potential benefit
+4. Provide clear implementation following the required patterns
 5. ENSURE your code sets a 'result' variable and uses 'df' not 'data'
+
+DIVERSITY GUIDELINES:
+- If existing features focus on ratings, try author/genre preferences
+- If existing features use means, try variance/distribution measures
+- If existing features are simple counts, try temporal patterns
+- If existing features are user-centric, try item-centric perspectives
+- Consider cross-feature interactions or ratios
 
 {format_instructions}"""
 
@@ -401,6 +413,35 @@ class FeatureAgent(BaseAgent):
             current_features = [
                 f.name for f in action_context.current_features.features
             ]
+
+            # Create detailed feature descriptions for diversity
+            existing_features_detail = []
+            for feature in action_context.current_features.features:
+                detail = f"- {feature.name}: {feature.description}"
+                if feature.code:
+                    # Extract key operations from code
+                    if "groupby" in feature.code:
+                        detail += " (uses groupby)"
+                    if "mean()" in feature.code:
+                        detail += " (calculates mean)"
+                    elif "std()" in feature.code or "var()" in feature.code:
+                        detail += " (calculates variance/std)"
+                    elif "count()" in feature.code or "size()" in feature.code:
+                        detail += " (counts items)"
+                    if "rating" in feature.code:
+                        detail += " (based on ratings)"
+                    elif "author" in feature.code:
+                        detail += " (based on authors)"
+                    elif "title" in feature.code:
+                        detail += " (based on titles)"
+                existing_features_detail.append(detail)
+
+            existing_features_str = (
+                "\n".join(existing_features_detail)
+                if existing_features_detail
+                else "No existing features yet"
+            )
+
             performance_summary = self._summarize_performance(
                 action_context.performance_history
             )
@@ -473,6 +514,7 @@ class FeatureAgent(BaseAgent):
                     "sparsity": data_context.sparsity,
                     "action_specific_prompt": action_prompt,
                     "format_instructions": format_instructions,
+                    "existing_features_detail": existing_features_str,
                 }
             )
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from vulcan.agents import FeatureAgent
-from vulcan.evaluation import FeatureEvaluator
+from vulcan.evaluation import RecommendationEvaluator
 from vulcan.features import FeatureExecutor
 from vulcan.types import (
     ActionContext,
@@ -32,20 +32,23 @@ class MCTSOrchestrator:
         self,
         config: VulcanConfig,
         performance_tracker: Optional[PerformanceTracker] = None,
+        results_manager: Optional[Any] = None,
     ) -> None:
         """Initialize MCTS orchestrator.
 
         Args:
             config: VULCAN configuration.
             performance_tracker: Optional external performance tracker to use.
+            results_manager: Optional results manager for saving experiment data.
         """
         self.config = config
         self.logger = get_vulcan_logger(__name__)
+        self.results_manager = results_manager
 
         # Core components
         self.feature_agent = FeatureAgent(config)
         self.feature_executor = FeatureExecutor(config)
-        self.feature_evaluator = FeatureEvaluator(config)
+        self.feature_evaluator = RecommendationEvaluator(config)
         self.experiment_tracker: Optional[ExperimentTracker] = None
 
         # Performance tracking
@@ -63,6 +66,10 @@ class MCTSOrchestrator:
         self.iteration_count = 0
         self.feature_evaluations: List[FeatureEvaluation] = []
 
+        # Decision log for narrative
+        self.decision_logs: List[Dict[str, Any]] = []
+        self.llm_interactions: List[Dict[str, Any]] = []
+
     async def initialize(self) -> bool:
         """Initialize all components.
 
@@ -75,9 +82,10 @@ class MCTSOrchestrator:
             await self.feature_executor.initialize()
             await self.feature_evaluator.initialize()
 
-            # Initialize experiment tracking
-            if self.config.experiment.wandb_enabled:
-                self.experiment_tracker = ExperimentTracker(self.config.experiment)
+            # Initialize experiment tracking (disabled for now)
+            # if self.config.experiment.wandb_enabled:
+            #     import wandb
+            #     wandb.init(...)
 
             # Create root node
             self.root_node = MCTSNode()
@@ -94,16 +102,22 @@ class MCTSOrchestrator:
         self,
         data_context: DataContext,
         max_iterations: Optional[int] = None,
+        results_manager: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Run MCTS search for optimal feature set.
 
         Args:
             data_context: Data context with all splits.
             max_iterations: Maximum iterations (uses config if None).
+            results_manager: Results manager for saving data (overrides init value).
 
         Returns:
             Search results with best feature set and performance.
         """
+        # Use provided results manager or fall back to instance one
+        if results_manager:
+            self.results_manager = results_manager
+
         # Ensure we're initialized
         if self.root_node is None:
             await self.initialize()
@@ -124,6 +138,10 @@ class MCTSOrchestrator:
 
                 # Run single MCTS iteration
                 await self._run_iteration(data_context)
+
+                # Save progress to results manager every few iterations
+                if self.results_manager and iteration % 5 == 0:
+                    await self._save_progress_to_results_manager()
 
                 # Log progress
                 if iteration % 10 == 0:
@@ -149,8 +167,26 @@ class MCTSOrchestrator:
 
             execution_time = time.time() - start_time
 
+            # Run full evaluation on best features
+            if self.best_node:
+                self.logger.info("Running FULL evaluation on best features found")
+                best_evaluation = await self._run_full_evaluation(
+                    self.best_node, data_context
+                )
+                self.logger.info(
+                    "Full evaluation complete",
+                    fast_score=self.best_score,
+                    full_score=best_evaluation.overall_score,
+                    full_precision=best_evaluation.metrics.precision_at_10,
+                    full_improvement=best_evaluation.metrics.improvement_over_baseline,
+                )
+
             # Generate final results
             results = await self._generate_results(data_context, execution_time)
+
+            # Save final results to results manager
+            if self.results_manager:
+                await self._save_final_results_to_results_manager(results)
 
             self.logger.info(
                 "MCTS search completed",
@@ -316,6 +352,7 @@ class MCTSOrchestrator:
                 feature_results=feature_results,
                 data_context=data_context,
                 iteration=self.iteration_count,
+                fast_mode=True,  # Use fast evaluation during exploration
             )
 
             # Store evaluation in node
@@ -542,3 +579,180 @@ class MCTSOrchestrator:
             self.experiment_tracker.finish_experiment(dummy_result)
 
         self.logger.info("MCTS orchestrator cleanup completed")
+
+    async def _run_full_evaluation(
+        self, node: MCTSNode, data_context: DataContext
+    ) -> FeatureEvaluation:
+        """Run full evaluation on the best features found.
+
+        Args:
+            node: Best node found.
+            data_context: Data context.
+
+        Returns:
+            Full evaluation result.
+        """
+        try:
+            # Get complete feature set for this node
+            feature_set = self._get_feature_set_for_node(node)
+
+            # Execute all features
+            feature_results = await self.feature_executor.execute_feature_set(
+                features=feature_set.features,
+                data_context=data_context,
+                target_split="validation",  # Use validation for evaluation
+            )
+
+            # Evaluate feature set
+            evaluation = await self.feature_evaluator.evaluate_feature_set(
+                feature_set=feature_set,
+                feature_results=feature_results,
+                data_context=data_context,
+                iteration=self.iteration_count,
+                fast_mode=False,  # Use full evaluation
+            )
+
+            # Store evaluation in node
+            node.evaluation_score = evaluation.overall_score
+
+            # Record evaluation in performance tracker
+            self.performance_tracker.record_evaluation(evaluation)
+
+            self.logger.debug(
+                "Node simulated",
+                node_id=node.node_id,
+                score=evaluation.overall_score,
+                feature_count=len(feature_set.features),
+            )
+
+            return evaluation
+
+        except Exception as e:
+            self.logger.error("Full evaluation failed", error=str(e))
+            # Return a default evaluation with low score
+            return FeatureEvaluation(
+                feature_set=self._get_feature_set_for_node(node),
+                metrics=FeatureMetrics(extraction_time=0.0),
+                overall_score=0.0,
+                fold_id=data_context.fold_id,
+                iteration=self.iteration_count,
+                evaluation_time=0.0,
+            )
+
+    async def _save_progress_to_results_manager(self) -> None:
+        """Save current MCTS progress to results manager."""
+        if not self.results_manager:
+            return
+
+        try:
+            # Generate comprehensive visualization data
+            tree_data = await self.get_tree_visualization_data()
+
+            # Create stats summary
+            stats = {
+                "total_nodes": self._count_tree_nodes(),
+                "max_depth": self._get_max_tree_depth(),
+                "best_score": self.best_score,
+                "iterations_completed": self.iteration_count,
+                "avg_branching_factor": self._get_avg_branching_factor(),
+            }
+
+            # Create best candidate info
+            best_candidate = None
+            if self.best_node:
+                best_feature_set = self._get_feature_set_for_node(self.best_node)
+                if best_feature_set.features:
+                    best_candidate = {
+                        "feature_name": best_feature_set.features[-1].name,
+                        "score": self.best_score,
+                        "generation": self.best_node.depth,  # Use depth as generation
+                    }
+
+            # Combine all experiment data
+            experiment_data = {
+                "nodes": tree_data.get("nodes", []),
+                "edges": tree_data.get("edges", []),
+                "best_node_id": tree_data.get("best_node_id"),
+                "stats": stats,
+                "generation_history": [],  # MCTS doesn't have generations, but keep for compatibility
+                "action_rewards": {
+                    "generate_new": [],
+                    "mutate_existing": [],
+                },  # Placeholder for compatibility
+                "best_candidate": best_candidate,
+                "decision_logs": self.decision_logs,
+                "llm_interactions": self.llm_interactions,
+            }
+
+            # Update experiment data through results manager
+            self.results_manager.update_experiment_data(experiment_data)
+
+        except Exception as e:
+            self.logger.error(
+                "Failed to save progress to results manager", error=str(e)
+            )
+
+    async def _save_final_results_to_results_manager(
+        self, results: Dict[str, Any]
+    ) -> None:
+        """Save final MCTS results to results manager."""
+        if not self.results_manager:
+            return
+
+        try:
+            # Save final results and mark experiment as completed
+            await self._save_progress_to_results_manager()  # Save final state
+
+            # Add final results metadata
+            final_metadata = {"final_results": results, "status": "completed"}
+
+            self.results_manager.finish_experiment(final_metadata)
+
+        except Exception as e:
+            self.logger.error(
+                "Failed to save final results to results manager", error=str(e)
+            )
+
+    def _log_decision(self, action: str, details: Dict[str, Any]) -> None:
+        """Log a decision made during MCTS search.
+
+        Args:
+            action: Action taken (e.g., 'explore', 'exploit', 'select_node')
+            details: Decision details including reasoning
+        """
+        decision_log = {
+            "timestamp": time.time(),
+            "iteration": self.iteration_count,
+            "action": action,
+            "details": details,
+        }
+
+        self.decision_logs.append(decision_log)
+
+        # Also save to results manager if available
+        if self.results_manager:
+            self.results_manager.add_decision_log(decision_log)
+
+    def _log_llm_interaction(
+        self, prompt: str, response: str, feature_code: str = None
+    ) -> None:
+        """Log an LLM interaction during feature generation.
+
+        Args:
+            prompt: The prompt sent to LLM
+            response: The LLM response
+            feature_code: Generated feature code (if applicable)
+        """
+        llm_interaction = {
+            "timestamp": time.time(),
+            "iteration": self.iteration_count,
+            "prompt": prompt,
+            "response": response,
+            "feature_code": feature_code,
+        }
+
+        self.llm_interactions.append(llm_interaction)
+
+        # Also save to results manager if available
+        if self.results_manager:
+            self.results_manager.add_llm_interaction(llm_interaction)

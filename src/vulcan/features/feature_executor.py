@@ -55,6 +55,7 @@ class FeatureExecutor:
         self.llm_client = None
         self.llm_chain = None
         self._execution_cache: Dict[str, Any] = {}
+        self._full_data_cache: Dict[str, pd.DataFrame] = {}  # Cache for full data
 
     async def initialize(self) -> bool:
         """Initialize the feature executor with LangChain structured output."""
@@ -120,32 +121,40 @@ class FeatureExecutor:
         feature: FeatureDefinition,
         data_context: DataContext,
         target_split: str = "train",
+        max_records: Optional[int] = None,
     ) -> List[FeatureValue]:
-        """Execute a feature definition on data with self-correction capabilities.
+        """Execute a single feature definition and extract values.
 
         Args:
             feature: Feature definition to execute.
-            data_context: Data context with access to data.
-            target_split: Which data split to use (train/val/test).
+            data_context: Data context containing all splits.
+            target_split: Which data split to use ('train', 'validation', 'test').
+            max_records: Maximum number of records to process (None for all).
 
         Returns:
-            List of feature values for users.
+            List of feature values for all users.
         """
+        self.logger.info(
+            "Executing feature",
+            feature_name=feature.name,
+            feature_type=feature.feature_type,
+            target_split=target_split,
+            max_records=max_records,
+        )
+
         start_time = time.time()
 
         try:
             # Check cache first
-            cache_key = f"{feature.name}_{target_split}"
+            cache_key = f"{feature.name}_{target_split}_full"
             if cache_key in self._execution_cache:
                 self.logger.debug(
-                    "Using cached feature results",
-                    feature_name=feature.name,
-                    target_split=target_split,
+                    "Using cached feature values", feature_name=feature.name
                 )
                 return self._execution_cache[cache_key]
 
-            # Load actual data for the specified split
-            data = await self._load_split_data(data_context, target_split)
+            # Load target split data
+            data = await self._load_split_data(data_context, target_split, max_records)
 
             # Execute based on feature type with self-correction
             if feature.feature_type == FeatureType.CODE_BASED:
@@ -189,28 +198,37 @@ class FeatureExecutor:
             raise
 
     async def _load_split_data(
-        self, data_context: DataContext, target_split: str
+        self,
+        data_context: DataContext,
+        target_split: str,
+        max_records: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Load actual data for specified split.
 
         Args:
             data_context: Data context.
             target_split: Target split name.
+            max_records: Maximum number of records to process (None for all).
 
         Returns:
             Data dictionary with real data.
         """
-        # Load real data from the streaming data context
-        if hasattr(data_context, "get_sample_batch"):
-            # Use the streaming data context's method
-            if target_split == "train":
-                return data_context.get_sample_batch("train", max_records=1000)
-            elif target_split in ["validation", "val"]:
-                return data_context.get_sample_batch("validation", max_records=500)
-            elif target_split == "test":
-                return data_context.get_sample_batch("test", max_records=500)
+        # For feature execution, we need the FULL data, not just samples
+        if hasattr(data_context, "get_full_split_data"):
+            # Use the full data loading method for feature execution
+            self.logger.info(f"Loading full {target_split} data for feature execution")
+            full_df = data_context.get_full_split_data(target_split)
+            # Return the DataFrame directly - our execution methods can handle DataFrames
+            return full_df
 
-        # Fallback to data_context properties
+        # Fallback to sample batch for other data contexts
+        if hasattr(data_context, "get_sample_batch"):
+            self.logger.warning(
+                f"Using sample batch for {target_split} - full data method not available"
+            )
+            return data_context.get_sample_batch(target_split, max_records=max_records)
+
+        # Final fallback to data_context properties
         if target_split == "train":
             return data_context.train_data
         elif target_split in ["validation", "val"]:
@@ -921,12 +939,14 @@ CORRECTED CODE:
             # Close LLM client if needed
             pass
         self._execution_cache.clear()
+        self._full_data_cache.clear()
 
     async def execute_feature_set(
         self,
         features: List[FeatureDefinition],
         data_context: DataContext,
         target_split: str = "train",
+        max_records: Optional[int] = None,
     ) -> Dict[str, List[FeatureValue]]:
         """Execute multiple features in parallel.
 
@@ -934,13 +954,16 @@ CORRECTED CODE:
             features: List of feature definitions.
             data_context: Data context.
             target_split: Target data split.
+            max_records: Maximum number of records to process (None for all).
 
         Returns:
             Dictionary mapping feature names to their values.
         """
         tasks = []
         for feature in features:
-            task = self.execute_feature(feature, data_context, target_split)
+            task = self.execute_feature(
+                feature, data_context, target_split, max_records
+            )
             tasks.append(task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -979,3 +1002,41 @@ CORRECTED CODE:
         return await self._execute_code_feature_with_correction(
             feature, data, data_context, max_attempts=3
         )
+
+    def clear_cache(
+        self, feature_name: Optional[str] = None, split: Optional[str] = None
+    ):
+        """Clear execution cache.
+
+        Args:
+            feature_name: If provided, only clear cache for this feature
+            split: If provided, only clear cache for this split
+        """
+        if feature_name and split:
+            cache_key = f"{feature_name}_{split}_full"
+            if cache_key in self._execution_cache:
+                del self._execution_cache[cache_key]
+                self.logger.info(f"Cleared cache for {feature_name} on {split}")
+        elif feature_name:
+            # Clear all splits for this feature
+            keys_to_remove = [
+                k
+                for k in self._execution_cache.keys()
+                if k.startswith(f"{feature_name}_")
+            ]
+            for key in keys_to_remove:
+                del self._execution_cache[key]
+            self.logger.info(f"Cleared all cache entries for {feature_name}")
+        elif split:
+            # Clear all features for this split
+            keys_to_remove = [
+                k for k in self._execution_cache.keys() if k.endswith(f"_{split}_full")
+            ]
+            for key in keys_to_remove:
+                del self._execution_cache[key]
+            self.logger.info(f"Cleared all cache entries for {split} split")
+        else:
+            # Clear everything
+            self._execution_cache.clear()
+            self._full_data_cache.clear()
+            self.logger.info("Cleared all execution caches")

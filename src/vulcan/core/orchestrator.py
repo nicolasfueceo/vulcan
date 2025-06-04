@@ -11,13 +11,11 @@ from fastapi import WebSocket
 from vulcan.types import (
     ExperimentResult,
     ExperimentStatus,
-    ExplorationState,
-    LLMInteraction,
     VulcanConfig,
     WebSocketMessage,
     WebSocketMessageType,
 )
-from vulcan.utils import PerformanceTracker, get_vulcan_logger
+from vulcan.utils import get_vulcan_logger
 
 logger = get_vulcan_logger(__name__)
 
@@ -30,33 +28,33 @@ class VulcanOrchestrator:
     """Main orchestrator for VULCAN autonomous feature engineering."""
 
     def __init__(self, config: VulcanConfig) -> None:
-        """Initialize orchestrator with configuration.
+        """Initialize VULCAN orchestrator.
 
         Args:
-
-            config: VULCAN configuration object.
+            config: VULCAN configuration.
         """
         self.config = config
-        self._experiment_id: Optional[str] = None
+        self.performance_tracker = None
+
+        # State management
         self._is_running = False
-        self._experiment_history: List[ExperimentResult] = []
-        self._websocket_callbacks: List[callable] = []
+        self._experiment_id: Optional[str] = None
         self._components_initialized = False
-        self._active_websockets: List[WebSocket] = []
-        self._exploration_state: Optional[ExplorationState] = None
+        self._results_manager = None
 
-        # Progressive Evolution components
+        # Experiment tracking
+        self._experiment_history: List[ExperimentResult] = []
+
+        # Orchestrator instances
         self.evo_orchestrator = None
-        self.current_generation = 0
-        self.best_score = 0.0
-        self.iteration_count = 0
-        self.llm_history: List[LLMInteraction] = []
+        self.mcts_orchestrator = None
 
-        # Feature components
-        self.feature_executor = None
-        self.feature_evaluator = None
+        # WebSocket management
+        self._websocket_callbacks: List[callable] = []
+        self._active_websockets: List[WebSocket] = []
+        self._exploration_state: Optional[Dict[str, Any]] = None
 
-        # Callbacks for saving experiment artifacts
+        # Artifact callbacks
         self._callbacks = {
             "llm_output": [],
             "feature_code": [],
@@ -64,17 +62,7 @@ class VulcanOrchestrator:
             "evolution_snapshot": [],
         }
 
-        # Initialize performance tracker
-        self.performance_tracker = PerformanceTracker(max_history=1000)
-
-        logger.info(
-            "VULCAN Orchestrator initialized",
-            max_generations=getattr(config.mcts, "max_iterations", 50),
-            population_size=getattr(config.mcts, "population_size", 50),
-            generation_size=getattr(config.mcts, "generation_size", 20),
-            llm_provider=config.llm.provider,
-            llm_model=config.llm.model_name,
-        )
+        logger.info("🔧 VULCAN Orchestrator initialized", config_loaded=True)
 
     async def initialize_components(self) -> bool:
         """Initialize all system components.
@@ -187,7 +175,8 @@ class VulcanOrchestrator:
         )
         try:
             # Initialize feature components
-            from vulcan.feature import FeatureEvaluator, FeatureExecutor
+            from vulcan.evaluation import FeatureEvaluator
+            from vulcan.feature import FeatureExecutor
 
             self.feature_executor = FeatureExecutor(self.config)
             self.feature_evaluator = FeatureEvaluator(self.config)
@@ -239,6 +228,7 @@ class VulcanOrchestrator:
         experiment_name: Optional[str] = None,
         config_overrides: Optional[Dict[str, Any]] = None,
         data_context: Optional[Any] = None,
+        results_manager: Optional[Any] = None,
     ) -> str:
         """Start a new experiment.
 
@@ -246,6 +236,7 @@ class VulcanOrchestrator:
             experiment_name: Name for the experiment.
             config_overrides: Configuration overrides.
             data_context: Data context for the experiment (will create default if None).
+            results_manager: ResultsManager for saving experiment data to files.
 
         Returns:
             Experiment ID.
@@ -269,6 +260,7 @@ class VulcanOrchestrator:
 
         self._experiment_id = experiment_id
         self._is_running = True
+        self._results_manager = results_manager  # Store for use in other methods
 
         exp_logger.info(
             "🚀 Starting new VULCAN experiment",
@@ -366,7 +358,7 @@ class VulcanOrchestrator:
             self.evo_orchestrator = ProgressiveEvolutionOrchestrator(
                 self.config,
                 self.performance_tracker,
-                websocket_callback=self._send_evolution_websocket_update,
+                results_manager=self._results_manager,  # Pass results manager
             )
 
             await self.evo_orchestrator.initialize()
@@ -383,7 +375,7 @@ class VulcanOrchestrator:
                 max_generations=self.config.mcts.max_iterations,
             )
 
-            # Broadcast final state
+            # Update exploration state for potential future API access
             self._exploration_state = {
                 "current_generation": evolution_results.get("total_generations", 0),
                 "population": await self.evo_orchestrator.get_evolution_visualization_data(),
@@ -393,7 +385,6 @@ class VulcanOrchestrator:
                     "total_features_generated", 0
                 ),
             }
-            await self._broadcast_state()
 
             # Extract results from Progressive Evolution
             execution_time = time.time() - start_time
@@ -418,6 +409,15 @@ class VulcanOrchestrator:
 
             self._experiment_history.append(result)
 
+            # Save final results via results manager
+            if self._results_manager:
+                final_results = {
+                    "experiment_results": result.dict(),
+                    "evolution_results": evolution_results,
+                    "final_state": self._exploration_state,
+                }
+                self._results_manager.finish_experiment(final_results)
+
             exp_logger.info(
                 "🎉 Experiment completed successfully",
                 experiment_id=experiment_id,
@@ -429,19 +429,6 @@ class VulcanOrchestrator:
                 population_size=evolution_results.get("population_size", 0),
             )
 
-            # Send completion notification
-            await self._send_websocket_message(
-                WebSocketMessage(
-                    type=WebSocketMessageType.EXPERIMENT_COMPLETED,
-                    timestamp=time.time(),
-                    experiment_id=experiment_id,
-                    experiment_name=experiment_name,
-                    results=result.dict(),
-                )
-            )
-
-            exp_logger.info("🌐 Experiment completion notification sent")
-
         except ImportError as e:
             execution_time = time.time() - start_time
             exp_logger.error(
@@ -450,6 +437,13 @@ class VulcanOrchestrator:
                 error="ProgressiveEvolutionOrchestrator not available",
                 execution_time=f"{execution_time:.3f}s",
             )
+
+            # Mark experiment as failed in results manager
+            if self._results_manager:
+                self._results_manager.finish_experiment(
+                    {"error": str(e), "status": "failed"}
+                )
+
             raise RuntimeError(
                 "Progressive Evolution feature engineering components not implemented"
             ) from e
@@ -464,23 +458,19 @@ class VulcanOrchestrator:
                 exc_info=True,
             )
 
-            # Send failure notification
-            await self._send_websocket_message(
-                WebSocketMessage(
-                    type=WebSocketMessageType.EXPERIMENT_FAILED,
-                    timestamp=time.time(),
-                    experiment_id=experiment_id,
-                    experiment_name=experiment_name,
-                    error=str(e),
+            # Mark experiment as failed in results manager
+            if self._results_manager:
+                self._results_manager.finish_experiment(
+                    {"error": str(e), "status": "failed"}
                 )
-            )
 
-            exp_logger.info("🌐 Experiment failure notification sent")
+            exp_logger.info("📁 Experiment failure recorded")
             raise
 
         finally:
             self._is_running = False
             self._experiment_id = None
+            self._results_manager = None  # Clear reference
             # Cleanup evolution orchestrator
             if self.evo_orchestrator:
                 await self.evo_orchestrator.cleanup()

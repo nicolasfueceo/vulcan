@@ -1,0 +1,62 @@
+/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/.venv/lib/python3.9/site-packages/lightfm/_lightfm_fast.py:9: UserWarning: LightFM was compiled without OpenMP support. Only a single thread will be used.
+  warnings.warn(
+================================================================================
+🚀 VULCAN MCTS Feature Engineering Experiment
+================================================================================
+
+📋 Configuration:
+  - Max iterations: 10
+  - Max depth: 5
+  - LLM model: gpt-4o-mini
+  - LLM temperature: 0.7
+
+📊 Loading Goodreads data...
+2025-05-31 16:25:09 [info     ] 🔧 Initializing Goodreads data loader batch_size=1000 db_path='/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db' inner_fold=1 outer_fold=1 splits_dir='/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits'
+2025-05-31 16:25:09 [debug    ] ✅ Input validation passed
+2025-05-31 16:25:09 [debug    ] 📂 Loading user splits from CSV files
+2025-05-31 16:25:09 [debug    ] 📄 Loading split files          test_file=outer_fold_1_val_clusters_users.csv train_file=outer_fold_1_inner_fold_1_feat_train_users.csv val_file=outer_fold_1_inner_fold_1_feat_val_users.csv
+2025-05-31 16:25:09 [debug    ] 📖 Reading user IDs from outer_fold_1_inner_fold_1_feat_train_users.csv
+2025-05-31 16:25:09 [debug    ] ✅ Loaded user IDs from outer_fold_1_inner_fold_1_feat_train_users.csv count=44,306 file_size=1427.8KB load_time=0.028s
+2025-05-31 16:25:09 [debug    ] 📖 Reading user IDs from outer_fold_1_inner_fold_1_feat_val_users.csv
+2025-05-31 16:25:09 [debug    ] ✅ Loaded user IDs from outer_fold_1_inner_fold_1_feat_val_users.csv count=22,154 file_size=714.0KB load_time=0.010s
+2025-05-31 16:25:09 [debug    ] 📖 Reading user IDs from outer_fold_1_val_clusters_users.csv
+2025-05-31 16:25:09 [debug    ] ✅ Loaded user IDs from outer_fold_1_val_clusters_users.csv count=16,616 file_size=535.5KB load_time=0.008s
+2025-05-31 16:25:09 [info     ] 📊 User splits loaded successfully test_load_time=0.008s test_users=16,616 total_users=83,076 train_load_time=0.028s train_users=44,306 val_load_time=0.010s val_users=22,154
+2025-05-31 16:25:09 [info     ] ✅ Goodreads data loader initialized initialization_time=0.047s split_loading_time=0.046s
+2025-05-31 16:25:09 [info     ] 🔨 Creating data context        inner_fold=1 outer_fold=1 sample_size=None
+2025-05-31 16:25:09 [debug    ] 📈 Computing dataset statistics
+2025-05-31 16:25:09 [debug    ] 🔢 Counting distinct users
+2025-05-31 16:25:09 [debug    ] 🔢 Counting distinct items
+2025-05-31 16:25:09 [debug    ] 🔢 Counting total ratings
+2025-05-31 16:25:10 [debug    ] 📊 Statistics computed          density=0.0117% n_items=258,585 n_ratings=3,144,782 n_users=103,845 sparsity=0.999883
+2025-05-31 16:25:10 [debug    ] 📊 Dataset statistics computed  time=0.532s
+2025-05-31 16:25:10 [debug    ] 🌊 StreamingDataContext initialized fold_id=outer_1_inner_1 has_loader=True
+2025-05-31 16:25:10 [info     ] ✅ Data context created successfully context_creation_time=0.002s fold_id=outer_1_inner_1 n_items=258,585 n_users=103,845 sparsity=0.999883 stats_time=0.532s
+  ✅ Loaded 103,845 users, 258,585 items
+  📈 Sparsity: 0.9999
+2025-05-31 16:25:10 [info     ] Performance tracker initialized max_history=100
+
+🌳 Initializing MCTS orchestrator...
+2025-05-31 16:25:10 [info     ] LangChain initialized with structured output agent_name=FeatureAgent
+2025-05-31 16:25:10 [info     ] Feature agent initialized      agent_name=FeatureAgent provider=openai use_llm=True
+2025-05-31 16:25:10 [info     ] Agent initialization status changed agent_name=FeatureAgent initialized=True
+2025-05-31 16:25:10 [info     ] LangChain client initialized for feature execution
+2025-05-31 16:25:10 [info     ] Feature executor initialized
+2025-05-31 16:25:10 [info     ] Initializing recommendation evaluator
+2025-05-31 16:25:10 [info     ] Loaded cached baseline hyperparameters
+2025-05-31 16:25:10 [info     ] MCTS orchestrator initialized successfully
+  ✅ MCTS orchestrator initialized
+
+🔧 Checking baseline hyperparameters...
+Traceback (most recent call last):
+  File "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/run_mcts_experiment.py", line 183, in <module>
+    asyncio.run(run_mcts_experiment())
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 642, in run_until_complete
+    return future.result()
+  File "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/run_mcts_experiment.py", line 63, in run_mcts_experiment
+    hyperparams = json.load(f)
+UnboundLocalError: local variable 'json' referenced before assignment

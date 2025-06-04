@@ -3,11 +3,11 @@
 import argparse
 import sys
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -20,18 +20,19 @@ from vulcan.types import (
     StatusResponse,
     VulcanConfig,
 )
-from vulcan.utils import setup_logging
+from vulcan.utils import ResultsManager, setup_logging
 
 # Global variables
 config_manager: ConfigManager = None
 orchestrator: VulcanOrchestrator = None
+results_manager: ResultsManager = None
 logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global orchestrator
+    global orchestrator, results_manager
 
     # Startup
     print("✅ VULCAN system initialized successfully")
@@ -55,7 +56,7 @@ def create_app(config: VulcanConfig) -> FastAPI:
     Returns:
         Configured FastAPI application.
     """
-    global config_manager, orchestrator
+    global config_manager, orchestrator, results_manager
 
     # Create app with lifespan
     app = FastAPI(
@@ -79,6 +80,7 @@ def create_app(config: VulcanConfig) -> FastAPI:
     # Initialize components
     config_manager = ConfigManager()
     orchestrator = VulcanOrchestrator(config)
+    results_manager = ResultsManager(config)
 
     # Add routes
     @app.get("/api/health", response_model=HealthResponse)
@@ -89,33 +91,6 @@ def create_app(config: VulcanConfig) -> FastAPI:
             message="VULCAN 2.0 API is running",
             version="2.0.0",
         )
-
-    @app.websocket("/ws/exploration")
-    async def websocket_endpoint(websocket: WebSocket):
-        """WebSocket endpoint for real-time exploration visualization."""
-        try:
-            # Get orchestrator instance
-            if not orchestrator:
-                await websocket.close(code=1011, reason="System not initialized")
-                return
-
-            # Add websocket to orchestrator
-            await orchestrator.add_websocket(websocket)
-
-            # Keep connection alive and handle messages
-            while True:
-                try:
-                    # Wait for messages (can be used for interactive features later)
-                    data = await websocket.receive_text()
-                except WebSocketDisconnect:
-                    break
-
-        except Exception as e:
-            logger.error("WebSocket connection failed", error=str(e))
-        finally:
-            # Clean up connection
-            if orchestrator:
-                await orchestrator.remove_websocket(websocket)
 
     @app.get("/api/status", response_model=StatusResponse)
     async def get_status() -> StatusResponse:
@@ -131,7 +106,7 @@ def create_app(config: VulcanConfig) -> FastAPI:
                 status="running" if status.is_running else "partial",
                 components=status.components_initialized,
                 config_loaded=config_manager is not None,
-                experiments_count=status.experiment_history_count,
+                experiments_count=len(results_manager.list_experiments()),
             )
 
         except Exception as e:
@@ -141,149 +116,91 @@ def create_app(config: VulcanConfig) -> FastAPI:
     async def get_experiments() -> List[Dict[str, Any]]:
         """Get list of past experiments."""
         try:
-            if not orchestrator:
+            if not results_manager:
                 return []
 
-            # Get experiment history from orchestrator
-            experiment_history = orchestrator.get_experiment_history()
-            experiments = []
+            # Get experiments from results manager
+            experiments = results_manager.list_experiments()
 
-            for i, result in enumerate(experiment_history):
-                if not hasattr(result, "best_score") or result.best_score is None:
-                    logger.warning(f"Incomplete experiment result at index {i}")
-                    continue
-
-                experiments.append(
+            # Transform to expected format
+            formatted_experiments = []
+            for i, exp in enumerate(experiments):
+                formatted_experiments.append(
                     {
                         "id": i,
-                        "fold_id": result.fold_id
-                        if hasattr(result, "fold_id")
-                        else "unknown",
-                        "iteration": i + 1,
-                        "overall_score": result.best_score,
-                        "feature_count": len(result.features)
-                        if hasattr(result, "features") and result.features
-                        else 0,
-                        "evaluation_time": result.execution_time,
-                        "action_taken": "experiment",
-                        "features": [
-                            {
-                                "name": result.best_feature,
-                                "type": "generated",
-                                "description": f"Best feature from experiment {result.experiment_name}",
-                            }
-                        ]
-                        if result.best_feature
-                        else [],
-                        "metrics": {
-                            "silhouette_score": result.best_score,
-                            "calinski_harabasz": result.best_score * 100,
-                            "davies_bouldin": 1.0 - result.best_score,
-                        },
+                        "experiment_name": exp.get("experiment_name", "unknown"),
+                        "algorithm": exp.get("algorithm", "unknown"),
+                        "start_time": exp.get("start_time", ""),
+                        "status": exp.get("status", "unknown"),
+                        "iterations_completed": exp.get("iterations_completed", 0),
+                        "best_score": exp.get("best_score", 0.0),
+                        "end_time": exp.get("end_time", ""),
                     }
                 )
 
-            return experiments
+            return formatted_experiments
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.get("/api/experiments/{experiment_id}", response_model=Dict[str, Any])
-    async def get_experiment(experiment_id: int) -> Dict[str, Any]:
-        """Get specific experiment details."""
+    @app.get("/api/experiments/{experiment_name}/data")
+    async def get_experiment_data(experiment_name: str) -> Dict[str, Any]:
+        """Get experiment visualization data."""
         try:
-            if not orchestrator:
+            if not results_manager:
                 raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
+                    status_code=503, detail="Results manager not initialized"
                 )
 
-            experiment_history = orchestrator.get_experiment_history()
-            if experiment_id >= len(experiment_history):
+            experiment_data = results_manager.load_experiment_data(experiment_name)
+            if not experiment_data:
                 raise HTTPException(status_code=404, detail="Experiment not found")
 
-            result = experiment_history[experiment_id]
-
-            if not hasattr(result, "best_score") or result.best_score is None:
-                raise HTTPException(
-                    status_code=404, detail="Experiment result incomplete"
-                )
-
-            return {
-                "id": experiment_id,
-                "fold_id": result.fold_id if hasattr(result, "fold_id") else "unknown",
-                "iteration": experiment_id + 1,
-                "overall_score": result.best_score,
-                "improvement_over_parent": result.improvement_over_parent
-                if hasattr(result, "improvement_over_parent")
-                else None,
-                "evaluation_time": result.execution_time,
-                "feature_set": {
-                    "action_taken": "experiment",
-                    "parent_features": result.parent_features
-                    if hasattr(result, "parent_features")
-                    else [],
-                    "total_cost": result.total_cost
-                    if hasattr(result, "total_cost")
-                    else None,
-                    "features": [
-                        {
-                            "name": result.best_feature,
-                            "type": "generated",
-                            "description": f"Best feature from {result.experiment_name}",
-                        }
-                    ]
-                    if result.best_feature
-                    else [],
-                },
-                "metrics": {
-                    "silhouette_score": result.best_score,
-                    "calinski_harabasz": result.best_score * 100,
-                    "davies_bouldin": 1.0 - result.best_score,
-                },
-            }
+            return ApiResponse(status="success", data=experiment_data).dict()
 
         except Exception as e:
+            logger.error(f"Error getting experiment data: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.get("/api/tree", response_model=Dict[str, Any])
-    async def get_evolution_tree() -> Dict[str, Any]:
-        """Get Progressive Evolution visualization data."""
+    @app.get("/api/experiments/latest/data")
+    async def get_latest_experiment_data() -> Dict[str, Any]:
+        """Get data from the most recent experiment."""
         try:
-            if not orchestrator:
+            if not results_manager:
                 raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
+                    status_code=503, detail="Results manager not initialized"
                 )
 
-            # Check if we have an active Progressive Evolution orchestrator
-            evo_orchestrator = getattr(orchestrator, "evo_orchestrator", None)
-            if not evo_orchestrator:
-                # Return empty evolution structure if no evolution is running
-                return {
-                    "population": [],
-                    "generation_history": [],
-                    "action_rewards": {"generate_new": [], "mutate_existing": []},
-                    "best_candidate": None,
-                    "stats": {
-                        "current_generation": 0,
-                        "population_size": 0,
-                        "best_score": 0.0,
-                        "total_features_generated": 0,
+            experiment_data = results_manager.get_latest_experiment_data()
+            if not experiment_data:
+                return ApiResponse(
+                    status="success",
+                    data={
+                        "nodes": [],
+                        "edges": [],
+                        "stats": {
+                            "total_nodes": 0,
+                            "max_depth": 0,
+                            "best_score": 0.0,
+                            "iterations_completed": 0,
+                            "avg_branching_factor": 0.0,
+                        },
+                        "generation_history": [],
+                        "action_rewards": {"generate_new": [], "mutate_existing": []},
+                        "best_candidate": None,
                     },
-                }
+                ).dict()
 
-            # Get evolution visualization data from the Progressive Evolution orchestrator
-            evolution_data = await evo_orchestrator.get_evolution_visualization_data()
-
-            return evolution_data
+            return ApiResponse(status="success", data=experiment_data).dict()
 
         except Exception as e:
-            logger.error(f"Error getting Evolution data: {str(e)}")
+            logger.error(f"Error getting latest experiment data: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/experiments/start")
     async def start_experiment(request: ExperimentRequest):
         """Start a new experiment with given configuration."""
-        global orchestrator, config
+        global orchestrator, config, results_manager
 
         try:
             if not orchestrator:
@@ -294,11 +211,22 @@ def create_app(config: VulcanConfig) -> FastAPI:
             # Extract configuration overrides
             config_overrides = request.config_overrides or {}
 
+            # Start experiment tracking in results manager
+            experiment_id = f"evolution_{request.experiment_name}"
+            experiment_metadata = {
+                "algorithm": "evolution",
+                "experiment_name": request.experiment_name,
+                "config_overrides": config_overrides,
+            }
+
+            experiment_dir = results_manager.start_experiment(
+                experiment_id, experiment_metadata
+            )
+
             # Create data context based on configuration
             outer_fold = config_overrides.get("outer_fold", 1)
             inner_fold = config_overrides.get("inner_fold", 1)
             data_sample_size = config_overrides.get("data_sample_size", 5000)
-            use_cache = config_overrides.get("use_cache", True)
 
             from vulcan.data.goodreads_loader import GoodreadsDataLoader
 
@@ -313,15 +241,140 @@ def create_app(config: VulcanConfig) -> FastAPI:
             data_context = loader.get_data_context(sample_size=data_sample_size)
 
             # Start the experiment with the configuration
-            experiment_id = await orchestrator.start_experiment(
+            experiment_result_id = await orchestrator.start_experiment(
                 experiment_name=request.experiment_name,
                 config_overrides=config_overrides,
                 data_context=data_context,
+                results_manager=results_manager,  # Pass results manager
             )
 
-            return ApiResponse(status="success", data={"experiment_id": experiment_id})
+            return ApiResponse(
+                status="success", data={"experiment_id": experiment_result_id}
+            )
         except Exception as e:
             logger.error(f"Error starting experiment: {str(e)}")
+            return ApiResponse(status="error", message=str(e))
+
+    @app.post("/api/mcts/start")
+    async def start_mcts_experiment(request: ExperimentRequest):
+        """Start a new MCTS experiment with given configuration."""
+        global orchestrator, config, results_manager
+
+        try:
+            if not orchestrator:
+                # Initialize orchestrator with proper config
+                orchestrator = VulcanOrchestrator(config)
+                await orchestrator.initialize_components()
+
+            # Extract configuration overrides
+            config_overrides = request.config_overrides or {}
+
+            # Update config for MCTS
+            config.mcts.max_iterations = config_overrides.get("max_iterations", 10)
+            config.mcts.max_depth = config_overrides.get("max_depth", 5)
+            config.mcts.exploration_factor = config_overrides.get(
+                "exploration_factor", 1.4
+            )
+            config.llm.temperature = config_overrides.get("llm_temperature", 0.7)
+            config.llm.model_name = config_overrides.get("llm_model", "gpt-4o-mini")
+
+            # Start experiment tracking in results manager
+            experiment_id = f"mcts_{request.experiment_name}"
+            experiment_metadata = {
+                "algorithm": "mcts",
+                "experiment_name": request.experiment_name,
+                "config_overrides": config_overrides,
+            }
+
+            experiment_dir = results_manager.start_experiment(
+                experiment_id, experiment_metadata
+            )
+
+            # Create data context based on configuration
+            outer_fold = config_overrides.get("outer_fold", 1)
+            inner_fold = config_overrides.get("inner_fold", 1)
+            data_sample_size = config_overrides.get("data_sample_size", 20000)
+
+            from vulcan.data.goodreads_loader import GoodreadsDataLoader
+
+            loader = GoodreadsDataLoader(
+                db_path="/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db",
+                splits_dir="/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits",
+                outer_fold=outer_fold,
+                inner_fold=inner_fold,
+            )
+
+            # Load data context
+            data_context = loader.get_data_context(sample_size=data_sample_size)
+
+            # Create MCTS orchestrator
+            from vulcan.mcts.mcts_orchestrator import MCTSOrchestrator
+            from vulcan.utils import PerformanceTracker
+
+            performance_tracker = PerformanceTracker(max_history=100)
+            mcts_orchestrator = MCTSOrchestrator(config, performance_tracker)
+            await mcts_orchestrator.initialize()
+
+            # Store reference for later access
+            orchestrator.mcts_orchestrator = mcts_orchestrator
+
+            # Start the MCTS search asynchronously and save results
+            import asyncio
+
+            async def run_mcts():
+                results = await mcts_orchestrator.run_search(
+                    data_context=data_context,
+                    max_iterations=config.mcts.max_iterations,
+                    results_manager=results_manager,  # Pass results manager
+                )
+                # Mark experiment as finished
+                results_manager.finish_experiment({"final_results": results})
+
+            # Run in background
+            asyncio.create_task(run_mcts())
+
+            experiment_result_id = (
+                f"mcts_{request.experiment_name}_{outer_fold}_{inner_fold}"
+            )
+
+            return ApiResponse(
+                status="success", data={"experiment_id": experiment_result_id}
+            )
+        except Exception as e:
+            logger.error(f"Error starting MCTS experiment: {str(e)}")
+            return ApiResponse(status="error", message=str(e))
+
+    @app.post("/api/experiments/stop")
+    async def stop_experiment():
+        """Stop the current experiment."""
+        try:
+            if not orchestrator:
+                raise HTTPException(
+                    status_code=503, detail="Orchestrator not initialized"
+                )
+
+            # Stop any running experiments
+            if (
+                hasattr(orchestrator, "evo_orchestrator")
+                and orchestrator.evo_orchestrator
+            ):
+                await orchestrator.evo_orchestrator.cleanup()
+                orchestrator.evo_orchestrator = None
+
+            if (
+                hasattr(orchestrator, "mcts_orchestrator")
+                and orchestrator.mcts_orchestrator
+            ):
+                await orchestrator.mcts_orchestrator.cleanup()
+                orchestrator.mcts_orchestrator = None
+
+            # Finish current experiment in results manager
+            if results_manager:
+                results_manager.finish_experiment()
+
+            return ApiResponse(status="success", message="Experiment stopped")
+        except Exception as e:
+            logger.error(f"Error stopping experiment: {str(e)}")
             return ApiResponse(status="error", message=str(e))
 
     @app.get("/api/data/stats")
@@ -460,87 +513,6 @@ def create_app(config: VulcanConfig) -> FastAPI:
 
         except Exception as e:
             logger.error(f"Error getting data stats: {str(e)}")
-            return ApiResponse(status="error", message=str(e))
-
-    @app.get("/api/performance/summary")
-    async def get_performance_summary():
-        """Get comprehensive performance tracking summary."""
-        try:
-            if not orchestrator:
-                raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
-                )
-
-            metrics = orchestrator.get_performance_metrics()
-            return ApiResponse(status="success", data=metrics)
-
-        except Exception as e:
-            logger.error(f"Error getting performance summary: {str(e)}")
-            return ApiResponse(status="error", message=str(e))
-
-    @app.get("/api/performance/features")
-    async def get_feature_performance(
-        feature_name: Optional[str] = None, top_k: int = 10, criteria: str = "avg_score"
-    ):
-        """Get feature performance metrics."""
-        try:
-            if not orchestrator:
-                raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
-                )
-
-            if feature_name:
-                # Get specific feature performance
-                metrics = orchestrator.get_feature_performance(feature_name)
-                if not metrics:
-                    raise HTTPException(status_code=404, detail="Feature not found")
-                return ApiResponse(status="success", data=metrics)
-            else:
-                # Get best performing features
-                best_features = orchestrator.get_best_features(top_k, criteria)
-                return ApiResponse(
-                    status="success",
-                    data={
-                        "best_features": best_features,
-                        "criteria": criteria,
-                        "count": len(best_features),
-                    },
-                )
-
-        except Exception as e:
-            logger.error(f"Error getting feature performance: {str(e)}")
-            return ApiResponse(status="error", message=str(e))
-
-    @app.get("/api/performance/suggestions")
-    async def get_performance_suggestions():
-        """Get AI-powered feature performance suggestions."""
-        try:
-            if not orchestrator:
-                raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
-                )
-
-            suggestions = orchestrator.get_feature_suggestions()
-            return ApiResponse(status="success", data=suggestions)
-
-        except Exception as e:
-            logger.error(f"Error getting performance suggestions: {str(e)}")
-            return ApiResponse(status="error", message=str(e))
-
-    @app.get("/api/performance/export")
-    async def export_performance_data():
-        """Export complete performance tracking data for analysis."""
-        try:
-            if not orchestrator:
-                raise HTTPException(
-                    status_code=503, detail="Orchestrator not initialized"
-                )
-
-            export_data = orchestrator.export_performance_data()
-            return ApiResponse(status="success", data=export_data)
-
-        except Exception as e:
-            logger.error(f"Error exporting performance data: {str(e)}")
             return ApiResponse(status="error", message=str(e))
 
     @app.exception_handler(Exception)
