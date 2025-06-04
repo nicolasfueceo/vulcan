@@ -58,32 +58,6 @@ class MCTSActionEnum(str, Enum):
     COMBINE = "combine"
 
 
-class ReflectionResponse(BaseModel):
-    """Structured response for performance reflection requests."""
-
-    performance_analysis: str = Field(
-        description="Analysis of which features are performing well and why"
-    )
-    performance_trends: str = Field(
-        description="Patterns observed in the performance trends"
-    )
-    feature_interactions: str = Field(
-        description="Analysis of feature interactions or redundancies"
-    )
-    missing_features: str = Field(
-        description="Types of features that might be missing from the current set"
-    )
-    recommended_action: MCTSActionEnum = Field(
-        description="Best next action to improve performance: add, mutate, replace, or combine"
-    )
-    action_reasoning: str = Field(
-        description="Specific reasoning for the recommended action"
-    )
-    specific_suggestions: List[str] = Field(
-        description="Specific suggestions for implementing the recommended action"
-    )
-
-
 class LLMFeatureExtractionResponse(BaseModel):
     """Structured response for LLM-based feature extraction."""
 

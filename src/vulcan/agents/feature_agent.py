@@ -1,7 +1,8 @@
+#!/usr/bin/env python
 """Intelligent feature generation agent for VULCAN system."""
 
 import os
-import time
+import re
 from typing import Any, Dict, List, Optional
 
 import structlog
@@ -17,7 +18,6 @@ from vulcan.types import (
     FeatureType,
     FeatureTypeEnum,
     MCTSAction,
-    ReflectionResponse,
     VulcanConfig,
 )
 
@@ -155,33 +155,6 @@ MANDATORY: Your implementation must set 'result' variable.
 """,
 }
 
-REFLECTION_SYSTEM_PROMPT = """You are an expert data scientist analyzing feature performance in a recommender system. 
-
-You must respond with a valid JSON object that matches the exact schema provided. Do not include any additional text, explanations, or markdown formatting outside the JSON response.
-
-Provide detailed analysis and actionable recommendations based on the performance data."""
-
-REFLECTION_USER_PROMPT = """Current Feature Set:
-{feature_descriptions}
-
-Performance Metrics:
-{performance_metrics}
-
-Performance History:
-{performance_history}
-
-Data Context:
-- Users: {n_users}, Items: {n_items}, Sparsity: {sparsity:.3f}
-
-Analyze the results and provide insights:
-1. Which features are performing well and why?
-2. What patterns do you see in the performance trends?
-3. Are there any feature interactions or redundancies?
-4. What should be the next action to improve performance?
-5. What types of features might be missing?
-
-{format_instructions}"""
-
 
 class FeatureAgent(BaseAgent):
     """Intelligent agent for generating and reasoning about features using structured JSON output."""
@@ -195,7 +168,6 @@ class FeatureAgent(BaseAgent):
         super().__init__(config, "FeatureAgent")
         self.llm_client = None
         self.feature_chain = None
-        self.reflection_chain = None
         self.use_llm = config.llm.provider != "local"
 
     async def initialize(self) -> bool:
@@ -236,7 +208,6 @@ class FeatureAgent(BaseAgent):
 
                 # Create structured output chains
                 self._setup_feature_generation_chain()
-                self._setup_reflection_chain()
 
                 self.logger.info("LangChain initialized with structured output")
 
@@ -264,27 +235,6 @@ class FeatureAgent(BaseAgent):
             return await parser.ainvoke(llm_response)
 
         self.feature_chain = feature_chain_func
-
-    def _setup_reflection_chain(self) -> None:
-        """Setup the reflection chain with structured output."""
-        # Create parser for ReflectionResponse
-        parser = JsonOutputParser(pydantic_object=ReflectionResponse)
-
-        # Create prompt template
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", REFLECTION_SYSTEM_PROMPT),
-                ("human", REFLECTION_USER_PROMPT),
-            ]
-        )
-
-        # Create a simple callable chain
-        async def reflection_chain_func(inputs):
-            formatted_prompt = await prompt.ainvoke(inputs)
-            llm_response = await self.llm_client.ainvoke(formatted_prompt)
-            return await parser.ainvoke(llm_response)
-
-        self.reflection_chain = reflection_chain_func
 
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a new feature based on the current context.
@@ -408,6 +358,13 @@ class FeatureAgent(BaseAgent):
         Returns:
             Generated feature definition.
         """
+        generation_details = {
+            "action": action.value,
+            "current_feature_count": len(action_context.current_features.features),
+            # Consider adding current_generation if available in action_context or passed through
+        }
+        self.logger.info("Attempting LLM feature generation", **generation_details)
+
         try:
             # Prepare context for LLM
             current_features = [
@@ -494,11 +451,14 @@ class FeatureAgent(BaseAgent):
 
             # Log the prompt for auditing
             self.logger.info(
-                "Sending prompt to LLM",
+                "Sending prompt to LLM for feature generation",
                 action=action.value,
                 model=self.config.llm.model_name,
                 temperature=self.config.llm.temperature,
                 max_tokens=self.config.llm.max_tokens,
+                # Prompt content itself is too large for a single log line;
+                # refer to saved artifacts if FeatureAgent has callbacks for that.
+                prompt_artifact_info="Full prompt details saved via callback if configured.",
             )
 
             # Invoke the structured chain
@@ -524,15 +484,24 @@ class FeatureAgent(BaseAgent):
                 action=action.value,
                 feature_name=response.get("feature_name"),
                 feature_type=response.get("feature_type"),
+                # Full response content is too large; refer to saved artifacts.
+                response_artifact_info="Full response details saved via callback if configured.",
             )
-            self.logger.debug("Full structured response", response=response)
+            self.logger.debug(
+                "Full structured LLM response details", response_details=response
+            )  # Keep debug for full details
 
             # Convert to FeatureDefinition
             feature = self._convert_response_to_feature(response)
             return feature
 
         except Exception as e:
-            self.logger.error("Structured LLM feature generation failed", error=str(e))
+            self.logger.error(
+                "Structured LLM feature generation failed",
+                error=str(e),
+                action=action.value,
+                exc_info=True,
+            )
             return None
 
     def _convert_response_to_feature(
@@ -595,180 +564,514 @@ class FeatureAgent(BaseAgent):
                 )
 
         except Exception as e:
-            self.logger.error("Failed to convert response to feature", error=str(e))
+            self.logger.error(
+                "Failed to convert response to feature", error=str(e), exc_info=True
+            )
             return None
 
-    def _validate_and_fix_code(self, code: str, feature_name: str) -> str:
-        """Validate and fix generated code to ensure it follows required patterns.
+    def _vfc_strip_markdown(self, code: str, feature_name: str) -> str:
+        """Strips markdown formatting (e.g., ```python) from the code string."""
+        self.logger.debug(
+            "Attempting to strip markdown",
+            feature_name=feature_name,
+            code_prefix=code[:20],
+        )
+        stripped_code = code.strip()
+        if stripped_code.startswith("```python"):
+            stripped_code = stripped_code[9:].strip()
+            self.logger.info("Stripped ```python prefix", feature_name=feature_name)
+        elif stripped_code.startswith("```"):
+            stripped_code = stripped_code[3:].strip()
+            self.logger.info("Stripped ``` prefix", feature_name=feature_name)
+        if stripped_code.endswith("```"):
+            stripped_code = stripped_code[:-3].strip()
+            self.logger.info("Stripped ``` suffix", feature_name=feature_name)
+        return stripped_code
 
-        Args:
-            code: Generated code string
-            feature_name: Name of the feature for error reporting
-
-        Returns:
-            Validated and potentially fixed code
-        """
-        # Remove any markdown formatting
-        code = code.strip()
-        if code.startswith("```python"):
-            code = code[9:]
-        if code.startswith("```"):
-            code = code[3:]
-        if code.endswith("```"):
-            code = code[:-3]
-        code = code.strip()
-
-        # Check for common issues and fix them
-        issues_found = []
-
-        # 1. Check if code sets 'result' variable
+    def _vfc_ensure_result_assignment(self, code: str, feature_name: str) -> str:
+        """Ensures the code assigns to a 'result' variable, attempting a fix if common patterns are missed."""
         if "result =" not in code and "result=" not in code:
-            issues_found.append("No 'result' variable assignment found")
-
-            # Try to fix by looking for common patterns
-            if code.strip().endswith(")") and ("df.groupby" in code or "df." in code):
-                # Likely missing result assignment
+            self.logger.warning(
+                f"No 'result' variable assignment found in code for feature '{feature_name}'",
+                issue_type="missing_result_assignment",
+            )
+            # Attempt fix for common LLM pattern: forgetting 'result =' before a pandas expression
+            if code.strip().endswith(")") and (
+                "df.groupby" in code or "df." in code or "pd." in code
+            ):
                 code = f"result = {code}"
-                issues_found.append("Fixed: Added 'result =' assignment")
+                self.logger.info(
+                    f"Fixed: Added 'result =' assignment to feature '{feature_name}' based on common pattern",
+                    fix_type="added_result_assignment",
+                )
+        return code
 
-        # 2. Check for 'data' instead of 'df'
+    def _vfc_replace_data_with_df(self, code: str, feature_name: str) -> str:
+        """Replaces common incorrect 'data' references with 'df' for DataFrame access."""
         if "data." in code or "data[" in code or "data.groupby" in code:
-            issues_found.append("Found 'data' reference, replacing with 'df'")
+            self.logger.warning(
+                f"Found 'data' reference instead of 'df' in code for feature '{feature_name}'",
+                issue_type="data_reference_found",
+            )
+            original_code = code
             code = (
                 code.replace("data.", "df.")
                 .replace("data[", "df[")
                 .replace("data.groupby", "df.groupby")
             )
+            if code != original_code:
+                self.logger.info(
+                    f"Fixed: Replaced 'data' with 'df' for feature '{feature_name}'",
+                    fix_type="replaced_data_with_df",
+                )
+        return code
 
-        # 3. Fix scalar fillna issues - common LLM error
-        if ".fillna(" in code and (
-            "mean()" in code or "sum()" in code or "std()" in code
+    def _vfc_fix_scalar_fillna(self, code: str, feature_name: str) -> str:
+        """Attempts to fix common LLM errors of using .fillna() on likely scalar results from aggregations."""
+        if ".fillna(" not in code:  # Quick check
+            return code
+
+        lines = code.split("\n")
+        modified_lines = []
+        changed = False
+
+        # Regex to find a pandas scalar aggregation method call
+        # (e.g., .mean(), .sum()) possibly followed by .fillna(...)
+        # This tries to avoid matching .fillna on a Series resulting from a groupby chain.
+        scalar_agg_fillna_pattern = re.compile(
+            r"(\.mean\(\)|\.sum\(\)|\.std\(\)|\.var\(\)|\.median\(\)|\.min\(\)|\.max\(\)|\.count\(\)|\.size\(\))"  # Scalar aggregation
+            r"\s*(\.fillna\s*\([^)]*\))"  # Followed by .fillna(...)
+        )
+
+        for line_idx, line in enumerate(lines):
+            new_line = line
+            # Only apply if 'result =' is in the line to target primary result assignments
+            if "result =" in line:
+                # Check if the line contains a groupby operation. If so, fillna might be appropriate for the resulting Series.
+                is_groupby_chain = ".groupby(" in line
+
+                match = scalar_agg_fillna_pattern.search(line)
+                if match and not is_groupby_chain:
+                    # If it is NOT a groupby chain and a scalar_agg_fillna pattern is found, remove fillna.
+                    fillna_part = match.group(2)
+                    new_line = line.replace(fillna_part, "")
+                    self.logger.info(
+                        f"Fixed: Removed '{fillna_part}' from likely scalar operation on feature '{feature_name}' (line {line_idx + 1})",
+                        original_line_snippet=line.strip(),
+                        new_line_snippet=new_line.strip(),
+                        fix_type="removed_scalar_fillna",
+                    )
+                    changed = True
+            modified_lines.append(new_line)
+
+        return "\n".join(modified_lines) if changed else code
+
+    def _vfc_preserve_user_id_index(self, code: str, feature_name: str) -> str:
+        """Placeholder for logic to fix operations (e.g., explode, pivot_table with reset_index)
+        that might unintentionally drop 'user_id' index. Currently logs a warning."""
+        # Robustly fixing this requires deep semantic understanding of the pandas operations.
+        # Current implementation primarily logs potential issues for manual review.
+        if (
+            "'user_id'" in code
+            and ".reset_index()" in code
+            and (".explode(" in code or ".pivot_table(" in code or ".unstack(" in code)
         ):
-            # Check if fillna is being called on potential scalar results
-            lines = code.split("\n")
-            for i, line in enumerate(lines):
-                if "result =" in line and ".fillna(" in line:
-                    # If the line has aggregation functions that might return scalars
-                    if any(
-                        agg in line
-                        for agg in [
-                            ".mean()",
-                            ".sum()",
-                            ".std()",
-                            ".var()",
-                            ".median()",
-                        ]
-                    ):
-                        # Check if it's a groupby operation that should return a Series
-                        if ".groupby(" not in line:
-                            # This is likely a scalar operation, remove fillna
-                            new_line = line.replace(".fillna(0)", "").replace(
-                                ".fillna()", ""
-                            )
-                            lines[i] = new_line
-                            issues_found.append(
-                                "Fixed: Removed fillna from scalar operation"
-                            )
-                        else:
-                            # This is a groupby, ensure it's properly structured
-                            if "pd.Series(" not in line and "pd.DataFrame(" not in line:
-                                # Wrap the result to ensure it's a Series
-                                assignment_part = line.split("=")[0].strip()
-                                expression_part = line.split("=", 1)[1].strip()
-                                lines[i] = (
-                                    f"{assignment_part} = pd.Series({expression_part})"
-                                )
-                                issues_found.append(
-                                    "Fixed: Wrapped groupby result in pd.Series"
-                                )
-            code = "\n".join(lines)
+            self.logger.warning(
+                f"Found complex operation pattern (e.g., explode/pivot/unstack with reset_index) in feature '{feature_name}'. "
+                "This might lose 'user_id' index. Manual review of the generated code is recommended.",
+                issue_type="potential_user_id_loss_risk",
+            )
+        return code
 
-        # 4. Fix user_id KeyError issues - another common LLM error
-        if "'user_id'" in code and ".reset_index()" in code and ".explode(" in code:
-            # This pattern often loses the user_id index
-            issues_found.append("Found complex operation that might lose user_id index")
-            # Try to fix by ensuring user_id is preserved
-            if ".reset_index()" in code and ".groupby('user_id')" in code:
-                # Replace reset_index() with reset_index().set_index('user_id') if appropriate
-                code = code.replace(".reset_index()", ".reset_index(drop=False)")
-                issues_found.append("Fixed: Preserved user_id index in reset_index")
-
-        # 5. Ensure proper pandas operations
+    def _vfc_check_required_patterns(self, code: str, feature_name: str) -> str:
+        """Checks for presence of required patterns like 'df.' (implying pandas usage) and 'result ='. Primarily logs warnings."""
         required_patterns = ["df.", "result ="]
         missing_patterns = [p for p in required_patterns if p not in code]
         if missing_patterns:
-            issues_found.append(f"Missing required patterns: {missing_patterns}")
+            self.logger.warning(
+                f"Missing required patterns {missing_patterns} for feature '{feature_name}'. 'df.' implies pandas usage, 'result =' for final assignment.",
+                issue_type="missing_required_patterns",
+            )
+        return code
 
-        # 6. Add fillna() for robustness if missing (but only for Series operations)
-        if "groupby" in code and "fillna" not in code and "result =" in code:
-            # Add fillna to the result assignment, but only if it's a Series operation
-            if code.count("result =") == 1:
-                result_line = [line for line in code.split("\n") if "result =" in line][
-                    0
-                ]
-                # Only add fillna if it's a groupby operation (which returns Series)
-                if (
-                    ".groupby(" in result_line
-                    and not any(
-                        scalar_op in result_line
-                        for scalar_op in [".mean()", ".sum()", ".count()"]
+    def _vfc_add_robust_fillna(self, code: str, feature_name: str) -> str:
+        """Adds .fillna(0) for robustness to GroupBy operations if not already present and seems appropriate for numerical results."""
+        if "groupby" not in code or "result =" not in code:  # Quick check
+            return code
+
+        lines = code.split("\n")
+        modified_lines = []
+        changed = False
+        for line_idx, line in enumerate(lines):
+            new_line = line
+            # Target lines assigning a result from a groupby operation, not already having fillna.
+            if (
+                "result =" in line
+                and ".groupby(" in line
+                and not re.search(r"\.fillna\s*\([^)]*\)", line)
+            ):
+                # Heuristic: Add .fillna(0) if it looks like a groupby creating a Series expected to be numeric.
+                # Avoid adding .fillna(0) if the result is clearly non-numeric (e.g., .agg(list) or string ops).
+                # This is a common pattern for numerical aggregations by group.
+                # Check if common scalar-producing aggregations are NOT the very last step (if so, _vfc_fix_scalar_fillna handles it)
+                if not line.strip().endswith(".fillna(0)") and not any(
+                    line.strip().endswith(s_agg) for s_agg in [".first()", ".last()"]
+                ):  # Add more non-numeric terminal ops if needed
+                    new_line = line.rstrip() + ".fillna(0)"
+                    self.logger.info(
+                        f"Fixed: Added .fillna(0) for robustness to groupby operation in feature '{feature_name}' (line {line_idx + 1})",
+                        fix_type="added_groupby_fillna",
                     )
-                    or ".groupby(" in result_line
-                ):
-                    if not result_line.strip().endswith(".fillna(0)"):
-                        new_result_line = result_line.rstrip() + ".fillna(0)"
-                        code = code.replace(result_line, new_result_line)
-                        issues_found.append("Added .fillna(0) for robustness")
+                    changed = True
+            modified_lines.append(new_line)
+        return "\n".join(modified_lines) if changed else code
 
-        # 7. Fix common string operations that cause errors
-        if ".split(',')" in code and ".apply(" in code:
-            # Common pattern that can cause issues
-            if "lambda x:" in code and "len(set(" in code:
-                # This often creates complex nested operations that fail
-                issues_found.append("Simplified complex string operation")
-                # Replace with simpler pattern
-                code = code.replace(
-                    "lambda x: len(set(x))",
-                    "lambda x: len(set(str(x).split(',')) if pd.notna(x) else [])",
+    def _vfc_simplify_string_operations(self, code: str, feature_name: str) -> str:
+        """Simplifies common complex or error-prone string operations generated by LLMs, ensuring NaN and type safety."""
+        # Example: .str.split(',').apply(lambda x: len(set(x))) needs to handle NaNs and non-strings.
+        if ".split(" in code and ".apply(" in code and "lambda x: len(set(" in code:
+            self.logger.info(
+                f"Attempting to simplify complex string operation pattern in feature '{feature_name}'",
+                issue_type="complex_string_op_simplify",
+            )
+            original_code = code
+            # Robust replacement for patterns like: lambda x: len(set(x)) or lambda x: len(set(x.split(',')))
+            # This handles potential NaNs and ensures string conversion before split, returning 0 for problematic cases.
+            code = re.sub(
+                # Matches: lambda x: len(set( <optional str(x)> <optional .split(...) > ))
+                r"lambda\s+x\s*:\s*len\s*\(\s*set\s*\(\s*(?:str\s*\(\s*x\s*\))?s*x?\s*(?:\.split\s*\(\s*['\"]?,['\"]?\s*\))?\s*\)\s*\)",
+                "lambda x: len(set(str(x).split(',') if pd.notna(x) and x is not None else [])) if pd.notna(x) and x is not None else 0",
+                code,
+            )
+            if code != original_code:
+                self.logger.info(
+                    f"Fixed: Simplified string operation with NaN/type handling for feature '{feature_name}'",
+                    fix_type="simplified_string_op",
+                )
+                # Ensure pd is imported due to pd.notna() - handled by _vfc_add_missing_imports
+        return code
+
+    def _vfc_add_missing_imports(self, code: str, feature_name: str) -> str:
+        """Adds common missing imports (e.g., itertools, pandas) based on code content. Ensures import is at the top."""
+        required_imports = []
+        if "combinations(" in code and "from itertools import combinations" not in code:
+            required_imports.append("from itertools import combinations")
+
+        # Check for pandas usage (pd.function, pd.Series, etc.)
+        if re.search(r"pd\.(notna|Series|DataFrame|to_datetime|Timestamp)", code) or (
+            "pd " in code and "import pandas as pd" not in code.split("\n")[0]
+        ):
+            if not any(
+                imp_line.startswith("import pandas as pd")
+                for imp_line in code.split("\n")
+            ):
+                required_imports.append("import pandas as pd")
+
+        if not required_imports:
+            return code
+
+        self.logger.info(
+            f"Adding missing imports for feature '{feature_name}': {required_imports}",
+            fix_type="added_missing_imports",
+        )
+        current_lines = code.split("\n")
+        existing_imports = [
+            line
+            for line in current_lines
+            if line.startswith("import") or line.startswith("from")
+        ]
+        other_code_lines = [
+            line
+            for line in current_lines
+            if not (line.startswith("import") or line.startswith("from"))
+        ]
+
+        # Add new imports only if not already present (case-sensitive check for simplicity)
+        final_imports = list(
+            dict.fromkeys(
+                existing_imports
+                + [imp for imp in required_imports if imp not in existing_imports]
+            )
+        )
+
+        return "\n".join(final_imports + other_code_lines)
+
+    def _vfc_fix_df_column_access_fillna(self, code: str, feature_name: str) -> str:
+        """Adds .fillna('') before .str access on DataFrame columns (e.g., 'authors', 'title') to prevent errors on NaN values."""
+        # Heuristic based on common text column names that might contain NaNs.
+        text_columns_heuristic = getattr(
+            self.config.data, "text_columns", ["authors", "title"]
+        )  # Use config if available
+        if not text_columns_heuristic:
+            return code  # No columns to check
+
+        lines = code.split("\n")
+        modified_lines = []
+        changed = False
+
+        for line_idx, line in enumerate(lines):
+            new_line = line
+            for col_name in text_columns_heuristic:
+                # Regex to find df['col_name'].str (but not df['col_name'].fillna(...).str)
+                # Handles single or double quotes around column name.
+                pattern = re.compile(
+                    rf"(df\[['\"]{re.escape(col_name)}['\"]\])(?!\.fillna\s*\([^)]*\))(\s*\.str\.)"
                 )
 
-        # 8. Ensure imports for complex operations
-        if "combinations(" in code and "from itertools import combinations" not in code:
-            code = "from itertools import combinations\n" + code
-            issues_found.append("Added missing itertools import")
+                def replacer_for_str_access(match):
+                    nonlocal changed  # To modify 'changed' in outer scope
+                    changed = True
+                    self.logger.info(
+                        f"Fixed: Added .fillna('') for robust string access on df['{col_name}'] in feature '{feature_name}' (line {line_idx + 1})",
+                        fix_type="added_str_fillna_for_column_access",
+                    )
+                    return f"{match.group(1)}.fillna(''){match.group(2)}"  # construct: df['col'].fillna('').str.
 
-        # 9. Fix DataFrame column access patterns
-        if "df['authors'].str.split(',').apply(" in code:
-            # This pattern often causes issues with complex operations
-            code = code.replace(
-                "df['authors'].str.split(',').apply(",
-                "df['authors'].fillna('').str.split(',').apply(",
-            )
-            issues_found.append("Added fillna for string operations")
+                new_line = pattern.sub(replacer_for_str_access, new_line)
+            modified_lines.append(new_line)
 
-        # Log validation results
-        if issues_found:
-            self.logger.info(
-                "Code validation and fixes applied",
-                feature_name=feature_name,
-                issues=issues_found,
-                original_code_length=len(code),
-            )
+        return "\n".join(modified_lines) if changed else code
 
-        # Final validation - try to parse the code
+    def _vfc_compile_code(self, code: str, feature_name: str) -> str:
+        """Final compilation check for the generated code. Returns a safe fallback if SyntaxError occurs."""
         try:
-            compile(code, "<feature_code>", "exec")
+            compile(code, f"<feature_code_for_{feature_name}>", "exec")
+            self.logger.debug(
+                f"Code for feature '{feature_name}' compiled successfully after validation."
+            )
         except SyntaxError as e:
             self.logger.error(
-                "Generated code has syntax errors after validation",
-                feature_name=feature_name,
-                error=str(e),
-                code=code,
+                f"Generated code for feature '{feature_name}' has syntax errors after all validation attempts.",
+                error_message=str(e),
+                line_number=e.lineno,
+                offset=e.offset,
+                code_submitted_to_compile=code,
+                exc_info=True,
             )
-            # Return a safe fallback
-            return "# Fallback due to syntax error in generated code\nresult = df.groupby('user_id')['rating'].mean().fillna(0)"
-
+            # Return a safe, simple fallback feature code
+            fallback_code = "import pandas as pd\n# Fallback due to syntax error in generated code\nresult = df.groupby('user_id')['rating'].mean().fillna(0)"
+            self.logger.warning(
+                f"Returning fallback code for feature '{feature_name}' due to compilation failure."
+            )
+            return fallback_code
         return code
+
+    def _validate_and_fix_code(self, code: str, feature_name: str) -> str:
+        """Validate and fix generated Python code for features to ensure it follows required patterns and is executable.
+
+        This method applies a series of specific validation and correction rules, executed in a defined order.
+        Each rule is encapsulated in a helper method (_vfc_*).
+
+        Args:
+            code: The generated code string from the LLM.
+            feature_name: Name of the feature, used for logging and error reporting.
+
+        Returns:
+            Validated and potentially fixed code string. If unfixable syntax errors persist,
+            a safe fallback code is returned.
+        """
+        self.logger.info(
+            f"Starting code validation/fixing process for feature: '{feature_name}'",
+            original_code_prefix=code[:100] + "...",
+        )
+        original_code_for_comparison = str(
+            code
+        )  # Keep an exact copy for final comparison
+
+        # 0. Initial: Add any obviously missing imports based on common patterns first.
+        code = self._vfc_add_missing_imports(code, feature_name)
+        # 1. Strip markdown like ```python ``` that LLMs sometimes add.
+        code = self._vfc_strip_markdown(code, feature_name)
+        # 2. Ensure 'result = ' for final assignment.
+        code = self._vfc_ensure_result_assignment(code, feature_name)
+        # 3. Replace common 'data. ...' with 'df. ...'.
+        code = self._vfc_replace_data_with_df(code, feature_name)
+        # 4. Fix .fillna() on likely scalar pandas results (common LLM error).
+        code = self._vfc_fix_scalar_fillna(code, feature_name)
+        # 5. Log if operations might drop user_id index (complex to auto-fix reliably).
+        code = self._vfc_preserve_user_id_index(code, feature_name)
+        # 6. Check for presence of essential patterns ('df.', 'result ='). Logs only.
+        code = self._vfc_check_required_patterns(code, feature_name)
+        # 7. Add .fillna(0) to groupby results for robustness if numeric and not handled.
+        code = self._vfc_add_robust_fillna(code, feature_name)
+        # 8. Simplify common complex/error-prone string operations.
+        code = self._vfc_simplify_string_operations(code, feature_name)
+        # 9. Add .fillna('') before .str access on known text columns.
+        code = self._vfc_fix_df_column_access_fillna(code, feature_name)
+
+        # 10. Re-run import adder in case some fixes introduced new needs (e.g., pd.notna from string simplification).
+        code = self._vfc_add_missing_imports(code, feature_name)
+
+        # 11. Final compilation check. If this fails, a fallback code is returned.
+        final_code = self._vfc_compile_code(code, feature_name)
+
+        if final_code != original_code_for_comparison:
+            self.logger.info(
+                f"Code for feature '{feature_name}' was modified by validation/fixing process.",
+                status="CodeModified",
+                # For brevity in standard logs, detailed diffs are not logged here.
+                # Original snippet: original_code_for_comparison[:150] + "...",
+                # Final snippet: final_code[:150] + "..."
+            )
+            self.logger.debug(
+                "Code change details",
+                feature_name=feature_name,
+                original_code=original_code_for_comparison,
+                final_code=final_code,
+            )
+        else:
+            self.logger.info(
+                f"Code for feature '{feature_name}' passed validation without substantive changes or used fallback.",
+                status="CodeUnchangedOrFallback",
+            )
+        return final_code
+
+    def _prepare_action_specific_llm_prompt(
+        self,
+        action: MCTSAction,
+        action_context: ActionContext,
+        base_action_prompt_template: str,
+    ) -> str:
+        """Prepares the action-specific part of the LLM prompt by filling placeholders (e.g., {{target_feature}}).
+
+        Args:
+            action: The MCTSAction (ADD, MUTATE, REPLACE, COMBINE) being performed.
+            action_context: The context for the action, including current features and potential targets.
+            base_action_prompt_template: The basic string template for the action prompt (from ACTION_SPECIFIC_PROMPTS).
+
+        Returns:
+            A string with placeholders filled, tailored for the specific action and context.
+        """
+        self.logger.debug(
+            f"Preparing action-specific LLM prompt for action: {action.value}"
+        )
+        action_prompt = base_action_prompt_template  # Start with the generic template for the action type
+
+        target_feature_name: Optional[str] = None
+        target_implementation: str = "N/A (Not Applicable or Not Found)"  # Default placeholder if no specific impl is found
+
+        if action in [MCTSAction.MUTATE, MCTSAction.REPLACE]:
+            # Determine the target feature for mutation or replacement.
+            # ProgressiveEvolutionOrchestrator might set `mutation_target` in the agent_context,
+            # which should be passed into ActionContext if available.
+
+            current_features_list = action_context.current_features.features
+            # Prefer an explicit target from ActionContext if provided (e.g., from repair or specific mutation call)
+            explicit_target_name = getattr(
+                action_context, "target_feature_name", None
+            ) or getattr(action_context, "mutation_target", None)
+
+            if explicit_target_name and any(
+                f.name == explicit_target_name for f in current_features_list
+            ):
+                target_feature_name = explicit_target_name
+                self.logger.info(
+                    f"Using explicit target for {action.value}: {target_feature_name}"
+                )
+            elif (
+                current_features_list
+            ):  # If no explicit target, and population exists, pick one
+                # Fallback: use the worst-performing feature if no explicit target is set.
+                # Note: get_worst_performing_feature() needs to be implemented robustly in ActionContext or rely on orchestrator to provide it.
+                # For now, we assume ActionContext.get_worst_performing_feature() might return a name.
+                target_feature_name = action_context.get_worst_performing_feature()
+                if target_feature_name:
+                    self.logger.info(
+                        f"No explicit target for {action.value}, selected worst feature: '{target_feature_name}' from context."
+                    )
+                else:
+                    # If worst can't be determined (e.g. all equal, or method not fully implemented), pick the last one as a simple heuristic.
+                    target_feature_name = current_features_list[-1].name
+                    self.logger.warning(
+                        f"Could not determine worst feature for {action.value}; picking last feature '{target_feature_name}' as target."
+                    )
+            else:
+                self.logger.warning(
+                    f"No features in context to target for {action.value}. Prompt will be generic."
+                )
+                target_feature_name = (
+                    "a_selected_feature"  # Generic placeholder for LLM
+                )
+
+            if target_feature_name:
+                target_implementation = self._get_feature_implementation(
+                    target_feature_name, action_context
+                )
+
+            action_prompt = action_prompt.replace(
+                "{{target_feature}}", target_feature_name or "selected_feature"
+            ).replace("{{target_implementation}}", target_implementation)
+            self.logger.debug(
+                f"Prepared {action.value} prompt targeting: '{target_feature_name}'"
+            )
+
+        elif action == MCTSAction.COMBINE:
+            features_to_combine_defs: List[FeatureDefinition] = []
+            # ActionContext could ideally specify which features to combine via a field like `features_to_combine_names: List[str]`
+            explicit_combine_targets = getattr(
+                action_context, "features_to_combine_names", None
+            )
+
+            if explicit_combine_targets and len(explicit_combine_targets) >= 2:
+                for name in explicit_combine_targets[
+                    :2
+                ]:  # Take the first two specified
+                    feat_def = action_context.current_features.get_feature_by_name(name)
+                    if feat_def:
+                        features_to_combine_defs.append(feat_def)
+                if len(features_to_combine_defs) >= 2:
+                    self.logger.info(
+                        f"Using explicit targets for COMBINE: {[f.name for f in features_to_combine_defs]}"
+                    )
+                else:
+                    features_to_combine_defs = []  # Reset if not enough valid names found
+
+            if (
+                not features_to_combine_defs
+                and len(action_context.current_features.features) >= 2
+            ):
+                # Fallback: combine the first two available features as a simple heuristic if no explicit ones found/valid.
+                features_to_combine_defs = action_context.current_features.features[:2]
+                self.logger.info(
+                    f"No explicit/valid targets for COMBINE, selected first two available: {[f.name for f in features_to_combine_defs]}"
+                )
+
+            if len(features_to_combine_defs) >= 2:
+                feature_1 = features_to_combine_defs[0]
+                feature_2 = features_to_combine_defs[1]
+                impl_1 = self._get_feature_implementation(
+                    feature_1.name, action_context
+                )
+                impl_2 = self._get_feature_implementation(
+                    feature_2.name, action_context
+                )
+
+                action_prompt = (
+                    action_prompt.replace("{{feature_1}}", feature_1.name)
+                    .replace("{{feature_2}}", feature_2.name)
+                    .replace("{{implementation_1}}", impl_1)
+                    .replace("{{implementation_2}}", impl_2)
+                )
+                self.logger.debug(
+                    f"Prepared COMBINE prompt for features: '{feature_1.name}' and '{feature_2.name}'"
+                )
+            else:
+                self.logger.warning(
+                    "Not enough features available or specified to COMBINE. Using generic placeholders in prompt."
+                )
+                # Generic fallback placeholders if not enough features are available
+                action_prompt = (
+                    action_prompt.replace("{{feature_1}}", "user_avg_rating (example)")
+                    .replace("{{feature_2}}", "user_rating_count (example)")
+                    .replace(
+                        "{{implementation_1}}", "df.groupby('user_id')['rating'].mean()"
+                    )
+                    .replace(
+                        "{{implementation_2}}",
+                        "df.groupby('user_id')['rating'].count()",
+                    )
+                )
+        return action_prompt
 
     def _generate_heuristic_feature(
         self,
@@ -879,79 +1182,6 @@ class FeatureAgent(BaseAgent):
         """
         required_keys = ["data_context", "action_context"]
         return all(key in context for key in required_keys)
-
-    async def reflect_on_performance(
-        self,
-        action_context: ActionContext,
-        data_context: DataContext,
-    ) -> Dict[str, Any]:
-        """Reflect on current performance using structured output.
-
-        Args:
-            action_context: Action context with performance history.
-            data_context: Data context.
-
-        Returns:
-            Structured reflection results with insights and recommendations.
-        """
-        if not self.use_llm or not self.reflection_chain:
-            return {"reflection": "LLM not available for reflection"}
-
-        try:
-            # Prepare context for reflection
-            feature_descriptions = [
-                f"{f.name}: {f.description}"
-                for f in action_context.current_features.features
-            ]
-
-            performance_metrics = "No metrics available"
-            if action_context.performance_history:
-                latest = action_context.performance_history[-1]
-                performance_metrics = f"Overall score: {latest.overall_score:.3f}"
-
-            performance_history = self._summarize_performance(
-                action_context.performance_history
-            )
-
-            # Get format instructions
-            parser = JsonOutputParser(pydantic_object=ReflectionResponse)
-            format_instructions = parser.get_format_instructions()
-
-            # Log the reflection prompt for auditing
-            self.logger.info(
-                "Sending structured reflection prompt to LLM",
-                model=self.config.llm.model_name,
-            )
-
-            # Invoke structured reflection chain
-            response = await self.reflection_chain(
-                {
-                    "feature_descriptions": "\n".join(feature_descriptions),
-                    "performance_metrics": performance_metrics,
-                    "performance_history": performance_history,
-                    "n_users": data_context.n_users,
-                    "n_items": data_context.n_items,
-                    "sparsity": data_context.sparsity,
-                    "format_instructions": format_instructions,
-                }
-            )
-
-            # Log the structured reflection response
-            self.logger.info(
-                "Received structured reflection response",
-                recommended_action=response.get("recommended_action"),
-            )
-            self.logger.debug("Full reflection response", response=response)
-
-            return {
-                "reflection": response,
-                "timestamp": time.time(),
-                "context": "performance_analysis",
-            }
-
-        except Exception as e:
-            self.logger.error("Structured reflection failed", error=str(e))
-            return {"error": f"Reflection failed: {str(e)}"}
 
     async def cleanup(self) -> None:
         """Cleanup feature agent resources."""

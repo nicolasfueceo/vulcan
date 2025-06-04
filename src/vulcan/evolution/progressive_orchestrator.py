@@ -1,13 +1,23 @@
 """Progressive Feature Evolution Orchestrator for VULCAN."""
 
+import logging
 import random
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
+
+# Attempt to import for plotting, but make it optional
+try:
+    import matplotlib.pyplot as plt
+
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
 
 from vulcan.agents import FeatureAgent
 from vulcan.evaluation.recommendation_evaluator import RecommendationEvaluator
@@ -71,11 +81,13 @@ class ProgressiveEvolutionOrchestrator:
         config: VulcanConfig,
         performance_tracker: Optional[PerformanceTracker] = None,
         websocket_callback: Optional[callable] = None,
+        tensorboard_writer: Optional[Any] = None,  # Added for TensorBoard
     ) -> None:
         """Initialize the progressive evolution orchestrator."""
         self.config = config
         self.logger = get_vulcan_logger(__name__)
         self.websocket_callback = websocket_callback
+        self.tensorboard_writer = tensorboard_writer  # Store TensorBoard writer
 
         # Core components
         self.feature_agent = FeatureAgent(config)
@@ -89,6 +101,9 @@ class ProgressiveEvolutionOrchestrator:
         )
 
         # Evolution parameters
+        # Note: Parameters like population_size, generation_size, etc., are sourced from
+        # the config.mcts section. While "mcts" might be a legacy naming convention,
+        # these parameters are still fundamental to the progressive evolution algorithm.
         self.population_size = getattr(config.mcts, "population_size", 50)
         self.generation_size = getattr(config.mcts, "generation_size", 20)
         self.max_repair_attempts = getattr(config.mcts, "max_repair_attempts", 3)
@@ -105,7 +120,6 @@ class ProgressiveEvolutionOrchestrator:
         self.total_features_generated = 0
 
         # Tracking
-        self.iteration_count = 0
         self.best_score = 0.0
         self.best_candidate: Optional[FeatureCandidate] = None
 
@@ -132,7 +146,7 @@ class ProgressiveEvolutionOrchestrator:
         max_generations: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run progressive feature evolution."""
-        max_generations = max_generations or self.config.mcts.max_iterations
+        max_generations = max_generations or self.config.experiment.max_generations
 
         self.logger.info(
             "Starting progressive feature evolution",
@@ -190,6 +204,71 @@ class ProgressiveEvolutionOrchestrator:
             )
 
             self.logger.info("Progressive evolution completed", **results)
+
+            # Optional: Save plot of score curve if matplotlib is available and TensorBoard is not used
+            if (
+                MATPLOTLIB_AVAILABLE
+                and not self.tensorboard_writer
+                and self.config.experiment.save_artifacts
+            ):
+                try:
+                    # We need the specific experiment output directory here.
+                    # This should be passed from VulcanOrchestrator or accessed via a shared context.
+                    # Assuming self.config might hold a more specific path after VO sets it.
+                    # This is a bit of a hack; ideally VO provides this path explicitly to run_evolution.
+                    # Let's try to get it from a potentially updated config by VO or a new attribute.
+                    # This path should resolve to .../experiments/YYYYMMDD_HHMMSS_exp_name_uuid/
+                    # For now, let's assume the current_experiment_dir_path is made available to this instance,
+                    # e.g., self.current_experiment_dir_path set by VulcanOrchestrator before calling this.
+                    # This is not ideal. A better way is for VO to pass this path.
+                    # HACK: Attempting to use a convention if VO updated a shared config or similar.
+                    # This requires careful coordination with VulcanOrchestrator.
+                    # Let's assume the main logger's file handler is in the correct experiment dir.
+                    plot_save_path = None
+                    root_logger = logging.getLogger()  # Standard logging root
+                    for handler in root_logger.handlers:
+                        if isinstance(handler, logging.FileHandler):
+                            plot_save_path = (
+                                Path(handler.baseFilename).parent / "score_curve.png"
+                            )
+                            break
+
+                    if plot_save_path and self.generation_history:
+                        generations = [s.generation for s in self.generation_history]
+                        best_scores = [s.best_score for s in self.generation_history]
+                        avg_scores = [s.avg_score for s in self.generation_history]
+
+                        plt.figure(figsize=(10, 6))
+                        plt.plot(
+                            generations,
+                            best_scores,
+                            label="Best Score per Generation",
+                            marker="o",
+                        )
+                        plt.plot(
+                            generations,
+                            avg_scores,
+                            label="Average Score per Generation",
+                            marker="x",
+                        )
+                        plt.xlabel("Generation")
+                        plt.ylabel("Score")
+                        plt.title("Evolution Score Curve")
+                        plt.legend()
+                        plt.grid(True)
+                        plt.savefig(plot_save_path)
+                        plt.close()
+                        self.logger.info(f"Score curve plot saved to {plot_save_path}")
+                    else:
+                        self.logger.warning(
+                            "Could not determine plot save path or no history to plot for score_curve.png"
+                        )
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to generate or save score curve plot: {e}",
+                        exc_info=True,
+                    )
+
             return results
 
         except Exception as e:
@@ -197,7 +276,16 @@ class ProgressiveEvolutionOrchestrator:
             raise
 
     def _choose_action(self) -> EvolutionAction:
-        """Choose action using epsilon-greedy RL policy."""
+        """Choose action using an epsilon-greedy RL policy.
+
+        The policy balances exploration and exploitation:
+        - Exploration: With a probability epsilon, a random action (generate new or mutate existing)
+          is chosen. Epsilon decays over generations, reducing random exploration as the
+          evolution progresses.
+        - Exploitation: With probability 1-epsilon, the action with the highest average historical
+          reward is chosen.
+        If mutation is chosen but the population is empty, it defaults to generating a new feature.
+        """
         # Epsilon-greedy exploration
         epsilon = max(0.1, 1.0 - (self.current_generation / 50))  # Decay exploration
 
@@ -255,8 +343,14 @@ class ProgressiveEvolutionOrchestrator:
     ) -> List[FeatureCandidate]:
         """Generate completely new features."""
         candidates = []
+        self.logger.info(
+            "Attempting to generate new features",
+            count=count,
+            generation=self.current_generation,
+        )
 
         for i in range(count):
+            feature_name_candidate = f"new_feature_gen{self.current_generation}_cand{i}"  # Tentative name for logging
             try:
                 # Build action context with proper FeatureSet
                 action_context = ActionContext(
@@ -275,11 +369,23 @@ class ProgressiveEvolutionOrchestrator:
                     "diversity_pressure": True,
                 }
 
+                self.logger.info(
+                    "Sending prompt to FeatureAgent for new feature",
+                    generation=self.current_generation,
+                    candidate_index=i,
+                    action=MCTSAction.ADD.value,  # Assuming ADD for new features
+                )
                 result = await self.feature_agent.execute(agent_context)
 
                 if result.get("success"):
                     feature = result["feature"]
-
+                    self.logger.info(
+                        "FeatureAgent proposed new feature",
+                        generation=self.current_generation,
+                        proposed_feature_name=feature.name,
+                        # Assuming FeatureAgent callbacks save detailed prompt/response, ref it generically
+                        details_loc="FeatureAgent LLM outputs/callbacks",
+                    )
                     # Check for duplicates
                     feature_key = self._get_feature_key(feature)
                     if feature_key not in self.feature_registry:
@@ -292,8 +398,18 @@ class ProgressiveEvolutionOrchestrator:
                         self.feature_registry[feature_key] = candidate
 
             except Exception as e:
-                self.logger.warning("Failed to generate new feature", error=str(e))
-
+                self.logger.warning(
+                    "Failed to generate new feature candidate",
+                    error=str(e),
+                    generation=self.current_generation,
+                    candidate_index=i,
+                    exc_info=True,
+                )
+        self.logger.info(
+            "Finished generating new feature candidates",
+            generated_count=len(candidates),
+            requested_count=count,
+        )
         return candidates
 
     async def _mutate_existing_features(
@@ -301,8 +417,17 @@ class ProgressiveEvolutionOrchestrator:
     ) -> List[FeatureCandidate]:
         """Mutate existing features from population."""
         candidates = []
+        self.logger.info(
+            "Attempting to mutate existing features",
+            count=count,
+            generation=self.current_generation,
+            population_size=len(self.population),
+        )
 
         if not self.population:
+            self.logger.warning(
+                "Mutation requested but population is empty. Falling back to generating new features."
+            )
             return await self._generate_new_features(count, data_context)
 
         for i in range(count):
@@ -332,11 +457,24 @@ class ProgressiveEvolutionOrchestrator:
                     "mutation_target": parent.feature.name,
                 }
 
+                self.logger.info(
+                    "Sending prompt to FeatureAgent for mutating feature",
+                    generation=self.current_generation,
+                    candidate_index=i,
+                    action=MCTSAction.MUTATE.value,
+                    target_feature_name=parent.feature.name,
+                )
                 result = await self.feature_agent.execute(agent_context)
 
                 if result.get("success"):
                     mutated_feature = result["feature"]
-
+                    self.logger.info(
+                        "FeatureAgent proposed mutated feature",
+                        generation=self.current_generation,
+                        proposed_feature_name=mutated_feature.name,
+                        original_feature_name=parent.feature.name,
+                        details_loc="FeatureAgent LLM outputs/callbacks",
+                    )
                     # Check for duplicates
                     feature_key = self._get_feature_key(mutated_feature)
                     if feature_key not in self.feature_registry:
@@ -351,17 +489,45 @@ class ProgressiveEvolutionOrchestrator:
                         self.feature_registry[feature_key] = candidate
 
             except Exception as e:
-                self.logger.warning("Failed to mutate feature", error=str(e))
-
+                self.logger.warning(
+                    "Failed to mutate feature candidate",
+                    error=str(e),
+                    generation=self.current_generation,
+                    candidate_index=i,
+                    target_feature_name=parent.feature.name
+                    if "parent" in locals()
+                    else "unknown",
+                    exc_info=True,
+                )
+        self.logger.info(
+            "Finished mutating feature candidates",
+            generated_count=len(candidates),
+            requested_count=count,
+        )
         return candidates
 
     async def _evaluate_candidates(
         self, candidates: List[FeatureCandidate], data_context: DataContext
     ) -> List[FeatureCandidate]:
         """Evaluate candidates with automatic code repair."""
+        evaluated_candidates_log = []
+        if not candidates:
+            self.logger.info(
+                "No candidates to evaluate for current generation.",
+                generation=self.current_generation,
+            )
+            return []
+
+        self.logger.info(
+            f"Starting evaluation of {len(candidates)} candidates for generation {self.current_generation}"
+        )
         evaluated = []
 
-        for candidate in candidates:
+        for idx, candidate in enumerate(candidates):
+            feature_name = candidate.feature.name
+            self.logger.debug(
+                f"Evaluating candidate {idx + 1}/{len(candidates)}: {feature_name}"
+            )
             try:
                 # Execute feature with automatic repair
                 success, error, feature_results = await self._execute_with_repair(
@@ -383,23 +549,83 @@ class ProgressiveEvolutionOrchestrator:
                     candidate.execution_successful = True
                     evaluated.append(candidate)
 
-                    # Track evaluation
-                    self.performance_tracker.record_evaluation(evaluation)
+                    log_payload = {
+                        "event": "feature_evaluation_success",
+                        "generation": self.current_generation,
+                        "feature_name": feature_name,
+                        "score": candidate.score,
+                        "metrics": evaluation.metrics.dict(),  # Assuming metrics is a Pydantic model
+                    }
+                    self.logger.info("Feature evaluated successfully", **log_payload)
+                    if self.tensorboard_writer:
+                        self.tensorboard_writer.add_scalar(
+                            f"FeatureScores/{feature_name.replace('_', '/')}",
+                            candidate.score,
+                            self.current_generation,
+                        )
+                        # Log individual metrics if desired
+                        for (
+                            metric_name,
+                            metric_value,
+                        ) in evaluation.metrics.dict().items():
+                            if isinstance(metric_value, (int, float)):
+                                self.tensorboard_writer.add_scalar(
+                                    f"FeatureMetrics/{feature_name.replace('_', '/')}/{metric_name}",
+                                    metric_value,
+                                    self.current_generation,
+                                )
+
+                    # Track evaluation (already present)
+                    # self.performance_tracker.record_evaluation(evaluation)
+                    evaluated_candidates_log.append(
+                        {
+                            "name": feature_name,
+                            "score": candidate.score,
+                            "status": "success",
+                        }
+                    )
 
                 else:
                     candidate.execution_successful = False
                     candidate.error_message = error
                     # Still add to evaluated list for tracking
+                    self.logger.warning(
+                        "Feature execution failed after repair attempts",
+                        feature_name=feature_name,
+                        error=error,
+                        generation=self.current_generation,
+                    )
+                    evaluated_candidates_log.append(
+                        {
+                            "name": feature_name,
+                            "error": error,
+                            "status": "failed_execution",
+                        }
+                    )
 
             except Exception as e:
                 candidate.execution_successful = False
                 candidate.error_message = str(e)
                 self.logger.warning(
-                    "Feature evaluation failed",
-                    feature=candidate.feature.name,
+                    "Feature evaluation process failed unexpectedly",
+                    feature_name=feature_name,
                     error=str(e),
+                    generation=self.current_generation,
+                    exc_info=True,
+                )
+                evaluated_candidates_log.append(
+                    {
+                        "name": feature_name,
+                        "error": str(e),
+                        "status": "failed_evaluation_exception",
+                    }
                 )
 
+        self.logger.info(
+            "Finished evaluation of candidates for generation",
+            generation=self.current_generation,
+            evaluation_summary=evaluated_candidates_log,
+        )
         return evaluated
 
     async def _execute_with_repair(
@@ -424,9 +650,10 @@ class ProgressiveEvolutionOrchestrator:
                     # Attempt automatic repair
                     self.logger.info(
                         "Attempting feature repair",
-                        feature=candidate.feature.name,
+                        feature_name=candidate.feature.name,  # Corrected: use feature_name consistently
                         attempt=attempt + 1,
                         error=error_msg,
+                        generation=self.current_generation,
                     )
 
                     repaired_feature = await self._repair_feature(
@@ -436,7 +663,13 @@ class ProgressiveEvolutionOrchestrator:
                     if repaired_feature:
                         candidate.feature = repaired_feature
                         candidate.repair_attempts += 1
-                        continue  # Try again with repaired feature
+                        self.logger.info(
+                            "Feature repaired successfully",
+                            original_feature_name=candidate.feature.name,  # Corrected
+                            repaired_feature_name=repaired_feature.name,  # Corrected
+                            generation=self.current_generation,
+                        )
+                        return True, None, results
 
                 return False, error_msg, None
 
@@ -458,8 +691,9 @@ class ProgressiveEvolutionOrchestrator:
                 repaired_feature = result["feature"]
                 self.logger.info(
                     "Feature repaired successfully",
-                    original=feature.name,
-                    repaired=repaired_feature.name,
+                    original_feature_name=feature.name,
+                    repaired_feature_name=repaired_feature.name,
+                    generation=self.current_generation,
                 )
                 return repaired_feature
 
@@ -524,28 +758,79 @@ class ProgressiveEvolutionOrchestrator:
         self, action: EvolutionAction, candidates: List[FeatureCandidate]
     ) -> GenerationStats:
         """Record statistics for the current generation."""
-        successful = [c for c in candidates if c.execution_successful]
-        failed = [c for c in candidates if not c.execution_successful]
-        repaired = [c for c in candidates if c.repair_attempts > 0]
+        successful = [
+            c for c in candidates if c.execution_successful and hasattr(c, "score")
+        ]
+        failed = len(candidates) - len(successful)
+        repaired = sum(c.repair_attempts > 0 for c in candidates)
 
         avg_score = (
             sum(c.score for c in successful) / len(successful) if successful else 0.0
         )
-        best_score = max(c.score for c in successful) if successful else 0.0
+        best_score_this_gen = max(c.score for c in successful) if successful else 0.0
 
         stats = GenerationStats(
             generation=self.current_generation,
             total_features=len(candidates),
             successful_features=len(successful),
-            failed_features=len(failed),
-            repaired_features=len(repaired),
+            failed_features=failed,
+            repaired_features=repaired,
             avg_score=avg_score,
-            best_score=best_score,
+            best_score=best_score_this_gen,  # Best score in *this* generation
             action_taken=action,
             population_size=len(self.population),
         )
 
         self.generation_history.append(stats)
+
+        # Enhanced logging for progress
+        progress_log_data = {
+            "event": "generation_progress",
+            "generation": self.current_generation,
+            "action_taken": action.value,
+            "candidates_generated": len(candidates),
+            "successful_evaluations": len(successful),
+            "failed_evaluations": failed,
+            "features_repaired": repaired,
+            "avg_score_this_gen": avg_score,
+            "best_score_this_gen": best_score_this_gen,
+            "current_population_size": len(self.population),
+            "overall_best_score": self.best_score,  # Best score found so far across all gens
+            # Consider adding time elapsed for this generation if easily trackable
+        }
+        self.logger.info("Generation completed", **progress_log_data)
+
+        if self.tensorboard_writer:
+            self.tensorboard_writer.add_scalar(
+                "Generation/AvgScore", avg_score, self.current_generation
+            )
+            self.tensorboard_writer.add_scalar(
+                "Generation/BestScoreThisGen",
+                best_score_this_gen,
+                self.current_generation,
+            )
+            self.tensorboard_writer.add_scalar(
+                "Generation/SuccessfulFeatures",
+                len(successful),
+                self.current_generation,
+            )
+            self.tensorboard_writer.add_scalar(
+                "Generation/FailedFeatures", failed, self.current_generation
+            )
+            self.tensorboard_writer.add_scalar(
+                "Generation/RepairedFeatures", repaired, self.current_generation
+            )
+            self.tensorboard_writer.add_scalar(
+                "Generation/PopulationSize",
+                len(self.population),
+                self.current_generation,
+            )
+            self.tensorboard_writer.add_scalar(
+                "OverallBestScore", self.best_score, self.current_generation
+            )
+            # Log action distribution if needed (e.g., using text or histogram)
+            # self.tensorboard_writer.add_text("Generation/ActionTaken", action.value, self.current_generation)
+
         return stats
 
     def _update_action_rewards(
@@ -601,6 +886,28 @@ class ProgressiveEvolutionOrchestrator:
             if success_rates:
                 avg_success_rate = sum(success_rates) / len(success_rates)
 
+        final_results_payload = {
+            "best_score": self.best_score,
+            "total_generations": self.current_generation,
+            "execution_time_seconds": execution_time,
+            "fold_id": data_context.fold_id,  # Ensure data_context is available here
+            "best_features_count": len(self.best_candidate.feature)
+            if self.best_candidate and hasattr(self.best_candidate.feature, "__len__")
+            else (1 if self.best_candidate else 0),
+            "best_feature_details": self.best_candidate.feature.dict()
+            if self.best_candidate
+            else None,
+            "population_size_final": len(self.population),
+            "total_features_considered_in_run": sum(
+                stats.total_features for stats in self.generation_history
+            ),
+            "avg_candidate_success_rate": avg_success_rate,
+            # Add path to log file and other artifacts if known here
+            # This might be better logged by VulcanOrchestrator which knows the full experiment path
+        }
+        self.logger.info("Progressive Evolution Run Summary", **final_results_payload)
+
+        # Prepare output for VulcanOrchestrator (current structure seems fine)
         return {
             "best_score": self.best_score,
             "total_generations": self.current_generation,

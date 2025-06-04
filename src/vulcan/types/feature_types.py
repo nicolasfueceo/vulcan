@@ -1,7 +1,7 @@
 """Feature type definitions for VULCAN system."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -211,12 +211,14 @@ class ActionContext(BaseModel):
 
     def can_add_feature(self) -> bool:
         """Check if we can add more features."""
-        current_feature_count = len(self.current_features.features)
+        current_features_set = cast(FeatureSet, self.current_features)
+        current_feature_count = len(current_features_set.features)
         return current_feature_count < self.max_features
 
     def can_increase_cost(self, additional_cost: float) -> bool:
         """Check if we can increase computational cost."""
-        current_cost = self.current_features.get_total_cost()
+        current_features_set = cast(FeatureSet, self.current_features)
+        current_cost = current_features_set.get_total_cost()
         return (current_cost + additional_cost) <= self.max_cost
 
     def get_worst_performing_feature(self) -> Optional[str]:
@@ -224,7 +226,8 @@ class ActionContext(BaseModel):
         if not self.performance_history:
             return None
 
-        if len(self.current_features.features) <= 1:
+        current_features_set = cast(FeatureSet, self.current_features)
+        if len(current_features_set.features) <= 1:
             return None
 
         # Calculate feature performance scores based on improvement trends
@@ -240,9 +243,10 @@ class ActionContext(BaseModel):
     def _calculate_feature_performance_scores(self) -> Dict[str, float]:
         """Calculate performance scores for each feature based on evaluation history."""
         feature_scores = {}
+        current_features_set = cast(FeatureSet, self.current_features)
 
         # Get all feature names from current feature set
-        current_feature_names = {f.name for f in self.current_features.features}
+        current_feature_names = {f.name for f in current_features_set.features}
 
         # Initialize scores
         for feature_name in current_feature_names:
@@ -291,9 +295,10 @@ class ActionContext(BaseModel):
     def get_best_performing_features(self, top_k: int = 3) -> List[str]:
         """Get the names of the best performing features."""
         feature_scores = self._calculate_feature_performance_scores()
+        current_features_set = cast(FeatureSet, self.current_features)
 
         if not feature_scores:
-            return [f.name for f in self.current_features.features[:top_k]]
+            return [f.name for f in current_features_set.features[:top_k]]
 
         # Sort by score descending and return top k
         sorted_features = sorted(
@@ -304,9 +309,10 @@ class ActionContext(BaseModel):
     def get_feature_performance_summary(self) -> Dict[str, Any]:
         """Get a comprehensive performance summary for all features."""
         feature_scores = self._calculate_feature_performance_scores()
+        current_features_set = cast(FeatureSet, self.current_features)
 
         summary = {
-            "total_features": len(self.current_features.features),
+            "total_features": len(current_features_set.features),
             "total_evaluations": len(self.performance_history),
             "feature_scores": feature_scores,
             "best_feature": None,

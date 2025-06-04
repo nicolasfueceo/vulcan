@@ -82,15 +82,49 @@ class ApiConfig(BaseModel):
 class ExperimentConfig(BaseModel):
     """Configuration for experiment management."""
 
-    max_features: int = Field(default=100)
-    min_features: int = Field(default=3)
-    feature_selection_size: int = Field(default=20)
-    random_seed: Optional[int] = Field(default=None)
-    save_results: bool = Field(default=True)
-    results_dir: str = Field(default="results")
-    log_level: str = Field(default="INFO")
-    experiment_name: str = Field(default="vulcan_experiment")
-    experiment_tags: List[str] = Field(default_factory=list)
+    name: str = Field(default="vulcan_experiment", description="Experiment name")
+    description: Optional[str] = Field(
+        default=None, description="Experiment description"
+    )
+    output_dir: str = Field(
+        default="experiments", description="Main output directory for all experiments"
+    )
+    tags: List[str] = Field(default_factory=list, description="Tags for the experiment")
+
+    # W&B specific
+    wandb_enabled: bool = Field(
+        default=False, description="Enable Weights & Biases logging"
+    )
+    project_name: Optional[str] = Field(default=None, description="W&B project name")
+    entity: Optional[str] = Field(default=None, description="W&B entity")
+
+    # TensorBoard specific
+    tensorboard_enabled: bool = Field(
+        default=False, description="Enable TensorBoard logging"
+    )
+
+    # Feature engineering and evolution parameters
+    max_features_in_set: int = Field(
+        default=100,
+        description="Maximum number of features to maintain in a candidate set",
+    )
+    min_features_in_set: int = Field(
+        default=3, description="Minimum number of features to start with or maintain"
+    )
+    max_generations: int = Field(
+        default=10,
+        description="Max generations for progressive evolution or MCTS iterations",
+    )
+
+    # Run control
+    random_seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility of the experiment run",
+    )
+    save_artifacts: bool = Field(
+        default=True,
+        description="Whether to save experiment artifacts (results, logs, etc.)",
+    )
 
 
 class DataConfig(BaseModel):

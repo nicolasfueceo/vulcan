@@ -4,6 +4,8 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import WebSocket
@@ -16,6 +18,7 @@ from vulcan.types import (
     WebSocketMessageType,
 )
 from vulcan.utils import get_vulcan_logger
+from vulcan.utils.logging_utils import setup_experiment_file_logging
 
 logger = get_vulcan_logger(__name__)
 
@@ -235,7 +238,7 @@ class VulcanOrchestrator:
         Args:
             experiment_name: Name for the experiment.
             config_overrides: Configuration overrides.
-            data_context: Data context for the experiment (will create default if None).
+            data_context: Data context for the experiment.
             results_manager: ResultsManager for saving experiment data to files.
 
         Returns:
@@ -245,91 +248,132 @@ class VulcanOrchestrator:
             RuntimeError: If experiment is already running or components not initialized.
         """
         if self._is_running:
+            logger.warning(
+                "Attempted to start experiment while another is already running."
+            )
             raise RuntimeError("Experiment already running")
 
         if not self._components_initialized:
-            raise RuntimeError("Components not initialized")
+            logger.error(
+                "Attempted to start experiment before components were initialized."
+            )
+            raise RuntimeError(
+                "Components not initialized. Call initialize_components() first."
+            )
 
-        # Generate experiment ID and name
-        experiment_id = str(uuid.uuid4())
-        if not experiment_name:
-            experiment_name = f"{DEFAULT_EXPERIMENT_NAME}_{int(time.time())}"
-
-        # Create experiment logger with context
-        exp_logger = logger.bind_experiment(experiment_id, experiment_name)
-
-        self._experiment_id = experiment_id
         self._is_running = True
-        self._results_manager = results_manager  # Store for use in other methods
+        self._experiment_id = str(uuid.uuid4())
+        self._results_manager = results_manager
 
-        exp_logger.info(
-            "🚀 Starting new VULCAN experiment",
-            experiment_id=experiment_id,
-            experiment_name=experiment_name,
-            config_overrides=config_overrides or {},
+        effective_config = self.config
+        if config_overrides:
+            effective_config = self.config.update(**config_overrides)
+            logger.info(
+                "Applied configuration overrides for experiment.",
+                overrides=config_overrides,
+            )
+
+        experiment_name_for_run = (
+            experiment_name
+            or effective_config.experiment.name
+            or DEFAULT_EXPERIMENT_NAME
         )
 
-        # Apply configuration overrides
-        if config_overrides:
-            exp_logger.debug(
-                "⚙️ Applying configuration overrides", overrides=config_overrides
-            )
-            # Handle max_iterations override specifically
-            if "max_iterations" in config_overrides:
-                old_value = self.config.mcts.max_iterations
-                self.config.mcts.max_iterations = config_overrides["max_iterations"]
-                exp_logger.info(
-                    "🔧 Updated max_generations",
-                    old_value=old_value,
-                    new_value=self.config.mcts.max_iterations,
-                )
+        # Determine experiment directory
+        current_experiment_dir = None
+        if hasattr(self._results_manager, "get_experiment_dir") and callable(
+            self._results_manager.get_experiment_dir
+        ):
+            # This is a hypothetical way ResultsManager might provide the dir.
+            # current_experiment_dir = self._results_manager.get_experiment_dir()
+            # Actual integration depends on ResultsManager implementation.
+            # For now, we proceed with fallback if not available or not set this way.
+            pass  # Placeholder
 
-        # Create default data context if none provided
-        if data_context is None:
-            exp_logger.info("📊 Creating default data context")
+        if current_experiment_dir is None:  # Fallback directory creation
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_folder_name = f"{timestamp_str}_{experiment_name_for_run.replace(' ', '_')}_{self._experiment_id[:8]}"
+            current_experiment_dir = (
+                Path(effective_config.experiment.output_dir) / run_folder_name
+            )
+
+        current_experiment_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Experiment artifacts will be saved to: {current_experiment_dir}")
+
+        # Setup experiment-specific file logging
+        experiment_log_file = current_experiment_dir / "experiment.log"
+        setup_experiment_file_logging(experiment_log_file, effective_config.logging)
+
+        # Log Experiment Header
+        header_log_data = {
+            "event_type": "experiment_start_header",
+            "experiment_id": self._experiment_id,
+            "experiment_name": experiment_name_for_run,
+            "run_directory": str(current_experiment_dir),
+            "start_timestamp": datetime.now().isoformat(),
+            "config_llm_provider": effective_config.llm.provider,
+            "config_llm_model": effective_config.llm.model_name,
+            "config_max_generations": effective_config.experiment.max_generations,
+            "config_mcts_max_iterations": effective_config.mcts.max_iterations,
+            "config_evaluation_clustering_metric": effective_config.evaluation.clustering_config.metric,
+            "config_wandb_enabled": effective_config.experiment.wandb_enabled,
+            "config_tensorboard_enabled": effective_config.experiment.tensorboard_enabled,
+        }
+        if data_context and hasattr(data_context, "fold_id"):
+            header_log_data["data_fold_id"] = data_context.fold_id
+        if data_context and hasattr(data_context, "data_schema"):
+            header_log_data["data_schema_keys"] = list(data_context.data_schema.keys())
+
+        logger.info("Experiment Run Initialized", **header_log_data)
+
+        # Initialize TensorBoard writer if enabled
+        self.tensorboard_writer = None
+        if effective_config.experiment.tensorboard_enabled:
             try:
-                data_context = self._create_default_data_context()
-                exp_logger.info(
-                    "✅ Default data context created",
-                    n_users=data_context.n_users,
-                    n_items=data_context.n_items,
-                    sparsity=f"{data_context.sparsity:.4f}",
-                    fold_id=data_context.fold_id,
+                from torch.utils.tensorboard import SummaryWriter
+
+                tb_log_dir = current_experiment_dir / "tb_logs"
+                tb_log_dir.mkdir(parents=True, exist_ok=True)
+                self.tensorboard_writer = SummaryWriter(log_dir=str(tb_log_dir))
+                logger.info(f"TensorBoard logging enabled. Log directory: {tb_log_dir}")
+            except ImportError:
+                logger.warning(
+                    "TensorBoard logging enabled in config, but 'torch.utils.tensorboard' not found. Skipping TensorBoard."
                 )
             except Exception as e:
-                exp_logger.error(
-                    "❌ Failed to create data context", error=str(e), exc_info=True
+                logger.error(
+                    f"Failed to initialize TensorBoard SummaryWriter: {e}",
+                    exc_info=True,
                 )
-                self._is_running = False
-                raise
-        else:
-            exp_logger.info(
-                "📊 Using provided data context",
-                n_users=data_context.n_users,
-                n_items=data_context.n_items,
-                sparsity=f"{data_context.sparsity:.4f}",
-                fold_id=data_context.fold_id,
-            )
 
-        # Send WebSocket notification
-        await self._send_websocket_message(
-            WebSocketMessage(
-                type=WebSocketMessageType.EXPERIMENT_STARTED,
-                timestamp=time.time(),
-                experiment_id=experiment_id,
-                experiment_name=experiment_name,
+        # Store effective config and other details for the run
+        self.current_experiment_config = effective_config
+        self.current_experiment_name = experiment_name_for_run
+        self.current_experiment_dir_path = current_experiment_dir
+        self.current_data_context = data_context
+
+        # Save the effective_config to a file in current_experiment_dir
+        try:
+            effective_config.to_yaml(current_experiment_dir / "run_config.yaml")
+            logger.info(
+                f"Saved effective run configuration to {current_experiment_dir / 'run_config.yaml'}"
             )
+        except Exception as e:
+            logger.error(f"Failed to save run_config.yaml: {e}", exc_info=True)
+
+        logger.info(
+            f"Scheduling experiment execution: {experiment_name_for_run} (ID: {self._experiment_id})"
         )
 
-        exp_logger.info("🌐 Experiment start notification sent via WebSocket")
-
-        # Start experiment in background
-        exp_logger.info("🏃 Starting experiment execution in background")
+        # Schedule the actual experiment run
         asyncio.create_task(
-            self._run_experiment(experiment_id, experiment_name, data_context)
+            self._run_experiment(
+                experiment_id=self._experiment_id,
+                experiment_name=experiment_name_for_run,
+                data_context=data_context,
+            )
         )
-
-        return experiment_id
+        return self._experiment_id
 
     async def _run_experiment(
         self, experiment_id: str, experiment_name: str, data_context: Any
@@ -356,9 +400,10 @@ class VulcanOrchestrator:
             )
 
             self.evo_orchestrator = ProgressiveEvolutionOrchestrator(
-                self.config,
-                self.performance_tracker,
-                results_manager=self._results_manager,  # Pass results manager
+                config=self.current_experiment_config,
+                performance_tracker=self.performance_tracker,
+                websocket_callback=self._send_evolution_websocket_update,
+                tensorboard_writer=self.tensorboard_writer,
             )
 
             await self.evo_orchestrator.initialize()
@@ -410,24 +455,65 @@ class VulcanOrchestrator:
             self._experiment_history.append(result)
 
             # Save final results via results manager
-            if self._results_manager:
-                final_results = {
+            saved_artifacts_summary = {}
+            if (
+                self._results_manager
+                and hasattr(self._results_manager, "finish_experiment")
+                and hasattr(self._results_manager, "get_experiment_artifact_paths")
+            ):
+                final_payload_to_save = {
                     "experiment_results": result.dict(),
                     "evolution_results": evolution_results,
                     "final_state": self._exploration_state,
+                    "config_used": self.current_experiment_config.dict(),  # Save the actual config used for the run
                 }
-                self._results_manager.finish_experiment(final_results)
+                self._results_manager.finish_experiment(
+                    self._experiment_id, final_payload_to_save
+                )  # Assuming finish_experiment takes experiment_id
+                saved_artifacts_summary = (
+                    self._results_manager.get_experiment_artifact_paths(
+                        self._experiment_id
+                    )
+                )
+                exp_logger.info(
+                    "Final experiment artifacts saved by ResultsManager.",
+                    **saved_artifacts_summary,
+                )
+            else:
+                exp_logger.warning(
+                    "ResultsManager not available or does not support full artifact path reporting; some artifact paths may not be logged here."
+                )
+
+            # Enhanced completion log
+            completion_log_data = {
+                "event": "experiment_completed_successfully",
+                "experiment_id": experiment_id,
+                "experiment_name": experiment_name,
+                "best_score": result.best_score,
+                "total_generations_or_iterations": result.total_iterations,
+                "execution_time_seconds": f"{execution_time:.3f}",
+                "generations_per_second": f"{result.total_iterations / execution_time:.2f}"
+                if execution_time > 0
+                else "N/A",
+                "features_generated_in_run": evolution_results.get(
+                    "total_features_generated", 0
+                ),
+                "final_population_size": evolution_results.get("population_size", 0),
+                "experiment_log_file": str(
+                    self.current_experiment_dir_path / "experiment.log"
+                ),
+                "run_config_file": str(
+                    self.current_experiment_dir_path / "run_config.yaml"
+                ),
+                "results_directory": str(self.current_experiment_dir_path),
+            }
+            if saved_artifacts_summary:
+                completion_log_data["saved_artifacts"] = saved_artifacts_summary
 
             exp_logger.info(
-                "🎉 Experiment completed successfully",
-                experiment_id=experiment_id,
-                best_score=result.best_score,
-                total_generations=result.total_iterations,
-                execution_time=f"{execution_time:.3f}s",
-                generations_per_second=f"{result.total_iterations / execution_time:.2f}",
-                features_generated=evolution_results.get("total_features_generated", 0),
-                population_size=evolution_results.get("population_size", 0),
+                "Experiment completed and results processed", **completion_log_data
             )
+            # This log will go to console if a console handler is attached to the root logger.
 
         except ImportError as e:
             execution_time = time.time() - start_time
@@ -474,6 +560,17 @@ class VulcanOrchestrator:
             # Cleanup evolution orchestrator
             if self.evo_orchestrator:
                 await self.evo_orchestrator.cleanup()
+            # Close TensorBoard writer if it was created by VulcanOrchestrator
+            if self.tensorboard_writer:  # Ensure VO closes the writer it created
+                try:
+                    self.tensorboard_writer.close()
+                    logger.info(
+                        "TensorBoard SummaryWriter closed by VulcanOrchestrator."
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error closing TensorBoard SummaryWriter: {e}", exc_info=True
+                    )
             exp_logger.info("🔄 Experiment cleanup completed")
 
     async def _send_evolution_websocket_update(
