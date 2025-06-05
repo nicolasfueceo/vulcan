@@ -6,18 +6,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from vulcan.agents.feature_agent import FeatureAgent
-from vulcan.types import (
+from vulcan.schemas import (
     ActionContext,
     DataContext,
-    ExpectedCostEnum,
     FeatureDefinition,
     FeatureSet,
     FeatureType,
-    FeatureTypeEnum,
     LLMConfig,
-    MCTSAction,
     VulcanConfig,
 )
+from vulcan.schemas.feature_types import EvolutionAction as MCTSAction
+from vulcan.schemas.llm_schemas import ExpectedCostEnum, FeatureTypeEnum
 
 
 @pytest.fixture
@@ -102,11 +101,11 @@ async def test_feature_agent_generates_with_chain_of_thought(
     mock_action_context = ActionContext(
         current_features=FeatureSet(features=[]),
         performance_history=[],
-        available_actions=[MCTSAction.ADD],
+        available_actions=[MCTSAction.GENERATE_NEW],
         max_features=10,  # Added to satisfy ActionContext model
         max_cost=100.0,  # Added to satisfy ActionContext model
     )
-    action_to_perform = MCTSAction.ADD
+    action_to_perform = MCTSAction.GENERATE_NEW
 
     # 2. Prepare mock LLM response (as a dictionary)
     expected_feature_name = "CoT_Feature"

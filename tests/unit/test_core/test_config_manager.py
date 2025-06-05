@@ -6,7 +6,7 @@ import pytest
 import yaml  # Added for creating temporary config files
 
 from vulcan.core.config_manager import ConfigManager
-from vulcan.types import (
+from vulcan.schemas import (
     VulcanConfig,
 )
 
@@ -129,6 +129,7 @@ def test_vulcan_config_update_method():
 
     new_config_after_update = config.update(**updates)
 
+    # Use getattr to bypass linter's incorrect type inference for this test
     assert new_config_after_update.experiment.name == "updated_name_direct"
     assert new_config_after_update.llm.model_name == "gpt-4-direct"
     assert new_config_after_update.llm.temperature == 0.99
@@ -139,8 +140,9 @@ def test_vulcan_config_update_method():
     # Check behavior for extra fields. Pydantic V1 default is to ignore them.
     # If VulcanConfig is set to forbid extra fields, this update itself would raise a ValidationError.
     # If VulcanConfig is set to allow them, hasattr would be True.
-    assert not hasattr(new_config_after_update, "new_top_level_key"), \
+    assert not hasattr(new_config_after_update, "new_top_level_key"), (
         "Extra top-level keys should be ignored by default in Pydantic V1 unless explicitly allowed."
+    )
 
 
 # More tests can be added for:

@@ -19,39 +19,41 @@ export interface EvolutionGenerationHistory {
   population_size: number
 }
 
-export interface EvolutionStats {
-  total_nodes: number
-  max_depth: number
-  best_score: number
-  iterations_completed: number
-  avg_branching_factor: number
-  failed_nodes?: number
+export interface AgentStats {
+  [agentName: string]: {
+    count: number
+    reward_sum: number
+  }
 }
 
 export interface EvolutionData {
   population: EvolutionIndividual[]
   generation_history: EvolutionGenerationHistory[]
-  action_rewards: {
-    generate_new: number[]
-    mutate_existing: number[]
-  }
+  agent_stats: AgentStats
   best_candidate?: {
     feature_name: string
     score: number
     generation: number
   }
-  stats: EvolutionStats
 }
 
 // LLM Interaction Types
-export interface LLMInteraction {
-  id: string
-  timestamp: string
-  prompt: string
-  response: string
-  model: string
-  action_type: 'feature_generation' | 'feature_mutation' | 'reflection'
-  node_id?: string
+export interface LLMFeatureOutput {
+  name: string
+  description: string
+  feature_type: string
+  code?: string
+  llm_prompt?: string
+  chain_of_thought_reasoning: string
+}
+
+export interface LLMInteractionLog {
+  agent_name: string
+  timestamp: number
+  prompt_input: Record<string, any>
+  raw_response: string
+  parsed_response?: LLMFeatureOutput
+  error_message?: string
 }
 
 // Decision Log Types

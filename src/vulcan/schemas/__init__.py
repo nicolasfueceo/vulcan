@@ -19,6 +19,14 @@ from .config_types import (
     LoggingConfig,
     VulcanConfig,
 )
+from .feature_types import (
+    FeatureEvaluation,
+    FeatureMetrics,
+)
+from .evolution_types import (
+    FeatureCandidate,
+    GenerationStats,
+)
 from .experiment_types import (
     ExperimentRequest,
     ExperimentResult,
@@ -31,8 +39,6 @@ from .feature_types import (
     DataContext,
     EvolutionAction,
     FeatureDefinition,
-    FeatureEvaluation,
-    FeatureMetrics,
     FeatureSet,
     FeatureType,
     FeatureValue,
@@ -87,6 +93,17 @@ __all__ = [
     "LLMConfig",
     "LoggingConfig",
     "VulcanConfig",
+    # Data Types
+    "DataContext",
+    "FeatureDefinition",
+    "FeatureSet",
+    "FeatureType",
+    # Evaluation Types
+    "FeatureEvaluation",
+    "FeatureMetrics",
+    # Evolution Types
+    "FeatureCandidate",
+    "GenerationStats",
     # Experiment Types
     "ExperimentRequest",
     "ExperimentResult",
@@ -95,13 +112,7 @@ __all__ = [
     "SweepResult",
     # Feature Types
     "ActionContext",
-    "DataContext",
     "EvolutionAction",
-    "FeatureDefinition",
-    "FeatureEvaluation",
-    "FeatureMetrics",
-    "FeatureSet",
-    "FeatureType",
     "FeatureValue",
     # LLM Schema Types
     "EvolutionActionEnum",
@@ -116,3 +127,7 @@ __all__ = [
     "LLMInteraction",
     "ExplorationState",
 ]
+
+# This file makes the 'schemas' directory a Python package.
+
+# This file intentionally left blank to mark this directory as a Python package.

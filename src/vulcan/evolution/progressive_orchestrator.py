@@ -2,17 +2,17 @@
 
 import json
 import logging
-import math
 import random
 import time
 import uuid
-from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.table import Table
 from torch.utils.tensorboard import SummaryWriter
 
 # Attempt to import for plotting, but make it optional
@@ -23,11 +23,18 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-from vulcan.agents import FeatureAgent
+from vulcan.agents.ucb_agents import (
+    IdeateNewAgent,
+    LLMRowAgent,
+    MathematicalFeatureAgent,
+    MutateExistingAgent,
+    RefineTopAgent,
+    ReflectAndRefineAgent,
+    RepairAgent,
+)
 from vulcan.evaluation.recommendation_evaluator import RecommendationEvaluator
 from vulcan.features import FeatureExecutor
 from vulcan.schemas import (
-    ActionContext,
     DataContext,
     EvolutionAction,
     FeatureDefinition,
@@ -36,39 +43,11 @@ from vulcan.schemas import (
     FeatureType,
     VulcanConfig,
 )
+from vulcan.schemas.agent_schemas import LLMInteractionLog
+from vulcan.schemas.evolution_types import FeatureCandidate, GenerationStats
 from vulcan.utils import ExperimentTracker, PerformanceTracker, get_vulcan_logger
 
 logger = structlog.get_logger(__name__)
-
-
-@dataclass
-class FeatureCandidate:
-    """A feature candidate in the population."""
-
-    feature: FeatureDefinition
-    score: float
-    generation: int
-    parent_id: Optional[str] = None
-    mutation_type: Optional[str] = None
-    execution_successful: bool = True
-    error_message: Optional[str] = None
-    repair_attempts: int = 0
-    evaluation_result: Optional[FeatureEvaluation] = None
-
-
-@dataclass
-class GenerationStats:
-    """Statistics for a generation."""
-
-    generation: int
-    total_features: int
-    successful_features: int
-    failed_features: int
-    repaired_features: int
-    avg_score: float
-    best_score: float
-    action_taken: EvolutionAction
-    population_size: int
 
 
 class ProgressiveEvolutionOrchestrator:
@@ -88,7 +67,15 @@ class ProgressiveEvolutionOrchestrator:
         self.results_manager = results_manager
 
         # Core components
-        self.feature_agent = FeatureAgent(config)
+        self.agents = {
+            "IdeateNew": IdeateNewAgent("IdeateNew"),
+            "RefineTop": RefineTopAgent("RefineTop"),
+            "MutateExisting": MutateExistingAgent("MutateExisting"),
+            "LLMRowInference": LLMRowAgent("RowInference", batch_size=20),
+            "MathematicalFeature": MathematicalFeatureAgent("MathematicalFeature"),
+        }
+        self.repair_agent = RepairAgent("RepairAgent")
+        self.reflection_agent = ReflectAndRefineAgent("ReflectAndRefine")
         self.feature_executor = FeatureExecutor(config)
         self.feature_evaluator = RecommendationEvaluator(config)
         self.experiment_tracker: Optional[ExperimentTracker] = None
@@ -111,17 +98,12 @@ class ProgressiveEvolutionOrchestrator:
         self.population: List[FeatureCandidate] = []
         self.generation_history: List[GenerationStats] = []
         self.feature_registry: Dict[str, FeatureCandidate] = {}  # Prevent duplicates
+        self.llm_interactions: List[LLMInteractionLog] = []
 
-        # RL State
-        self.action_rewards: Dict[EvolutionAction, List[float]] = defaultdict(list)
+        # RL State is being replaced by UCB stats on agents
         self.current_generation = 0
         self.total_features_generated = 0
-
-        # UCB statistics for two arms: 0 = GENERATE_NEW, 1 = MUTATE_EXISTING
-        self.ucb_counts = [0, 0]  # number of times each arm was played
-        self.ucb_values = [0.0, 0.0]  # cumulative reward for each arm
-        self.total_ucb_pulls = 0  # total pulls so far
-        self.ucb_exploration_const = self.config.experiment.ucb_exploration_constant
+        self.total_ucb_pulls = 0
 
         # Tracking
         self.best_score = 0.0
@@ -175,10 +157,12 @@ class ProgressiveEvolutionOrchestrator:
             )
             self.tb_writer = None  # Ensure tb_writer is None if init fails
 
+        self.run_dir = exp_dir_path
+
     async def initialize(self) -> bool:
         """Initialize all components."""
         try:
-            await self.feature_agent.initialize()
+            # No agent initialization needed for UCB agents for now
             await self.feature_executor.initialize()
             await self.feature_evaluator.initialize()
 
@@ -198,6 +182,11 @@ class ProgressiveEvolutionOrchestrator:
         max_generations: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run progressive feature evolution."""
+        logger.info(
+            "run_evolution received DataContext",
+            data_context_type=type(data_context),
+            train_data_type=type(data_context.train_data),
+        )
         max_generations = max_generations or self.config.experiment.max_generations
 
         self.logger.info(
@@ -215,59 +204,57 @@ class ProgressiveEvolutionOrchestrator:
 
             for generation in range(max_generations):
                 self.current_generation = generation + 1
+                self.total_ucb_pulls += 1
 
-                # Choose action using RL policy
-                action = self._choose_action()
+                # Choose action using UCB policy
+                action_name, chosen_agent = self._choose_action_ucb()
 
                 # Generate new candidates based on action
-                candidates = await self._generate_candidates(action, data_context)
+                candidates = await self._generate_candidates(chosen_agent, data_context)
 
                 # Evaluate candidates (with automatic repair)
                 evaluated_candidates = await self._evaluate_candidates(
                     candidates, data_context
                 )
 
+                # Add refined candidates from reflection step
+                refined_candidates = await self._reflect_and_refine(
+                    evaluated_candidates, data_context
+                )
+                evaluated_candidates.extend(refined_candidates)
+
                 # Update population
                 self._update_population(evaluated_candidates)
 
                 # Record generation statistics
-                gen_stats = self._record_generation_stats(action, evaluated_candidates)
-
-                # Update RL rewards
-                self._update_action_rewards(action, gen_stats)
-
-                # Update UCB statistics
-                # Map EvolutionAction back to arm index (0 for GENERATE_NEW, 1 for MUTATE_EXISTING)
-                chosen_arm_for_ucb_update = (
-                    0 if action == EvolutionAction.GENERATE_NEW else 1
+                gen_stats = self._record_generation_stats(
+                    action_name, evaluated_candidates
                 )
-                # Use the best score from the generation as the reward for the chosen arm
-                # If no successful features, best_score might be low or an initial value, which is fine for UCB.
+
+                # Update UCB rewards for the agent
                 reward_for_ucb = gen_stats.best_score
+                chosen_agent.update_reward(reward_for_ucb)
 
-                self.ucb_counts[chosen_arm_for_ucb_update] += 1
-                self.total_ucb_pulls += 1
-                self.ucb_values[chosen_arm_for_ucb_update] += reward_for_ucb
-                self.logger.info(
-                    f"UCB stats updated for arm {chosen_arm_for_ucb_update} ({action.value}): "
-                    f"count={self.ucb_counts[chosen_arm_for_ucb_update]}, "
-                    f"value_sum={self.ucb_values[chosen_arm_for_ucb_update]:.4f}, "
-                    f"reward_this_gen={reward_for_ucb:.4f}, total_pulls={self.total_ucb_pulls}"
-                )
-
-                # Send real-time updates
-                await self._send_evolution_update()
-
-                # Log progress
-                if generation % 5 == 0:
-                    self.logger.info(
-                        "Evolution progress",
-                        generation=generation + 1,
-                        best_score=self.best_score,
-                        population_size=len(self.population),
-                        action_taken=action.value,
-                        avg_score=gen_stats.avg_score,
+                # Log to TensorBoard
+                if self.tb_writer:
+                    self.tb_writer.add_scalar(
+                        f"reward/arm/{action_name}",
+                        reward_for_ucb,
+                        self.current_generation,
                     )
+                    self.tb_writer.add_scalar(
+                        "reward/best_in_gen", reward_for_ucb, self.current_generation
+                    )
+                    self.tb_writer.add_scalar(
+                        "score/best_overall", self.best_score, self.current_generation
+                    )
+                    self.tb_writer.add_scalar(
+                        "population/size", len(self.population), self.current_generation
+                    )
+
+                if self._check_stopping_criteria(max_generations):
+                    self.logger.info("Stopping criteria met. Finalizing evolution.")
+                    break
 
             execution_time = time.time() - start_time
             results = await self._generate_evolution_results(
@@ -346,387 +333,253 @@ class ProgressiveEvolutionOrchestrator:
             self.logger.error("Evolution failed", error=str(e))
             raise
 
-    def _choose_action_ucb(self) -> int:
-        """
-        Return 0 for GenerateNew, 1 for MutateExisting, based on UCB1 formula:
-        UCB(a) = avg_reward(a) + c * sqrt(ln N / n_a)
-        Returns an integer: 0 for GENERATE_NEW, 1 for MUTATE_EXISTING.
-        """
-        # If any arm has never been tried, try it first:
-        for arm in (0, 1):
-            if self.ucb_counts[arm] == 0:
-                self.logger.info(f"UCB: Choosing arm {arm} (untried)")
-                return arm
+    def _check_stopping_criteria(self, max_generations: int) -> bool:
+        """Check if evolution should stop."""
+        if self.current_generation >= max_generations:
+            return True
 
-        total = self.total_ucb_pulls
-        ucb_scores = []
-        for arm in (0, 1):
-            avg_reward = self.ucb_values[arm] / self.ucb_counts[arm]
-            bonus = self.ucb_exploration_const * math.sqrt(
-                math.log(total) / self.ucb_counts[arm]
-            )
-            ucb_scores.append(avg_reward + bonus)
-            self.logger.debug(
-                f"UCB Arm {arm}: avg_reward={avg_reward:.4f}, bonus={bonus:.4f}, score={ucb_scores[arm]:.4f}"
-            )
+        # Stop if best score hasn't improved in N generations
+        patience = self.config.experiment.get("early_stopping_patience", 10)
+        if len(self.generation_history) > patience:
+            recent_history = self.generation_history[-patience:]
+            best_scores = [s.best_score for s in recent_history]
+            # using a small tolerance
+            if (max(best_scores) - recent_history[0].best_score) < 1e-4:
+                self.logger.info("Early stopping due to no improvement.")
+                return True
 
-        # Choose the arm with the higher UCB score
-        chosen_arm = 0 if ucb_scores[0] >= ucb_scores[1] else 1
+        return False
+
+    def _choose_action_ucb(self) -> Tuple[str, Any]:
+        """Choose an agent using the UCB1 algorithm."""
+        ucb_values = {
+            name: agent.get_ucb1(self.total_ucb_pulls)
+            for name, agent in self.agents.items()
+        }
+        chosen_name = max(ucb_values, key=ucb_values.get)
         self.logger.info(
-            f"UCB: Scores GenNew={ucb_scores[0]:.4f}, MutEx={ucb_scores[1]:.4f}. Chosen arm: {chosen_arm}"
+            "Chose action with UCB", action=chosen_name, ucb_scores=ucb_values
         )
-        return chosen_arm
-
-    def _choose_action(self) -> EvolutionAction:
-        """Choose action using Upper Confidence Bound (UCB1) policy."""
-
-        chosen_arm_index = self._choose_action_ucb()  # Returns 0 or 1
-
-        if chosen_arm_index == 0:
-            action = EvolutionAction.GENERATE_NEW
-        else:  # chosen_arm_index == 1
-            action = EvolutionAction.MUTATE_EXISTING
-
-        self.logger.info(
-            f"UCB translated arm {chosen_arm_index} to action: {action.value}"
-        )
-
-        # Can't mutate if population is empty
-        if action == EvolutionAction.MUTATE_EXISTING and len(self.population) == 0:
-            self.logger.warning(
-                "UCB chose MUTATE_EXISTING, but population is empty. Defaulting to GENERATE_NEW."
-            )
-            action = EvolutionAction.GENERATE_NEW
-
-        return action
+        return chosen_name, self.agents[chosen_name]
 
     async def _initialize_population(self, data_context: DataContext) -> None:
-        """Initialize the population with seed features."""
-        self.logger.info("Initializing seed population", size=self.generation_size)
-
-        # Generate initial population
-        candidates = await self._generate_new_features(
-            self.generation_size, data_context
+        """Initialize the population with features from the IdeateNewAgent."""
+        self.logger.info("Initializing population with new features")
+        logger.info(
+            "_initialize_population received DataContext",
+            data_context_type=type(data_context),
+            train_data_type=type(data_context.train_data),
         )
-        evaluated_candidates = await self._evaluate_candidates(candidates, data_context)
+        initial_agent = self.agents["IdeateNew"]
 
-        self.population = evaluated_candidates[: self.population_size]
-        self._update_best_candidate()
+        # --- Add data sample to context ---
+        data_sample = data_context.train_data.head(10).to_string()
+        context_summary = f"""Data Schema: {list(data_context.data_schema.keys())}\nUsers: {data_context.n_users}, Items: {data_context.n_items}\n\nData Sample:\n{data_sample}"""
+
+        candidates = []
+        for _ in range(self.population_size):
+            feature_def, log = initial_agent.select(
+                context=context_summary, existing_features=self.population
+            )
+            self.llm_interactions.append(log)
+            candidate = FeatureCandidate(
+                feature=feature_def,
+                score=0.0,
+                generation=0,
+            )
+            candidates.append(candidate)
+
+        evaluated_candidates = await self._evaluate_candidates(candidates, data_context)
+        self._update_population(evaluated_candidates)
+        self.logger.info(
+            f"Initialized population with {len(self.population)} features."
+        )
 
     async def _generate_candidates(
-        self, action: EvolutionAction, data_context: DataContext
+        self, agent: Any, data_context: DataContext
     ) -> List[FeatureCandidate]:
-        """Generate new feature candidates based on action."""
-        if action == EvolutionAction.GENERATE_NEW:
-            return await self._generate_new_features(self.generation_size, data_context)
-        elif action == EvolutionAction.MUTATE_EXISTING:
-            return await self._mutate_existing_features(
-                self.generation_size, data_context
-            )
-        else:
-            raise ValueError(f"Unknown action: {action}")
-
-    async def _generate_new_features(
-        self, count: int, data_context: DataContext
-    ) -> List[FeatureCandidate]:
-        """Generate completely new features."""
+        """Generate new candidates using the selected UCB agent."""
+        self.logger.info(f"Generating candidates with agent: {agent.name}")
         candidates = []
-        self.logger.info(
-            "Attempting to generate new features",
-            count=count,
-            generation=self.current_generation,
-        )
 
-        for i in range(count):
-            feature_name_candidate = f"new_feature_gen{self.current_generation}_cand{i}"  # Tentative name for logging
-            try:
-                # Build action context with proper FeatureSet
-                action_context = ActionContext(
-                    current_features=self._get_population_features(),
-                    performance_history=self._get_recent_evaluations(),
-                    available_actions=[EvolutionAction.GENERATE_NEW],
-                    max_features=count,
-                    max_cost=100.0,
-                )
+        # --- Add data sample to context ---
+        data_sample = data_context.train_data.head(10).to_string()
+        context_summary = f"""Data Schema: {list(data_context.data_schema.keys())}\nUsers: {data_context.n_users}, Items: {data_context.n_items}\n\nData Sample:\n{data_sample}"""
 
-                # Generate feature
-                agent_context = dict(
-                    data_context=data_context,
-                    action_context=action_context,
-                    action_to_perform=EvolutionAction.GENERATE_NEW,
-                    generation=self.current_generation,
-                    candidate_index=i,
-                )
-
-                self.logger.info(
-                    "Sending prompt to FeatureAgent for new feature",
-                    generation=self.current_generation,
-                    candidate_index=i,
-                    action=EvolutionAction.GENERATE_NEW.value,
-                )
-                result = await self.feature_agent.execute(agent_context)
-
-                if result.get("success"):
-                    feature = result["feature"]
-                    self.logger.info(
-                        "FeatureAgent proposed new feature",
-                        generation=self.current_generation,
-                        proposed_feature_name=feature.name,
-                        # Assuming FeatureAgent callbacks save detailed prompt/response, ref it generically
-                        details_loc="FeatureAgent LLM outputs/callbacks",
+        for _ in range(self.generation_size):
+            kwargs = {"context": context_summary}
+            if agent.name in ["RefineTop", "MutateExisting"]:
+                if not self.population:
+                    self.logger.warning(
+                        f"Agent {agent.name} requires a population, but it's empty. Skipping generation."
                     )
-                    # Check for duplicates
-                    feature_key = self._get_feature_key(feature)
-                    if feature_key not in self.feature_registry:
-                        candidate = FeatureCandidate(
-                            feature=feature,
-                            score=0.0,
-                            generation=self.current_generation,
-                        )
-                        candidates.append(candidate)
-                        self.feature_registry[feature_key] = candidate
+                    continue
+                kwargs["existing_features"] = self.population
 
-            except Exception as e:
-                self.logger.warning(
-                    "Failed to generate new feature candidate",
-                    error=str(e),
-                    generation=self.current_generation,
-                    candidate_index=i,
-                    exc_info=True,
-                )
-        self.logger.info(
-            "Finished generating new feature candidates",
-            generated_count=len(candidates),
-            requested_count=count,
-        )
+            if agent.name == "LLMRowInference":
+                # This needs a sample of data rows. Using validation_data for this.
+                # In a real scenario, this might need more careful handling.
+                df = data_context.validation_data
+                kwargs["data_rows"] = df.head(agent.batch_size).to_dict("records")
+                kwargs["text_columns"] = data_context.text_columns
+
+            feature_def, log = agent.select(**kwargs)
+            self.llm_interactions.append(log)
+            candidate = FeatureCandidate(
+                feature=feature_def, score=0.0, generation=self.current_generation
+            )
+            candidates.append(candidate)
         return candidates
 
-    async def _mutate_existing_features(
-        self, count: int, data_context: DataContext
+    async def _reflect_and_refine(
+        self, evaluated_candidates: List[FeatureCandidate], data_context: DataContext
     ) -> List[FeatureCandidate]:
-        """Mutate existing features from population."""
-        candidates = []
-        self.logger.info(
-            "Attempting to mutate existing features",
-            count=count,
-            generation=self.current_generation,
-            population_size=len(self.population),
-        )
-
-        if not self.population:
-            self.logger.warning(
-                "Mutation requested but population is empty. Falling back to generating new features."
-            )
-            return await self._generate_new_features(count, data_context)
-
-        for i in range(count):
-            try:
-                # Select parent feature (bias towards better performers)
-                parent = self._select_parent_feature()
-
-                # Build mutation context with proper FeatureSet
-                parent_feature_set = FeatureSet(
-                    features=[parent.feature],
-                    action_taken=EvolutionAction.MUTATE_EXISTING,
-                )
-
-                action_context = ActionContext(
-                    current_features=parent_feature_set,
-                    performance_history=self._get_recent_evaluations(),
-                    available_actions=[EvolutionAction.MUTATE_EXISTING],
-                    max_features=1,
-                    max_cost=50.0,
-                )
-                agent_context = dict(
-                    data_context=data_context,
-                    action_context=action_context,
-                    action_to_perform=EvolutionAction.MUTATE_EXISTING,
-                    generation=self.current_generation,
-                    candidate_index=i,
-                    target_feature_name=parent.feature.name,
-                )
-
+        """Use reflection to refine successful features."""
+        refined_features = []
+        for candidate in evaluated_candidates:
+            if (
+                candidate.status == "evaluated"
+                and candidate.score
+                > self.config.experiment.get("reflection_threshold", 0.6)
+            ):
                 self.logger.info(
-                    "Sending prompt to FeatureAgent for mutating feature",
-                    generation=self.current_generation,
-                    candidate_index=i,
-                    action=EvolutionAction.MUTATE_EXISTING.value,
-                    target_feature_name=parent.feature.name,
+                    f"Reflecting on successful feature {candidate.feature.name} with score {candidate.score}"
                 )
-                result = await self.feature_agent.execute(agent_context)
-
-                if result.get("success"):
-                    mutated_feature = result["feature"]
-                    self.logger.info(
-                        "FeatureAgent proposed mutated feature",
-                        generation=self.current_generation,
-                        proposed_feature_name=mutated_feature.name,
-                        original_feature_name=parent.feature.name,
-                        details_loc="FeatureAgent LLM outputs/callbacks",
+                try:
+                    refined_feature_def, log = self.reflection_agent.select(
+                        evaluated_feature=candidate
                     )
-                    # Check for duplicates
-                    feature_key = self._get_feature_key(mutated_feature)
-                    if feature_key not in self.feature_registry:
-                        candidate = FeatureCandidate(
-                            feature=mutated_feature,
-                            score=0.0,
-                            generation=self.current_generation,
-                            parent_id=parent.feature.name,
-                            mutation_type=result.get("mutation_type", "unknown"),
-                        )
-                        candidates.append(candidate)
-                        self.feature_registry[feature_key] = candidate
+                    self.llm_interactions.append(log)
 
-            except Exception as e:
-                self.logger.warning(
-                    "Failed to mutate feature candidate",
-                    error=str(e),
-                    generation=self.current_generation,
-                    candidate_index=i,
-                    target_feature_name=parent.feature.name
-                    if "parent" in locals()
-                    else "unknown",
-                    exc_info=True,
-                )
-        self.logger.info(
-            "Finished mutating feature candidates",
-            generated_count=len(candidates),
-            requested_count=count,
-        )
-        return candidates
+                    # Create a new candidate for the refined feature
+                    refined_candidate = FeatureCandidate(
+                        feature=refined_feature_def,
+                        score=0.0,
+                        generation=self.current_generation,
+                        parent_id=candidate.feature.name,
+                        mutation_type="reflection",
+                    )
+
+                    # Evaluate the new refined candidate
+                    evaluated_refined_list = await self._evaluate_candidates(
+                        [refined_candidate], data_context
+                    )
+                    if evaluated_refined_list:
+                        refined_features.extend(evaluated_refined_list)
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to refine feature {candidate.feature.name} after reflection",
+                        error=str(e),
+                    )
+
+        return refined_features
 
     async def _evaluate_candidates(
         self, candidates: List[FeatureCandidate], data_context: DataContext
     ) -> List[FeatureCandidate]:
-        """Evaluate candidates with automatic code repair."""
-        evaluated_candidates_log = []
-        if not candidates:
+        """Evaluate and repair feature candidates."""
+        evaluated_candidates = []
+        console = Console()
+
+        for candidate in candidates:
+            candidate.status = "evaluating"
             self.logger.info(
-                "No candidates to evaluate for current generation.",
-                generation=self.current_generation,
+                "Evaluating candidate", feature_name=candidate.feature.name
             )
-            return []
 
-        self.logger.info(
-            f"Starting evaluation of {len(candidates)} candidates for generation {self.current_generation}"
-        )
-        evaluated = []
-
-        for idx, candidate in enumerate(candidates):
-            feature_name = candidate.feature.name
-            self.logger.debug(
-                f"Evaluating candidate {idx + 1}/{len(candidates)}: {feature_name}"
+            # Execute feature to get values
+            # This now returns a tuple: (success, error_message, feature_results_dict)
+            success, error_msg, feature_results = await self._execute_with_repair(
+                candidate, data_context
             )
-            try:
-                # Execute feature with automatic repair
-                success, error, feature_results = await self._execute_with_repair(
-                    candidate, data_context
-                )
 
-                if success:
-                    # Evaluate feature performance
-                    feature_set = FeatureSet(features=[candidate.feature])
-
-                    eval_result = await self.feature_evaluator.evaluate_feature_set(
-                        feature_set=feature_set,
-                        feature_results=feature_results,  # Pass actual feature execution results
-                        data_context=data_context,
-                        iteration=self.current_generation,
-                    )
-
-                    candidate.score = eval_result.score
-                    candidate.execution_successful = True
-                    candidate.evaluation_result = (
-                        eval_result  # Store the full evaluation
-                    )
-
-                    # Log and store artifact if W&B enabled (or always if TensorBoard is primary)
-                    if self.experiment_tracker:
-                        self.experiment_tracker.log_feature_evaluation(eval_result)
-
-                    log_payload = {
-                        "event_type": "feature_evaluation_success",
-                        "generation": self.current_generation,
-                        "feature_name": feature_name,
-                        "score": candidate.score,
-                        "metrics": eval_result.metrics.dict(),  # Assuming metrics is a Pydantic model
-                    }
-                    self.logger.info("Feature evaluated successfully", **log_payload)
-                    if self.tb_writer:
-                        self.tb_writer.add_scalar(
-                            f"FeatureScores/{feature_name.replace('_', '/')}",
-                            candidate.score,
-                            self.current_generation,
-                        )
-                        # Log individual metrics if desired
-                        for (
-                            metric_name,
-                            metric_value,
-                        ) in eval_result.metrics.dict().items():
-                            if isinstance(metric_value, (int, float)):
-                                self.tb_writer.add_scalar(
-                                    f"FeatureMetrics/{feature_name.replace('_', '/')}/{metric_name}",
-                                    metric_value,
-                                    self.current_generation,
-                                )
-
-                    # Track evaluation (already present)
-                    # self.performance_tracker.record_evaluation(evaluation)
-                    evaluated_candidates_log.append(
-                        {
-                            "name": feature_name,
-                            "score": candidate.score,
-                            "status": "success",
-                        }
-                    )
-
-                else:
-                    candidate.execution_successful = False
-                    candidate.error_message = error
-                    # Still add to evaluated list for tracking
-                    self.logger.warning(
-                        "Feature execution failed after repair attempts",
-                        feature_name=feature_name,
-                        error=error,
-                        generation=self.current_generation,
-                    )
-                    evaluated_candidates_log.append(
-                        {
-                            "name": feature_name,
-                            "error": error,
-                            "status": "failed_execution",
-                        }
-                    )
-
-            except Exception as e:
-                candidate.execution_successful = False
-                candidate.error_message = str(e)
+            if not success:
                 self.logger.warning(
-                    "Feature evaluation process failed unexpectedly",
-                    feature_name=feature_name,
-                    error=str(e),
-                    generation=self.current_generation,
-                    exc_info=True,
+                    "Execution failed after repairs",
+                    feature_name=candidate.feature.name,
+                    error=error_msg,
                 )
-                evaluated_candidates_log.append(
-                    {
-                        "name": feature_name,
-                        "error": str(e),
-                        "status": "failed_evaluation_exception",
-                    }
+                candidate.status = "failed"
+                candidate.error_message = error_msg
+
+                # --- Add explicit failure logging to console ---
+                failure_panel = Panel(
+                    f"[bold]Feature Name:[/] {candidate.feature.name}\\n\\n[bold]Error:[/]\\n[red]{error_msg}[/red]",
+                    title="💀 Feature Execution Failed",
+                    border_style="bold red",
+                    expand=False,
                 )
+                console.print(failure_panel)
+                # --- End failure logging ---
+
+                evaluated_candidates.append(candidate)
+                continue
+
+            # Evaluate feature set (which now contains just this one feature)
+            feature_set = FeatureSet(features=[candidate.feature])
+            evaluation_result = await self.feature_evaluator.evaluate_feature_set(
+                feature_set, feature_results, data_context, self.current_generation
+            )
+
+            candidate.evaluation_result = evaluation_result
+            candidate.score = evaluation_result.overall_score
+            candidate.status = "evaluated"
+
+            # --- Detailed Console Logging ---
+            title = f"📈 Evaluation: [bold bright_white]{candidate.feature.name}[/]"
+            score_color = (
+                "green"
+                if candidate.score > 0.5
+                else "yellow"
+                if candidate.score > 0.2
+                else "red"
+            )
+
+            summary_table = Table(show_header=False, box=None, padding=(0, 1))
+            summary_table.add_row(
+                "[bold]Overall Score[/]:",
+                f"[{score_color}]{candidate.score:.4f}[/{score_color}]",
+            )
+
+            metrics_table = Table(
+                title="[bold]Metric Breakdown[/]",
+                box=None,
+                show_header=True,
+                header_style="bold cyan",
+            )
+            metrics_table.add_column("Metric", justify="left")
+            metrics_table.add_column("Value", justify="right")
+
+            if evaluation_result.metrics:
+                metrics_dict = evaluation_result.metrics.dict()
+                for key, value in metrics_dict.items():
+                    if value is not None:
+                        metrics_table.add_row(
+                            key.replace("_", " ").title(), f"{value:.4f}"
+                        )
+
+            log_panel = Panel(
+                Group(summary_table, metrics_table),
+                title=title,
+                border_style="blue",
+                expand=False,
+            )
+            console.print(log_panel)
+            # --- End Detailed Logging ---
+
+            evaluated_candidates.append(candidate)
 
         self.logger.info(
-            "Finished evaluation of candidates for generation",
-            generation=self.current_generation,
-            evaluation_summary=evaluated_candidates_log,
+            "Finished evaluating all candidates for this generation.",
+            count=len(candidates),
         )
-        return evaluated
+        return evaluated_candidates
 
     async def _execute_with_repair(
         self, candidate: FeatureCandidate, data_context: DataContext
     ) -> Tuple[bool, Optional[str], Optional[Dict]]:
-        """Execute feature with automatic code repair on failure."""
+        """Execute feature, with a repair loop if execution fails."""
         for attempt in range(self.max_repair_attempts + 1):
             try:
                 # Try to execute the feature
@@ -735,72 +588,59 @@ class ProgressiveEvolutionOrchestrator:
                     data_context=data_context,
                     target_split="validation",
                 )
-
-                return True, None, results  # Success! Return the results
+                return True, None, results  # Success!
 
             except Exception as e:
                 error_msg = str(e)
-
-                if attempt < self.max_repair_attempts:
-                    # Attempt automatic repair
-                    self.logger.info(
-                        "Attempting feature repair",
-                        feature_name=candidate.feature.name,  # Corrected: use feature_name consistently
-                        attempt=attempt + 1,
-                        error=error_msg,
-                        generation=self.current_generation,
-                    )
-
-                    repaired_feature = await self._repair_feature(
-                        candidate.feature, error_msg, data_context
-                    )
-
-                    if repaired_feature:
-                        candidate.feature = repaired_feature
-                        candidate.repair_attempts += 1
-                        self.logger.info(
-                            "Feature repaired successfully",
-                            original_feature_name=candidate.feature.name,  # Corrected
-                            repaired_feature_name=repaired_feature.name,  # Corrected
-                            generation=self.current_generation,
-                        )
-                        return True, None, results
-
-                return False, error_msg, None
-
-    async def _repair_feature(
-        self, feature: FeatureDefinition, error_msg: str, data_context: DataContext
-    ) -> Optional[FeatureDefinition]:
-        """Attempt to repair a broken feature."""
-        try:
-            repair_context = {
-                "feature": feature,
-                "error_message": error_msg,
-                "data_context": data_context,
-                "repair_instructions": "Fix the syntax/logic error in this feature",
-            }
-
-            result = await self.feature_agent.execute(repair_context)
-
-            if result.get("success"):
-                repaired_feature = result["feature"]
-                self.logger.info(
-                    "Feature repaired successfully",
-                    original_feature_name=feature.name,
-                    repaired_feature_name=repaired_feature.name,
-                    generation=self.current_generation,
+                self.logger.warning(
+                    "Feature execution failed",
+                    feature_name=candidate.feature.name,
+                    error=error_msg,
+                    attempt=attempt + 1,
                 )
-                return repaired_feature
 
-        except Exception as e:
-            self.logger.warning("Feature repair failed", error=str(e))
+                if attempt >= self.max_repair_attempts:
+                    self.logger.error(
+                        "Feature repair failed after max attempts",
+                        feature_name=candidate.feature.name,
+                    )
+                    return False, error_msg, None
 
-        return None
+                # Attempt to repair the feature
+                self.logger.info(
+                    "Attempting to repair feature",
+                    feature_name=candidate.feature.name,
+                )
+                try:
+                    repaired_feature_def, log = self.repair_agent.select(
+                        faulty_code=candidate.feature.code or "",
+                        error_message=error_msg,
+                    )
+                    self.llm_interactions.append(log)
+                    candidate.feature = repaired_feature_def
+                    candidate.repair_attempts += 1
+                    self.logger.info(
+                        "Feature repaired successfully, retrying execution",
+                        feature_name=candidate.feature.name,
+                    )
+                except Exception as repair_e:
+                    self.logger.error(
+                        "Agent-based repair failed",
+                        feature_name=candidate.feature.name,
+                        repair_error=str(repair_e),
+                    )
+                    return (
+                        False,
+                        f"Execution failed: {error_msg}. Repair failed: {repair_e}",
+                        None,
+                    )
+
+        return False, "Reached end of repair loop unexpectedly.", None
 
     def _update_population(self, new_candidates: List[FeatureCandidate]) -> None:
         """Update population with new candidates, keeping only the best."""
         # Add successful candidates to population
-        successful_candidates = [c for c in new_candidates if c.execution_successful]
+        successful_candidates = [c for c in new_candidates if c.status == "evaluated"]
         self.population.extend(successful_candidates)
 
         # Sort by score (descending) and keep top performers
@@ -808,6 +648,16 @@ class ProgressiveEvolutionOrchestrator:
         self.population = self.population[: self.population_size]
 
         self._update_best_candidate()
+
+        # --- Log Best Feature ---
+        if self.best_candidate:
+            self.logger.info(
+                "Current Best Feature",
+                name=self.best_candidate.feature.name,
+                score=self.best_candidate.score,
+                generation=self.best_candidate.generation,
+            )
+        # --- End Log Best Feature ---
 
         # Save the updated population to disk
         if self.results_manager:
@@ -818,7 +668,7 @@ class ProgressiveEvolutionOrchestrator:
                     "generation": cand.generation,
                     "parent_id": cand.parent_id,
                     "mutation_type": cand.mutation_type,
-                    "execution_successful": cand.execution_successful,
+                    "status": cand.status,
                     "repair_attempts": cand.repair_attempts,
                 }
                 for cand in self.population
@@ -866,15 +716,15 @@ class ProgressiveEvolutionOrchestrator:
         return []  # Simplified for now
 
     def _record_generation_stats(
-        self, action: EvolutionAction, candidates: List[FeatureCandidate]
+        self, action: str, candidates: List[FeatureCandidate]
     ) -> GenerationStats:
         """Record statistics for the current generation."""
         successful = [
-            c for c in candidates if c.execution_successful and c.score is not None
+            c for c in candidates if c.status == "evaluated" and c.score is not None
         ]
         failed = len(candidates) - len(successful)
         repaired = sum(
-            1 for c in candidates if c.repair_attempts > 0 and c.execution_successful
+            1 for c in candidates if c.repair_attempts > 0 and c.status == "evaluated"
         )
 
         avg_score = (
@@ -909,7 +759,7 @@ class ProgressiveEvolutionOrchestrator:
 
         progress_log_data = {
             "generation": self.current_generation,
-            "action_taken": action.value,
+            "action_taken": action,
             "total_candidates": len(candidates),
             "successful_features": len(successful),
             "failed_features": failed,
@@ -949,29 +799,16 @@ class ProgressiveEvolutionOrchestrator:
             self.tb_writer.add_scalar(
                 "OverallBestScore", self.best_score, self.current_generation
             )
-            # Log UCB stats
-            self.tb_writer.add_scalar(
-                "UCB/TotalPulls", self.total_ucb_pulls, self.current_generation
-            )
-            self.tb_writer.add_scalar(
-                "UCB/ExplorationConstant",
-                self.ucb_exploration_const,
-                self.current_generation,
-            )
-            for arm_idx, arm_action in enumerate(
-                [EvolutionAction.GENERATE_NEW, EvolutionAction.MUTATE_EXISTING]
-            ):
-                arm_name = arm_action.value
+            # Log UCB stats from agents
+            for agent_name, agent in self.agents.items():
                 self.tb_writer.add_scalar(
-                    f"UCB/Arm_{arm_name}_Pulls",
-                    self.ucb_counts[arm_idx],
-                    self.current_generation,
+                    f"UCB/Pulls/{agent_name}", agent.count, self.current_generation
                 )
-                if self.ucb_counts[arm_idx] > 0:
-                    avg_reward_arm = self.ucb_values[arm_idx] / self.ucb_counts[arm_idx]
+                if agent.count > 0:
+                    avg_reward = agent.reward_sum / agent.count
                     self.tb_writer.add_scalar(
-                        f"UCB/Arm_{arm_name}_AvgReward",
-                        avg_reward_arm,
+                        f"UCB/AvgReward/{agent_name}",
+                        avg_reward,
                         self.current_generation,
                     )
 
@@ -1004,29 +841,6 @@ class ProgressiveEvolutionOrchestrator:
         )
         self.generation_history.append(stats)
         return stats
-
-    def _update_action_rewards(
-        self, action: EvolutionAction, stats: GenerationStats
-    ) -> None:
-        """Update RL rewards for the taken action."""
-        # Reward based on success rate and score improvement
-        success_rate = (
-            stats.successful_features / stats.total_features
-            if stats.total_features > 0
-            else 0.0
-        )
-        score_improvement = stats.best_score - (
-            self.generation_history[-2].best_score
-            if len(self.generation_history) > 1
-            else 0.0
-        )
-
-        reward = success_rate * 0.5 + score_improvement * 0.5
-        self.action_rewards[action].append(reward)
-
-        # Keep only recent rewards
-        if len(self.action_rewards[action]) > 20:
-            self.action_rewards[action] = self.action_rewards[action][-20:]
 
     async def _send_evolution_update(self) -> None:
         """Send real-time evolution update."""
@@ -1074,8 +888,8 @@ class ProgressiveEvolutionOrchestrator:
                 stats.total_features for stats in self.generation_history
             ),
             "avg_candidate_success_rate": avg_success_rate,
-            # Add path to log file and other artifacts if known here
-            # This might be better logged by VulcanOrchestrator which knows the full experiment path
+            "visualization_data": self._get_evolution_visualization_data(),
+            "llm_interactions": [log.dict() for log in self.llm_interactions],
         }
         self.logger.info("Progressive Evolution Run Summary", **final_results_payload)
 
@@ -1093,16 +907,15 @@ class ProgressiveEvolutionOrchestrator:
                 stats.total_features for stats in self.generation_history
             ),
             "avg_success_rate": avg_success_rate,
+            "visualization_data": self._get_evolution_visualization_data(),
+            "llm_interactions": [log.dict() for log in self.llm_interactions],
         }
 
-    async def get_evolution_visualization_data(self) -> Dict[str, Any]:
+    def _get_evolution_visualization_data(self) -> Dict[str, Any]:
         """Get evolution data for visualization."""
-        # Ensure action_rewards always has the expected structure for frontend
-        action_rewards_data = {
-            "generate_new": self.action_rewards.get(EvolutionAction.GENERATE_NEW, []),
-            "mutate_existing": self.action_rewards.get(
-                EvolutionAction.MUTATE_EXISTING, []
-            ),
+        agent_stats = {
+            name: {"count": agent.count, "reward_sum": agent.reward_sum}
+            for name, agent in self.agents.items()
         }
 
         return {
@@ -1113,7 +926,7 @@ class ProgressiveEvolutionOrchestrator:
                     "generation": candidate.generation,
                     "parent_id": candidate.parent_id,
                     "mutation_type": candidate.mutation_type,
-                    "execution_successful": candidate.execution_successful,
+                    "status": candidate.status,
                     "repair_attempts": candidate.repair_attempts,
                 }
                 for candidate in self.population
@@ -1125,12 +938,12 @@ class ProgressiveEvolutionOrchestrator:
                     "successful_features": stats.successful_features,
                     "avg_score": stats.avg_score,
                     "best_score": stats.best_score,
-                    "action_taken": stats.action_taken.value,
+                    "action_taken": stats.action_taken,
                     "population_size": stats.population_size,
                 }
                 for stats in self.generation_history
             ],
-            "action_rewards": action_rewards_data,
+            "agent_stats": agent_stats,
             "best_candidate": {
                 "feature_name": self.best_candidate.feature.name,
                 "score": self.best_candidate.score,
@@ -1142,8 +955,6 @@ class ProgressiveEvolutionOrchestrator:
 
     async def cleanup(self) -> None:
         """Clean up resources."""
-        if self.feature_agent:
-            await self.feature_agent.cleanup()
         if self.feature_executor:
             await self.feature_executor.cleanup()
         # if self.feature_evaluator: # RecommendationEvaluator might not have a cleanup method
@@ -1154,3 +965,25 @@ class ProgressiveEvolutionOrchestrator:
             self.logger.info("TensorBoard writer closed.")
 
         self.logger.info("Progressive Evolution Orchestrator cleaned up")
+
+    def _log_feature_to_disk(self, feature: FeatureDefinition, metrics: dict):
+        """Save feature metadata and metrics to a JSON file."""
+        log_data = {
+            "name": feature.name,
+            "description": feature.description,
+            "type": feature.feature_type.value,
+            "reasoning_steps": feature.llm_chain_of_thought_reasoning,
+            "code": feature.code if feature.feature_type == "code_based" else None,
+            "prompt": feature.llm_prompt
+            if feature.feature_type == "llm_based"
+            else None,
+            "metrics": metrics,
+            "accepted": metrics.get("reward", 0)
+            > self.config.experiment.get("acceptance_threshold", 0.5),
+        }
+        feature_dir = self.run_dir / "features"
+        feature_dir.mkdir(exist_ok=True)
+        file_path = feature_dir / f"{feature.name}.json"
+        with open(file_path, "w") as f:
+            json.dump(log_data, f, indent=2)
+        self.logger.info(f"Logged feature to {file_path}")

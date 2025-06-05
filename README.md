@@ -104,55 +104,16 @@ cd frontend && npm run dev
 
 ## 🧪 Running Experiments
 
+VULCAN experiments are designed to be run and monitored primarily through the web dashboard.
+
 ### Using the Web Dashboard
-1. Open http://localhost:3000
-2. Navigate to the "Experiment" tab
-3. Choose a preset or configure custom parameters
-4. Click "Start Evolution"
-5. Monitor progress in real-time
+1. Open http://localhost:3000 in your browser.
+2. Navigate to the "Experiments" or "Run" tab.
+3. Select an experiment preset from the dropdown menu (e.g., `goodreads_large`).
+4. Click the "Start Experiment" button.
+5. The backend will begin the experiment, and you can monitor its progress in real-time on the dashboard. For a cross-validation run, the dashboard will show updates for each fold as it is processed.
 
-### Using the Command Line
-
-**List available presets:**
-```bash
-python experiment_runner.py list
-```
-
-**Run a quick test:**
-```bash
-python experiment_runner.py run quick
-```
-
-**Run with monitoring:**
-```bash
-python experiment_runner.py run standard --monitor
-```
-
-**Show preset details:**
-```bash
-python experiment_runner.py show intensive
-```
-
-**Check system status:**
-```bash
-python experiment_runner.py status
-```
-
-**Stop current experiment:**
-```bash
-python experiment_runner.py stop
-```
-
-### Available Presets
-
-| Preset | Description | Time | Generations | Population |
-|--------|-------------|------|-------------|------------|
-| `quick` | Fast test for development | 2-3 min | 5 | 10 |
-| `standard` | Balanced experiment | 10-15 min | 20 | 30 |
-| `intensive` | Comprehensive evolution | 30-60 min | 50 | 50 |
-| `exploration` | High exploration focus | 20-30 min | 30 | 40 |
-| `exploitation` | Refinement focus | 15-25 min | 25 | 35 |
-| `repair_focused` | Test auto-repair | 8-12 min | 15 | 25 |
+This workflow uses the `/api/experiments/run/preset/{preset_name}` endpoint to trigger the orchestrator.
 
 ## 📊 Dashboard Features
 

@@ -9,19 +9,31 @@ from pydantic import BaseModel, Field
 class WebSocketMessageType(str, Enum):
     """WebSocket message types."""
 
+    # General Notifications
+    NOTIFICATION = "notification"
+    STATUS_UPDATE = "status_update"
+    LOG_MESSAGE = "log_message"
+    ERROR_MESSAGE = "error_message"
+
+    # Experiment Lifecycle
+    EXPERIMENT_START = "experiment_start"
+    EXPERIMENT_END = "experiment_end"
+    EXPERIMENT_STOPPED = "experiment_stopped"
+    EXPERIMENT_FAILED = "experiment_failed"
+
+    # For backward compatibility with old names
     EXPERIMENT_STARTED = "experiment_started"
     EXPERIMENT_COMPLETED = "experiment_completed"
-    EXPERIMENT_FAILED = "experiment_failed"
-    EXPERIMENT_STOPPED = "experiment_stopped"
+
+    # Evolution / MCTS Updates
     EXPLORATION_UPDATE = "exploration_update"
+    FEATURE_EVALUATION = "feature_evaluation"
+
+    # Sweep Lifecycle
     SWEEP_STARTED = "sweep_started"
     SWEEP_COMPLETED = "sweep_completed"
     SWEEP_FAILED = "sweep_failed"
-    FEATURE_EVALUATION = "feature_evaluation"
-    STATUS_UPDATE = "status_update"
     EXPERIMENT_UPDATE = "experiment_update"
-    LOG_MESSAGE = "log_message"
-    ERROR_MESSAGE = "error_message"
 
 
 class WebSocketMessage(BaseModel):

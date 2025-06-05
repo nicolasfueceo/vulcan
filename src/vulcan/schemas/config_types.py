@@ -176,6 +176,12 @@ class DataConfig(BaseModel):
     train_db: str = Field(default="data/train.db")
     test_db: str = Field(default="data/test.db")
     validation_db: str = Field(default="data/validation.db")
+    db_path: Optional[str] = Field(
+        default=None, description="Path to a single database file, if used."
+    )
+    splits_dir: Optional[str] = Field(
+        default=None, description="Directory containing data splits."
+    )
     base_path: Optional[str] = Field(
         default=None,
         description="Base path for data files, if not using absolute paths for dbs.",

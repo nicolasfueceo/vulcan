@@ -6,24 +6,67 @@ import time
 import uuid
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
 from fastapi import WebSocket
+from rich.console import Console
 
 from vulcan.schemas import (
+    DataContext,
     ExperimentResult,
     ExperimentStatus,
     VulcanConfig,
     WebSocketMessage,
     WebSocketMessageType,
 )
-from vulcan.utils import get_vulcan_logger
+from vulcan.utils import ResultsManager, get_vulcan_logger
 
 logger = get_vulcan_logger(__name__)
+CONSOLE = Console()
 
 # Constants
 DEFAULT_EXPERIMENT_NAME = "vulcan_experiment"
 MAX_CONCURRENT_EXPERIMENTS = 1
+
+# --- Orchestrator-level helpers ---
+
+CONFIGS_DIR = Path(__file__).resolve().parents[3] / "configs"
+
+
+def load_presets() -> Dict[str, Any]:
+    """Load all experiment presets from the configs directory."""
+    presets = {}
+    for config_path in CONFIGS_DIR.glob("*.yaml"):
+        with open(config_path) as f:
+            preset_name = config_path.stem
+            presets[preset_name] = {"path": config_path, "config": yaml.safe_load(f)}
+    return presets
+
+
+def get_fold_counts(config: Dict[str, Any]) -> tuple[int, int]:
+    """Get the number of outer and inner folds from the data splits directory."""
+    try:
+        # Assuming the base path for data is relative to the project root
+        project_root = Path(__file__).resolve().parents[3]
+        splits_dir = project_root / config["data"]["splits_dir"]
+
+        if not splits_dir.is_dir():
+            logger.warning(f"Splits directory not found at {splits_dir}")
+            return 1, 1
+
+        outer_folds = len(list(splits_dir.glob("outer_fold_*")))
+        inner_folds_path = splits_dir / "outer_fold_0"
+        inner_folds = (
+            len(list(inner_folds_path.glob("inner_fold_*")))
+            if inner_folds_path.is_dir()
+            else 0
+        )
+        return max(1, outer_folds), max(1, inner_folds)
+    except (KeyError, FileNotFoundError, TypeError) as e:
+        logger.error(f"Could not determine fold counts: {e}")
+        return 1, 1
 
 
 class VulcanOrchestrator:
@@ -42,7 +85,7 @@ class VulcanOrchestrator:
         self._is_running = False
         self._experiment_id: Optional[str] = None
         self._components_initialized = False
-        self._results_manager = None
+        self._results_manager = ResultsManager(config)
 
         # Queue for pending experiments
         self.experiment_queue = deque()
@@ -250,10 +293,74 @@ class VulcanOrchestrator:
                 logger.info("Queue runner task was cancelled.")
                 break
             except Exception as e:
-                logger.error(
-                    "Critical error in queue runner", error=str(e), exc_info=True
+                logger.error(f"Error in queue runner: {e}", exc_info=True)
+                await asyncio.sleep(10)  # Wait before retrying
+
+    async def start_preset_experiment(self, preset_name: str) -> Dict[str, Any]:
+        """
+        Starts an experiment based on a named preset from the /configs directory.
+        If the preset is a cross-validation run, it queues an experiment for each fold.
+        """
+        if self._is_running:
+            return {
+                "status": "error",
+                "message": "An experiment is already in progress.",
+            }
+
+        presets = load_presets()
+        if preset_name not in presets:
+            return {"status": "error", "message": f"Preset '{preset_name}' not found."}
+
+        preset = presets[preset_name]
+        preset_config = preset["config"]
+        experiment_base_name = preset_config.get("experiment", {}).get(
+            "name", preset_name
+        )
+
+        # Special handling for cross-validation runs
+        if "goodreads" in preset_name and "large" in preset_name:
+            num_outer, _ = get_fold_counts(preset_config)
+            msg = f"🔬 Starting {num_outer}-fold cross-validation for preset '{preset_name}'."
+            logger.info(msg)
+            await self._send_websocket_message(
+                WebSocketMessage(
+                    type=WebSocketMessageType.NOTIFICATION,
+                    timestamp=time.time(),
+                    payload={"message": msg},
                 )
-                await asyncio.sleep(10)
+            )
+
+            for i in range(num_outer):
+                exp_name = f"{experiment_base_name}_outer_fold_{i}"
+                overrides = {"data": {"outer_fold": i, "inner_fold": 0}}
+                request = {
+                    "experiment_name": exp_name,
+                    "config_overrides": overrides,
+                    "original_preset": preset_config,
+                }
+                self.experiment_queue.append(request)
+            return {
+                "status": "success",
+                "message": f"Queued {num_outer}-fold cross-validation.",
+            }
+
+        # For single runs
+        msg = f"🚀 Queuing single experiment for preset: '{preset_name}'"
+        logger.info(msg)
+        await self._send_websocket_message(
+            WebSocketMessage(
+                type=WebSocketMessageType.NOTIFICATION,
+                timestamp=time.time(),
+                payload={"message": msg},
+            )
+        )
+        request = {
+            "experiment_name": experiment_base_name,
+            "config_overrides": {},
+            "original_preset": preset_config,
+        }
+        self.experiment_queue.append(request)
+        return {"status": "success", "message": f"Queued single run for {preset_name}."}
 
     async def start_experiment(
         self,
@@ -262,7 +369,13 @@ class VulcanOrchestrator:
         data_context: Optional[Any] = None,
         results_manager: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Adds an experiment request to the queue."""
+        """Start a new feature engineering experiment."""
+        if self._is_running:
+            return {
+                "status": "error",
+                "message": "An experiment is already in progress.",
+            }
+
         if not self._components_initialized:
             raise RuntimeError("Cannot queue experiment: components not initialized.")
 
@@ -296,99 +409,129 @@ class VulcanOrchestrator:
         }
 
     async def _run_experiment(self, experiment_request: Dict[str, Any]):
-        """Runs a single experiment from start to finish. This is the consumer logic."""
-        # 1. Set busy state
+        """Execute a single experiment run."""
+        if not self._components_initialized:
+            logger.error("Cannot run experiment, components are not initialized.")
+            return
+
         self._is_running = True
-        self._experiment_id = experiment_request["experiment_id"]
-        exp_logger = logger.bind_experiment(
-            self._experiment_id, experiment_request["experiment_name"]
+        self._experiment_id = (
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        )
+        experiment_name = experiment_request.get(
+            "experiment_name", DEFAULT_EXPERIMENT_NAME
+        )
+        config_overrides = experiment_request.get("config_overrides", {})
+        original_preset = experiment_request.get("original_preset", {})
+
+        # Create a disposable config for this specific run
+        run_config = VulcanConfig(**original_preset).update(**config_overrides)
+
+        await self._send_websocket_message(
+            WebSocketMessage(
+                type=WebSocketMessageType.EXPERIMENT_START,
+                timestamp=time.time(),
+                payload={
+                    "experiment_id": self._experiment_id,
+                    "experiment_name": experiment_name,
+                    "config": run_config.to_dict(),
+                    "start_time": time.time(),
+                },
+            )
         )
 
         try:
-            # 2. Unpack request and set up config
-            config_overrides = experiment_request["config_overrides"]
-            data_context = experiment_request["data_context"]
-            effective_config = (
-                self.config.update(**config_overrides)
-                if config_overrides
-                else self.config
+            logger.info(
+                "🚀 Starting new experiment run", experiment_name=experiment_name
             )
-
-            # Use self._results_manager if available, otherwise the one from request
-            # This part of the logic might need refinement based on how ResultsManager is used.
-            # For now, let's assume one is created if not present.
-            if not self._results_manager:
-                from vulcan.utils import ResultsManager
-
-                self._results_manager = ResultsManager(effective_config)
-
-            # 3. Set up directories and logging for this run
-            exp_logger.info("🔬 Starting experiment execution...")
-
-            # 4. Initialize and run the evolution orchestrator
             from vulcan.evolution.progressive_orchestrator import (
                 ProgressiveEvolutionOrchestrator,
             )
 
+            # Use the disposable run_config for the orchestrator
             self.evo_orchestrator = ProgressiveEvolutionOrchestrator(
-                config=effective_config,
+                config=run_config,
                 results_manager=self._results_manager,
-                performance_tracker=self.performance_tracker,
                 websocket_callback=self._send_evolution_websocket_update,
             )
-            await self.evo_orchestrator.initialize()
+            data_context = self._create_default_data_context(run_config.data)
+            results = await self.evo_orchestrator.run_evolution(data_context)
 
-            evolution_results = await self.evo_orchestrator.run_evolution(
-                data_context=data_context,
-                max_generations=effective_config.experiment.max_generations,
+            logger.info(
+                "✅ Experiment run finished successfully",
+                experiment_name=experiment_name,
+                results=results,
             )
 
-            # 5. Process results (simplified for clarity)
-            exp_logger.info(
-                "✅ Experiment completed successfully.",
-                best_score=evolution_results.get("best_score"),
+            await self._send_websocket_message(
+                WebSocketMessage(
+                    type=WebSocketMessageType.EXPERIMENT_END,
+                    timestamp=time.time(),
+                    payload={
+                        "experiment_id": self._experiment_id,
+                        "status": "completed",
+                        "end_time": time.time(),
+                        "results": results,
+                    },
+                )
             )
 
-        except Exception as e:
-            exp_logger.error(
-                "❌ Experiment execution failed", error=str(e), exc_info=True
-            )
-        finally:
-            # 6. ALWAYS clean up and reset state
-            exp_logger.info("🔄 Experiment finished, cleaning up run...")
-            if self.evo_orchestrator:
-                await self.evo_orchestrator.cleanup()
-                self.evo_orchestrator = None
-            self._is_running = False
-            self._experiment_id = None
-            exp_logger.info("Queue is now free for the next experiment.")
-
-    def _create_default_data_context(self):
-        """Creates a default data context using the Goodreads data loader."""
-        from vulcan.data.goodreads_loader import GoodreadsDataLoader
-
-        logger.info("📊 Creating default Goodreads data context...")
-
-        # These paths and settings could be moved to the main config, but for now,
-        # we mirror the previous logic.
-        db_path = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db"
-        splits_dir = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits"
-
-        try:
-            loader = GoodreadsDataLoader(
-                db_path=db_path,
-                splits_dir=splits_dir,
-                outer_fold=1,  # Default fold
-                inner_fold=1,  # Default fold
-            )
-            data_context = loader.get_data_context()
-            logger.info("✅ Default data context created successfully.")
-            return data_context
         except Exception as e:
             logger.error(
-                f"❌ Failed to create default data context: {e}", exc_info=True
+                "❌ Experiment run failed",
+                experiment_name=experiment_name,
+                error=str(e),
+                exc_info=True,
             )
-            raise  # Re-raise the exception to be handled by the API layer
+            await self._send_websocket_message(
+                WebSocketMessage(
+                    type=WebSocketMessageType.EXPERIMENT_END,
+                    timestamp=time.time(),
+                    payload={
+                        "experiment_id": self._experiment_id,
+                        "status": "failed",
+                        "error": str(e),
+                        "end_time": time.time(),
+                    },
+                )
+            )
+        finally:
+            self._is_running = False
+            self.evo_orchestrator = None
+            self._experiment_id = None
+            logger.info("Orchestrator is now idle.")
+            if not self.experiment_queue:
+                await self._send_websocket_message(
+                    WebSocketMessage(
+                        type=WebSocketMessageType.NOTIFICATION,
+                        timestamp=time.time(),
+                        payload={"message": "All queued experiments have completed."},
+                    )
+                )
+
+    def _create_default_data_context(self, data_config: "DataConfig") -> DataContext:
+        """Create a default data context for a single experiment run."""
+        from vulcan.data.goodreads_loader import GoodreadsDataLoader
+
+        logger.info("Creating data context for experiment run.")
+
+        # Prefer the specific db_path from presets, otherwise fallback to train_db
+        db_path = data_config.db_path or data_config.train_db
+        splits_dir = data_config.splits_dir or "data/splits"
+
+        loader = GoodreadsDataLoader(
+            db_path=db_path,
+            splits_dir=splits_dir,
+            outer_fold=data_config.outer_fold,
+            inner_fold=data_config.inner_fold,
+        )
+        data_context = loader.get_data_context()
+        logger.info(
+            "DataContext created in orchestrator",
+            data_context_type=type(data_context),
+            train_data_type=type(data_context.train_data),
+        )
+        return data_context
 
     def get_status(self) -> ExperimentStatus:
         """Get current system status, including the queue."""
@@ -452,6 +595,10 @@ class VulcanOrchestrator:
             return False
 
         logger.info("Stopping experiment", experiment_id=self._experiment_id)
+
+        # Also stop the underlying evolution orchestrator if it exists
+        if self.evo_orchestrator:
+            await self.evo_orchestrator.cleanup()
 
         # Send stop notification
         await self._send_websocket_message(
@@ -530,12 +677,23 @@ class VulcanOrchestrator:
             self._websocket_callbacks.remove(callback)
 
     async def _send_websocket_message(self, message: WebSocketMessage) -> None:
-        """Send WebSocket message to all callbacks."""
-        for callback in self._websocket_callbacks:
-            try:
-                await callback(message)
-            except Exception as e:
-                logger.error("WebSocket callback failed", error=str(e))
+        """Send WebSocket message to all callbacks. Replaced with logging for script-based run."""
+        log_level = "info"
+        status = message.data.get("status") if message.data else None
+        if message.type == WebSocketMessageType.EXPERIMENT_END and status == "failed":
+            log_level = "error"
+
+        log_message = f"[WEBSOCKET_MESSAGE] Type: {message.type.value}"
+        log_payload = {
+            "data": message.data,
+            "error": message.error,
+            "results": message.results,
+        }
+
+        if log_level == "error":
+            logger.error(log_message, **log_payload)
+        else:
+            logger.info(log_message, **log_payload)
 
     def add_callback(self, callback_type: str, callback: callable) -> None:
         """Add a callback for saving experiment artifacts.
@@ -604,15 +762,32 @@ class VulcanOrchestrator:
         }
 
         state_json = json.dumps(serializable_state, default=str)
-        dead_sockets = []
+        logger.info("[BROADCAST_STATE]", state=state_json)
 
-        for ws in self._active_websockets:
-            try:
-                await ws.send_text(state_json)
-            except Exception as e:
-                logger.warning("Failed to send to websocket", error=str(e))
-                dead_sockets.append(ws)
+    async def run_single_experiment_from_preset(
+        self, preset_name: str, preset_config: Dict[str, Any]
+    ):
+        """Runs a single experiment directly, bypassing the queue.
 
-        # Clean up dead connections
-        for ws in dead_sockets:
-            await self.remove_websocket(ws)
+        Args:
+            preset_name: The name of the experiment preset.
+            preset_config: The loaded configuration dictionary for the preset.
+        """
+        if self._is_running:
+            logger.warning("An experiment is already in progress.")
+            return
+
+        # Initialize components before the first run
+        if not self._components_initialized:
+            await self.initialize_components()
+
+        experiment_name = preset_config.get("experiment", {}).get("name", preset_name)
+
+        request = {
+            "experiment_name": experiment_name,
+            "config_overrides": {},
+            "original_preset": preset_config,
+        }
+
+        # Directly run the experiment instead of queueing
+        await self._run_experiment(request)

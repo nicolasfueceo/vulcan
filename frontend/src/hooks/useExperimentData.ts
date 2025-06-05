@@ -1,147 +1,118 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { VisualizationData } from '@/types/vulcan'
+import { useState, useCallback, useEffect } from 'react'
+import { VisualizationData, EvolutionData, Experiment, LLMInteractionLog } from '@/types/vulcan'
 
 interface ExperimentListItem {
-  id: number
-  experiment_name: string
-  algorithm: string
-  start_time: string
+  id: string
+  name: string
+  start_time: string | null
   status: string
-  iterations_completed: number
-  best_score: number
-  end_time?: string
 }
 
 interface UseExperimentDataResult {
-  data: VisualizationData | null
   experiments: ExperimentListItem[]
   selectedExperiment: string | null
-  setSelectedExperiment: (experimentName: string | null) => void
+  setSelectedExperiment: (id: string | null) => void
+  experimentData: EvolutionData | null
+  llmLogs: LLMInteractionLog[]
   isLoading: boolean
   error: string | null
   refreshData: () => void
-  selectExperiment: (experimentName: string | null) => void
-  isPolling: boolean
-  setIsPolling: (polling: boolean) => void
 }
 
+const API_BASE_URL = 'http://localhost:8000/api'
+
 export function useExperimentData(): UseExperimentDataResult {
-  const [data, setData] = useState<VisualizationData | null>(null)
   const [experiments, setExperiments] = useState<ExperimentListItem[]>([])
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [experimentData, setExperimentData] = useState<EvolutionData | null>(null)
+  const [llmLogs, setLlmLogs] = useState<LLMInteractionLog[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isPolling, setIsPolling] = useState(false)
 
   const fetchExperiments = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/experiments')
-      if (!response.ok) throw new Error('Failed to fetch experiments')
-      
-      const experimentsData = await response.json()
-      setExperiments(experimentsData)
-      
-      return experimentsData
-    } catch (err) {
-      console.error('Error fetching experiments:', err)
-      setError(err instanceof Error ? err.message : 'Unknown error')
-      return []
-    }
-  }, [])
-
-  const fetchExperimentData = useCallback(async (experimentName?: string) => {
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      let url: string
-      if (experimentName) {
-        url = `http://localhost:8000/api/experiments/${experimentName}/data`
-      } else {
-        url = 'http://localhost:8000/api/experiments/latest/data'
+      const response = await fetch(`${API_BASE_URL}/experiments/list`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch experiment list.')
       }
-
-      const response = await fetch(url)
-      if (!response.ok) throw new Error('Failed to fetch experiment data')
       
       const result = await response.json()
-      
-      if (result.status === 'success') {
-        setData(result.data)
-      } else {
-        throw new Error(result.message || 'Failed to load experiment data')
+      const loadedExperiments = result.experiments || []
+      setExperiments(loadedExperiments)
+
+      if (loadedExperiments.length > 0 && !selectedExperiment) {
+        setSelectedExperiment(loadedExperiments[0].id)
       }
-    } catch (err) {
-      console.error('Error fetching experiment data:', err)
-      setError(err instanceof Error ? err.message : 'Unknown error')
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }, [selectedExperiment])
+
+  const fetchExperimentDetail = useCallback(async (experimentName: string) => {
+    setIsLoading(true)
+    setError(null)
+    setLlmLogs([])
+
+    try {
+      const [dataRes, logsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/experiments/${experimentName}/data`),
+        fetch(`${API_BASE_URL}/experiments/${experimentName}/llm-logs`),
+      ])
+
+      if (!dataRes.ok) throw new Error(`Failed to fetch data for experiment: ${experimentName}`)
+      if (!logsRes.ok) throw new Error(`Failed to fetch LLM logs for experiment: ${experimentName}`)
+      
+      const dataResult = await dataRes.json()
+      const logsResult = await logsRes.json()
+
+      if (dataResult.status === 'success') setExperimentData(dataResult.data)
+      else throw new Error(dataResult.message || 'Failed to parse experiment data.')
+
+      if (logsResult.status === 'success') setLlmLogs(logsResult.data)
+      else throw new Error(logsResult.message || 'Failed to parse LLM logs.')
+
+    } catch (e: any) {
+      setError(e.message)
     } finally {
       setIsLoading(false)
     }
   }, [])
 
-  const refreshData = useCallback(() => {
-    fetchExperiments()
-    fetchExperimentData(selectedExperiment || undefined)
-  }, [fetchExperiments, fetchExperimentData, selectedExperiment])
-
-  const selectExperiment = useCallback((experimentName: string | null) => {
-    setSelectedExperiment(experimentName)
-    if (experimentName) {
-      fetchExperimentData(experimentName)
+  const refreshData = useCallback(async () => {
+    await fetchExperiments()
+    if (selectedExperiment) {
+      await fetchExperimentDetail(selectedExperiment)
+    } else if (experiments.length > 0) {
+      // If no experiment is selected, but we have a list, select the first one.
+      await fetchExperimentDetail(experiments[0].id)
     } else {
-      fetchExperimentData() // Fetch latest
+      // No experiments available at all
+      setExperimentData(null)
+      setLlmLogs([])
+      setIsLoading(false)
     }
-  }, [fetchExperimentData])
+  }, [fetchExperiments, fetchExperimentDetail, selectedExperiment, experiments])
 
-  // Initial data fetch
   useEffect(() => {
-    refreshData()
+    fetchExperiments()
   }, [])
 
-  // Polling effect
   useEffect(() => {
-    if (!isPolling) return
-
-    const pollInterval = setInterval(() => {
-      refreshData()
-    }, 2000) // Poll every 2 seconds
-
-    return () => clearInterval(pollInterval)
-  }, [isPolling, refreshData])
-
-  // Auto-select latest experiment when experiments list changes
-  useEffect(() => {
-    if (experiments.length > 0 && !selectedExperiment) {
-      const latestExperiment = experiments[0] // Experiments are sorted by start time (newest first)
-      if (latestExperiment.status === 'running') {
-        setSelectedExperiment(latestExperiment.experiment_name)
-        setIsPolling(true) // Auto-start polling for running experiments
-      }
+    if (selectedExperiment) {
+      fetchExperimentDetail(selectedExperiment)
     }
-  }, [experiments, selectedExperiment])
-
-  // Stop polling when experiment finishes
-  useEffect(() => {
-    if (selectedExperiment && experiments.length > 0) {
-      const currentExp = experiments.find(exp => exp.experiment_name === selectedExperiment)
-      if (currentExp && currentExp.status === 'completed') {
-        setIsPolling(false)
-      }
-    }
-  }, [experiments, selectedExperiment])
+  }, [selectedExperiment, fetchExperimentDetail])
 
   return {
-    data,
     experiments,
     selectedExperiment,
     setSelectedExperiment,
+    experimentData,
+    llmLogs,
     isLoading,
     error,
     refreshData,
-    selectExperiment,
-    isPolling,
-    setIsPolling
   }
 } 
