@@ -43,57 +43,6 @@ export interface EvolutionData {
   stats: EvolutionStats
 }
 
-// MCTS Types
-export interface MCTSNode {
-  id: string
-  parent_id?: string
-  depth: number
-  visits: number
-  value: number
-  ucb_value: number
-  is_terminal: boolean
-  is_fully_expanded: boolean
-  action_taken: 'explore' | 'exploit' | 'root'
-  feature_name?: string
-  feature_code?: string
-  score?: number
-  children: string[]
-  cumulative_features: string[]
-}
-
-export interface MCTSEdge {
-  id: string
-  source: string
-  target: string
-  action_type: 'explore' | 'exploit'
-}
-
-export interface MCTSStats {
-  total_nodes: number
-  max_depth: number
-  best_score: number
-  iterations_completed: number
-  avg_branching_factor: number
-  failed_nodes?: number
-}
-
-export interface MCTSData {
-  nodes: MCTSNode[]
-  edges: MCTSEdge[]
-  best_node_id?: string
-  stats: MCTSStats
-  generation_history: EvolutionGenerationHistory[]  // For compatibility
-  action_rewards: {
-    generate_new: number[]
-    mutate_existing: number[]
-  }
-  best_candidate?: {
-    feature_name: string
-    score: number
-    generation: number
-  }
-}
-
 // LLM Interaction Types
 export interface LLMInteraction {
   id: string
@@ -122,4 +71,4 @@ export interface DecisionLog {
 }
 
 // Unified data type for components
-export type VisualizationData = EvolutionData | MCTSData 
+export type VisualizationData = EvolutionData 

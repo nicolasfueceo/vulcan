@@ -332,6 +332,7 @@ class VulcanOrchestrator:
 
             self.evo_orchestrator = ProgressiveEvolutionOrchestrator(
                 config=effective_config,
+                results_manager=self._results_manager,
                 performance_tracker=self.performance_tracker,
                 websocket_callback=self._send_evolution_websocket_update,
             )

@@ -18,6 +18,7 @@ interface UseExperimentDataResult {
   data: VisualizationData | null
   experiments: ExperimentListItem[]
   selectedExperiment: string | null
+  setSelectedExperiment: (experimentName: string | null) => void
   isLoading: boolean
   error: string | null
   refreshData: () => void
@@ -135,6 +136,7 @@ export function useExperimentData(): UseExperimentDataResult {
     data,
     experiments,
     selectedExperiment,
+    setSelectedExperiment,
     isLoading,
     error,
     refreshData,

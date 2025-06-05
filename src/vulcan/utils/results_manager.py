@@ -69,6 +69,7 @@ class ResultsManager:
         # Create initial empty data files
         self._save_experiment_data(
             {
+                "population": [],
                 "nodes": [],
                 "edges": [],
                 "best_node_id": None,
@@ -307,3 +308,29 @@ class ResultsManager:
                 self.logger.info(
                     "Removed old experiment", experiment_name=exp["experiment_name"]
                 )
+
+    def update_population(self, population_data: List[Dict[str, Any]]) -> None:
+        """Update the population data for the current experiment.
+
+        Args:
+            population_data: List of individuals in the new generation.
+        """
+        if not self.current_experiment_dir:
+            return
+
+        data = self._load_experiment_data()
+        data.setdefault("population", []).extend(population_data)
+        self._save_experiment_data(data)
+
+    def update_generation_history(self, generation_data: Dict[str, Any]) -> None:
+        """Update the generation history for the current experiment.
+
+        Args:
+            generation_data: Data for the new generation
+        """
+        if not self.current_experiment_dir:
+            return
+
+        data = self._load_experiment_data()
+        data.setdefault("generation_history", []).append(generation_data)
+        self._save_experiment_data(data)

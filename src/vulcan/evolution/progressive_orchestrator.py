@@ -77,6 +77,7 @@ class ProgressiveEvolutionOrchestrator:
     def __init__(
         self,
         config: VulcanConfig,
+        results_manager: Any,
         performance_tracker: Optional[PerformanceTracker] = None,
         websocket_callback: Optional[callable] = None,
     ) -> None:
@@ -84,6 +85,7 @@ class ProgressiveEvolutionOrchestrator:
         self.config = config
         self.logger = get_vulcan_logger(__name__)
         self.websocket_callback = websocket_callback
+        self.results_manager = results_manager
 
         # Core components
         self.feature_agent = FeatureAgent(config)
@@ -806,6 +808,22 @@ class ProgressiveEvolutionOrchestrator:
         self.population = self.population[: self.population_size]
 
         self._update_best_candidate()
+
+        # Save the updated population to disk
+        if self.results_manager:
+            population_for_saving = [
+                {
+                    "id": cand.feature.name,
+                    "score": cand.score,
+                    "generation": cand.generation,
+                    "parent_id": cand.parent_id,
+                    "mutation_type": cand.mutation_type,
+                    "execution_successful": cand.execution_successful,
+                    "repair_attempts": cand.repair_attempts,
+                }
+                for cand in self.population
+            ]
+            self.results_manager.update_population(population_for_saving)
 
     def _update_best_candidate(self) -> None:
         """Update the best candidate tracker."""
