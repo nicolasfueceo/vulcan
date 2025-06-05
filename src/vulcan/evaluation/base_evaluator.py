@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import structlog
-from sklearn.cluster import KMeans
+from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
 from sklearn.metrics import (
     calinski_harabasz_score,
     davies_bouldin_score,
@@ -19,7 +19,7 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import StandardScaler
 
-from vulcan.types import (
+from vulcan.schemas import (
     DataContext,
     FeatureEvaluation,
     FeatureMetrics,
@@ -194,31 +194,112 @@ class BaseFeatureEvaluator(ABC):
             labels = np.zeros(n_samples) if return_labels else None
             return metrics, labels
 
-        # Determine number of clusters
-        if n_clusters is None:
+        # Determine number of clusters for KMeans/Agglomerative if not DBSCAN
+        # DBSCAN determines its own number of clusters via eps and min_samples.
+        effective_n_clusters = n_clusters
+        if effective_n_clusters is None:
             if self.config.evaluation.clustering_config.n_clusters is not None:
-                n_clusters = self.config.evaluation.clustering_config.n_clusters
+                effective_n_clusters = (
+                    self.config.evaluation.clustering_config.n_clusters
+                )
             else:
                 cluster_range = self.config.evaluation.clustering_config.cluster_range
-                n_clusters = min(max(cluster_range), n_samples - 1)
-        n_clusters = max(min(n_clusters, n_samples - 1), 2)
+                # Ensure n_samples-1 is at least 2 if n_samples is 2 (upper bound for min)
+                upper_bound_k = n_samples - 1 if n_samples > 1 else 2
+                effective_n_clusters = min(max(cluster_range), upper_bound_k)
 
-        # Perform clustering
-        kmeans = KMeans(
-            n_clusters=n_clusters,
-            random_state=self.config.evaluation.random_state,
-            n_init=10,
+        # Ensure effective_n_clusters is at least 2 for algorithms that need it.
+        effective_n_clusters = max(
+            min(effective_n_clusters, n_samples - 1 if n_samples > 1 else 2), 2
         )
-        cluster_labels = kmeans.fit_predict(X_scaled)
+
+        # Perform clustering based on configuration
+        algorithm_name = self.config.evaluation.clustering_config.algorithm
+        self.logger.debug(
+            f"Performing clustering with {algorithm_name}",
+            n_clusters_param=effective_n_clusters,
+            method_param_n_clusters=n_clusters,
+        )
+
+        if algorithm_name == "kmeans":
+            model = KMeans(
+                n_clusters=effective_n_clusters,
+                random_state=self.config.evaluation.random_state,
+                n_init="auto",  # Explicitly set n_init to avoid future warnings, 'auto' is good default for sklearn >= 1.4
+            )
+            cluster_labels = model.fit_predict(X_scaled)
+        elif algorithm_name == "hierarchical":
+            model = AgglomerativeClustering(n_clusters=effective_n_clusters)
+            cluster_labels = model.fit_predict(X_scaled)
+        elif algorithm_name == "dbscan":
+            # DBSCAN parameters (eps, min_samples) might need to be configurable or optimized.
+            dbscan_eps = self.config.evaluation.clustering_config.dbscan_eps
+            dbscan_min_samples = (
+                self.config.evaluation.clustering_config.dbscan_min_samples
+            )
+            self.logger.info(
+                f"Using DBSCAN with eps={dbscan_eps} and min_samples={dbscan_min_samples}"
+            )  # Restoring f-string with direct access
+            model = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
+            cluster_labels = model.fit_predict(X_scaled)
+            # For DBSCAN, the number of clusters found is dynamic.
+            # Update effective_n_clusters for metrics if they require it or for logging.
+            # Number of clusters in labels, ignoring noise if present.
+            n_clusters_found = len(set(cluster_labels)) - (
+                1 if -1 in cluster_labels else 0
+            )
+            self.logger.debug(
+                f"DBSCAN found {n_clusters_found} clusters (excluding noise). Input n_clusters param was {effective_n_clusters}."
+            )
+            if n_clusters_found == 0:  # All points are noise or single cluster
+                self.logger.warning(
+                    "DBSCAN resulted in 0 clusters (all noise or one cluster). Metrics might be poor."
+                )
+                # To prevent errors in metrics expecting >1 cluster, we might need to handle this.
+                # For now, silhouette_score handles 1 cluster by raising error, so we need at least 2 or specific handling.
+                # If n_clusters_found is 0 or 1, silhouette_score will fail. Let's ensure labels are not all same or all -1.
+                if len(set(cluster_labels)) <= 1:  # all noise or all same cluster
+                    metrics = {
+                        "silhouette_score": 0.0,
+                        "calinski_harabasz": 0.0,
+                        "davies_bouldin": 1.0,
+                    }
+                    return metrics, cluster_labels if return_labels else (metrics, None)
+        else:
+            self.logger.warning(
+                f"Unknown clustering algorithm: {algorithm_name}. Defaulting to KMeans."
+            )
+            model = KMeans(
+                n_clusters=effective_n_clusters,
+                random_state=self.config.evaluation.random_state,
+                n_init="auto",
+            )
+            cluster_labels = model.fit_predict(X_scaled)
 
         # Compute metrics
-        metrics = {
-            "silhouette_score": float(silhouette_score(X_scaled, cluster_labels)),
-            "calinski_harabasz": float(
-                calinski_harabasz_score(X_scaled, cluster_labels)
-            ),
-            "davies_bouldin": float(davies_bouldin_score(X_scaled, cluster_labels)),
-        }
+        # Ensure there's more than 1 cluster for silhouette, calinski, davies_bouldin
+        num_unique_labels = len(set(cluster_labels)) - (
+            1 if -1 in cluster_labels and algorithm_name == "dbscan" else 0
+        )
+        if num_unique_labels < 2:
+            self.logger.warning(
+                "Clustering resulted in {num_unique_labels} unique cluster(s) for algorithm {algorithm_name}. Silhouette, Calinski-Harabasz, and Davies-Bouldin scores cannot be computed or will be default/worst.",
+                labels_set=set(cluster_labels),
+            )
+            # Default scores for invalid clustering for these metrics
+            metrics = {
+                "silhouette_score": 0.0,  # Or specific non-computable value if preferred
+                "calinski_harabasz": 0.0,
+                "davies_bouldin": 10.0,  # Higher is worse, so a large value
+            }
+        else:
+            metrics = {
+                "silhouette_score": float(silhouette_score(X_scaled, cluster_labels)),
+                "calinski_harabasz": float(
+                    calinski_harabasz_score(X_scaled, cluster_labels)
+                ),
+                "davies_bouldin": float(davies_bouldin_score(X_scaled, cluster_labels)),
+            }
 
         if return_labels:
             return metrics, cluster_labels

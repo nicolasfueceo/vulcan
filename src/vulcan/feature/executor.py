@@ -2,7 +2,9 @@
 
 from typing import Any, Dict, List
 
-from vulcan.types import VulcanConfig
+from vulcan.schemas import (
+    VulcanConfig,
+)
 from vulcan.utils import get_vulcan_logger
 
 logger = get_vulcan_logger(__name__)

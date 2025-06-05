@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from statistics import mean, stdev
 from typing import Any, Dict, List, Optional
 
-from vulcan.types import FeatureEvaluation
+from vulcan.schemas import (
+    FeatureEvaluation,
+)
 from vulcan.utils import get_vulcan_logger
 
 logger = get_vulcan_logger(__name__)

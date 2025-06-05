@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Union
 
 import structlog
 
-from vulcan.types import VulcanConfig
+from vulcan.schemas import VulcanConfig
 
 logger = structlog.get_logger(__name__)
 

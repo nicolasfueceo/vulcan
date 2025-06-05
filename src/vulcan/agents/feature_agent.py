@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Intelligent feature generation agent for VULCAN system."""
+"""Feature generation agent for VULCAN system."""
 
 import os
 import re
@@ -10,14 +10,14 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
-from vulcan.types import (
+from vulcan.schemas import (
     ActionContext,
     DataContext,
+    EvolutionAction,
     FeatureDefinition,
     FeatureGenerationResponse,
     FeatureType,
     FeatureTypeEnum,
-    MCTSAction,
     VulcanConfig,
 )
 
@@ -70,7 +70,9 @@ For hybrid features: This will be handled by the executor with proper LLM integr
 
 IMPORTANT: Generate features that are DIFFERENT from existing features. Avoid simple variations of the same concept."""
 
-FEATURE_GENERATION_USER_PROMPT = """Current Context:
+FEATURE_GENERATION_USER_PROMPT = """Before generating the feature, list 2-3 different strategies to derive a new user feature. Then select the most promising one and explain why. Finally, implement it.
+
+Current Context:
 - Action: {action}
 - Current features: {current_features}
 - Performance history: {performance_summary}
@@ -104,7 +106,7 @@ DIVERSITY GUIDELINES:
 {format_instructions}"""
 
 ACTION_SPECIFIC_PROMPTS = {
-    MCTSAction.ADD: """
+    EvolutionAction.GENERATE_NEW: """
 You are ADDING a new feature to the existing set. Focus on:
 - Complementing existing features
 - Filling gaps in user representation  
@@ -119,7 +121,7 @@ result = df.groupby('user_id')[column].operation()
 result = computed_feature_series
 ```
 """,
-    MCTSAction.MUTATE: """
+    EvolutionAction.MUTATE_EXISTING: """
 You are MUTATING an existing feature: {{target_feature}}
 Current implementation: {{target_implementation}}
 Focus on:
@@ -127,29 +129,6 @@ Focus on:
 - Adjusting parameters or thresholds
 - Enhancing the feature extraction method
 - Fixing any issues in the current implementation
-
-MANDATORY: Your implementation must set 'result' variable.
-""",
-    MCTSAction.REPLACE: """
-You are REPLACING the worst performing feature: {{target_feature}}
-Current implementation: {{target_implementation}}
-Focus on:
-- Creating a better alternative
-- Addressing the limitations of the replaced feature
-- Maintaining or improving performance
-- Using different columns or operations
-
-MANDATORY: Your implementation must set 'result' variable.
-""",
-    MCTSAction.COMBINE: """
-You are COMBINING two features: {{feature_1}} and {{feature_2}}
-Current implementations:
-Feature 1: {{implementation_1}}
-Feature 2: {{implementation_2}}
-Focus on:
-- Creating a composite feature that captures both aspects
-- Reducing feature redundancy
-- Improving overall representation
 
 MANDATORY: Your implementation must set 'result' variable.
 """,
@@ -253,7 +232,13 @@ class FeatureAgent(BaseAgent):
             action_context = context["action_context"]
 
             # Decide on the action to take
-            action = await self._decide_action(action_context, data_context)
+            action = context.get("action_to_perform")
+            if not isinstance(action, EvolutionAction):
+                self.logger.error(
+                    "Action not provided or invalid in context for FeatureAgent.execute",
+                    received_action=action,
+                )
+                pass
 
             # Generate feature based on action
             feature = await self._generate_feature(action, action_context, data_context)
@@ -279,54 +264,16 @@ class FeatureAgent(BaseAgent):
             self.logger.error("Feature generation failed", error=str(e))
             return {"error": f"Feature generation failed: {str(e)}"}
 
-    async def _decide_action(
-        self,
-        action_context: ActionContext,
-        data_context: DataContext,
-    ) -> MCTSAction:
-        """Decide which action to take based on current context.
-
-        Args:
-            action_context: Action context.
-            data_context: Data context.
-
-        Returns:
-            MCTS action to take.
-        """
-        # Simple heuristic for action selection
-        feature_count = len(action_context.current_features.features)
-
-        if feature_count == 0:
-            return MCTSAction.ADD
-        elif feature_count < 3:
-            return MCTSAction.ADD
-        else:
-            # For more features, use performance history to decide
-            if action_context.performance_history:
-                recent_performance = action_context.performance_history[-3:]
-                avg_performance = sum(
-                    p.overall_score for p in recent_performance
-                ) / len(recent_performance)
-
-                if avg_performance < 0.3:
-                    return MCTSAction.REPLACE
-                elif feature_count >= 5:
-                    return MCTSAction.COMBINE
-                else:
-                    return MCTSAction.MUTATE
-            else:
-                return MCTSAction.ADD
-
     async def _generate_feature(
         self,
-        action: MCTSAction,
+        action: EvolutionAction,
         action_context: ActionContext,
         data_context: DataContext,
     ) -> Optional[FeatureDefinition]:
         """Generate a feature based on the specified action.
 
         Args:
-            action: MCTS action to take.
+            action: EvolutionAction to take.
             action_context: Action context.
             data_context: Data context.
 
@@ -344,165 +291,126 @@ class FeatureAgent(BaseAgent):
 
     async def _generate_llm_feature(
         self,
-        action: MCTSAction,
+        action: EvolutionAction,
         action_context: ActionContext,
         data_context: DataContext,
     ) -> Optional[FeatureDefinition]:
-        """Generate feature using LangChain structured output.
-
-        Args:
-            action: MCTS action to take.
-            action_context: Action context.
-            data_context: Data context.
-
-        Returns:
-            Generated feature definition.
-        """
-        generation_details = {
-            "action": action.value,
-            "current_feature_count": len(action_context.current_features.features),
-            # Consider adding current_generation if available in action_context or passed through
-        }
-        self.logger.info("Attempting LLM feature generation", **generation_details)
-
-        try:
-            # Prepare context for LLM
-            current_features = [
-                f.name for f in action_context.current_features.features
-            ]
-
-            # Create detailed feature descriptions for diversity
-            existing_features_detail = []
-            for feature in action_context.current_features.features:
-                detail = f"- {feature.name}: {feature.description}"
-                if feature.code:
-                    # Extract key operations from code
-                    if "groupby" in feature.code:
-                        detail += " (uses groupby)"
-                    if "mean()" in feature.code:
-                        detail += " (calculates mean)"
-                    elif "std()" in feature.code or "var()" in feature.code:
-                        detail += " (calculates variance/std)"
-                    elif "count()" in feature.code or "size()" in feature.code:
-                        detail += " (counts items)"
-                    if "rating" in feature.code:
-                        detail += " (based on ratings)"
-                    elif "author" in feature.code:
-                        detail += " (based on authors)"
-                    elif "title" in feature.code:
-                        detail += " (based on titles)"
-                existing_features_detail.append(detail)
-
-            existing_features_str = (
-                "\n".join(existing_features_detail)
-                if existing_features_detail
-                else "No existing features yet"
-            )
-
-            performance_summary = self._summarize_performance(
-                action_context.performance_history
-            )
-
-            # Get action-specific prompt
-            action_prompt = ACTION_SPECIFIC_PROMPTS[action]
-
-            # Add action-specific context
-            if action == MCTSAction.MUTATE:
-                target_feature = action_context.get_worst_performing_feature()
-                if target_feature:
-                    target_impl = self._get_feature_implementation(
-                        target_feature, action_context
-                    )
-                    action_prompt = action_prompt.replace(
-                        "{{target_feature}}", target_feature
-                    ).replace("{{target_implementation}}", target_impl)
-            elif action == MCTSAction.REPLACE:
-                target_feature = action_context.get_worst_performing_feature()
-                if target_feature:
-                    target_impl = self._get_feature_implementation(
-                        target_feature, action_context
-                    )
-                    action_prompt = action_prompt.replace(
-                        "{{target_feature}}", target_feature
-                    ).replace("{{target_implementation}}", target_impl)
-            elif action == MCTSAction.COMBINE:
-                features = action_context.current_features.features
-                if len(features) >= 2:
-                    action_prompt = (
-                        action_prompt.replace("{{feature_1}}", features[0].name)
-                        .replace("{{feature_2}}", features[1].name)
-                        .replace(
-                            "{{implementation_1}}",
-                            features[0].code
-                            or features[0].llm_prompt
-                            or "No implementation",
-                        )
-                        .replace(
-                            "{{implementation_2}}",
-                            features[1].code
-                            or features[1].llm_prompt
-                            or "No implementation",
-                        )
-                    )
-
-            # Get format instructions from parser
-            parser = JsonOutputParser(pydantic_object=FeatureGenerationResponse)
-            format_instructions = parser.get_format_instructions()
-
-            # Log the prompt for auditing
-            self.logger.info(
-                "Sending prompt to LLM for feature generation",
-                action=action.value,
-                model=self.config.llm.model_name,
-                temperature=self.config.llm.temperature,
-                max_tokens=self.config.llm.max_tokens,
-                # Prompt content itself is too large for a single log line;
-                # refer to saved artifacts if FeatureAgent has callbacks for that.
-                prompt_artifact_info="Full prompt details saved via callback if configured.",
-            )
-
-            # Invoke the structured chain
-            response = await self.feature_chain(
-                {
-                    "action": action.value,
-                    "current_features": current_features,
-                    "performance_summary": performance_summary,
-                    "data_schema": list(data_context.data_schema.keys()),
-                    "text_columns": data_context.text_columns,
-                    "n_users": data_context.n_users,
-                    "n_items": data_context.n_items,
-                    "sparsity": data_context.sparsity,
-                    "action_specific_prompt": action_prompt,
-                    "format_instructions": format_instructions,
-                    "existing_features_detail": existing_features_str,
-                }
-            )
-
-            # Log the structured response
-            self.logger.info(
-                "Received structured LLM response",
-                action=action.value,
-                feature_name=response.get("feature_name"),
-                feature_type=response.get("feature_type"),
-                # Full response content is too large; refer to saved artifacts.
-                response_artifact_info="Full response details saved via callback if configured.",
-            )
-            self.logger.debug(
-                "Full structured LLM response details", response_details=response
-            )  # Keep debug for full details
-
-            # Convert to FeatureDefinition
-            feature = self._convert_response_to_feature(response)
-            return feature
-
-        except Exception as e:
-            self.logger.error(
-                "Structured LLM feature generation failed",
-                error=str(e),
-                action=action.value,
-                exc_info=True,
+        """Generate a feature using LLM with structured output."""
+        if not self.use_llm or not self.feature_chain:
+            self.logger.warning(
+                "LLM not configured or chain not initialized, skipping LLM generation."
             )
             return None
+
+        parser = JsonOutputParser(pydantic_object=FeatureGenerationResponse)
+        format_instructions = parser.get_format_instructions()
+
+        # Prepare context for the prompt
+        current_features_summary = (
+            ", ".join([f.name for f in action_context.current_features.features])
+            if action_context.current_features.features
+            else "No features yet"
+        )
+        performance_summary = self._summarize_performance(
+            action_context.performance_history
+        )
+        data_schema_summary = ", ".join(data_context.data_schema.keys())
+        text_columns_summary = ", ".join(data_context.text_columns)
+
+        # Apply prompt memory configuration
+        features_for_prompt = action_context.current_features.features
+        num_original_features = len(features_for_prompt)
+        prompt_memory_type = self.config.llm.prompt_memory_type
+        prompt_memory_max = self.config.llm.prompt_memory_max_features
+
+        if (
+            prompt_memory_type == "limited"
+            and prompt_memory_max is not None
+            and prompt_memory_max > 0
+        ):
+            if num_original_features > prompt_memory_max:
+                features_for_prompt = features_for_prompt[-prompt_memory_max:]
+                self.logger.info(
+                    "Applying 'limited' prompt memory.",
+                    action=action.value,
+                    max_features=prompt_memory_max,
+                    features_included=len(features_for_prompt),
+                    features_omitted=num_original_features - len(features_for_prompt),
+                )
+        elif prompt_memory_type == "none":
+            features_for_prompt = []
+            self.logger.info(
+                "Applying 'none' prompt memory. No existing features included in prompt.",
+                action=action.value,
+                features_omitted=num_original_features,
+            )
+        else:  # full or limited with no max_features set (effectively full)
+            self.logger.info(
+                "Applying 'full' prompt memory. All existing features included in prompt.",
+                action=action.value,
+                features_included=num_original_features,
+            )
+
+        existing_features_detail_str = "\n".join(
+            [
+                "- Name: {f.name}, Type: {f.feature_type}, Desc: {f.description}, Code: {f.code_snippet_and_dependencies}"
+                for f in features_for_prompt  # Use the (potentially) filtered list
+            ]
+        )
+        if not existing_features_detail_str:
+            existing_features_detail_str = (
+                "No existing features included in prompt based on memory settings."
+            )
+
+        action_specific_prompt_str = self._prepare_action_specific_llm_prompt(
+            action, action_context, ACTION_SPECIFIC_PROMPTS[action]
+        )
+
+        # Log the prompt for auditing
+        self.logger.info(
+            "Sending prompt to LLM for feature generation",
+            action=action.value,
+            model=self.config.llm.model_name,
+            temperature=self.config.llm.temperature,
+            max_tokens=self.config.llm.max_tokens,
+            # Prompt content itself is too large for a single log line;
+            # refer to saved artifacts if FeatureAgent has callbacks for that.
+            prompt_artifact_info="Full prompt details saved via callback if configured.",
+        )
+
+        # Invoke the structured chain
+        response = await self.feature_chain(
+            {
+                "action": action.value,
+                "current_features": current_features_summary,
+                "performance_summary": performance_summary,
+                "data_schema": data_schema_summary,
+                "text_columns": text_columns_summary,
+                "n_users": data_context.n_users,
+                "n_items": data_context.n_items,
+                "sparsity": data_context.sparsity,
+                "action_specific_prompt": action_specific_prompt_str,
+                "format_instructions": format_instructions,
+                "existing_features_detail": existing_features_detail_str,
+            }
+        )
+
+        # Log the structured response
+        self.logger.info(
+            "Received structured LLM response",
+            action=action.value,
+            feature_name=response.get("feature_name"),
+            feature_type=response.get("feature_type"),
+            # Full response content is too large; refer to saved artifacts.
+            response_artifact_info="Full response details saved via callback if configured.",
+        )
+        self.logger.debug(
+            "Full structured LLM response details", response_details=response
+        )  # Keep debug for full details
+
+        # Convert to FeatureDefinition
+        feature = self._convert_response_to_feature(response)
+        return feature
 
     def _convert_response_to_feature(
         self, response: Dict[str, Any]
@@ -542,6 +450,9 @@ class FeatureAgent(BaseAgent):
                     description=response["description"],
                     code=validated_code,
                     dependencies=response.get("dependencies", []),
+                    llm_chain_of_thought_reasoning=response.get(
+                        "chain_of_thought_reasoning"
+                    ),
                 )
             elif feature_type == FeatureType.LLM_BASED:
                 return FeatureDefinition(
@@ -551,6 +462,9 @@ class FeatureAgent(BaseAgent):
                     llm_prompt=response["implementation"],
                     text_columns=response.get("text_columns", ["title", "authors"]),
                     dependencies=response.get("dependencies", []),
+                    llm_chain_of_thought_reasoning=response.get(
+                        "chain_of_thought_reasoning"
+                    ),
                 )
             else:  # HYBRID
                 return FeatureDefinition(
@@ -561,6 +475,9 @@ class FeatureAgent(BaseAgent):
                     text_columns=response.get("text_columns", ["title"]),
                     postprocessing_code="result = llm_df['llm_value'].astype(float)",
                     dependencies=response.get("dependencies", []),
+                    llm_chain_of_thought_reasoning=response.get(
+                        "chain_of_thought_reasoning"
+                    ),
                 )
 
         except Exception as e:
@@ -928,14 +845,14 @@ class FeatureAgent(BaseAgent):
 
     def _prepare_action_specific_llm_prompt(
         self,
-        action: MCTSAction,
+        action: EvolutionAction,
         action_context: ActionContext,
         base_action_prompt_template: str,
     ) -> str:
         """Prepares the action-specific part of the LLM prompt by filling placeholders (e.g., {{target_feature}}).
 
         Args:
-            action: The MCTSAction (ADD, MUTATE, REPLACE, COMBINE) being performed.
+            action: The EvolutionAction (GENERATE_NEW, MUTATE_EXISTING) being performed.
             action_context: The context for the action, including current features and potential targets.
             base_action_prompt_template: The basic string template for the action prompt (from ACTION_SPECIFIC_PROMPTS).
 
@@ -950,13 +867,9 @@ class FeatureAgent(BaseAgent):
         target_feature_name: Optional[str] = None
         target_implementation: str = "N/A (Not Applicable or Not Found)"  # Default placeholder if no specific impl is found
 
-        if action in [MCTSAction.MUTATE, MCTSAction.REPLACE]:
-            # Determine the target feature for mutation or replacement.
-            # ProgressiveEvolutionOrchestrator might set `mutation_target` in the agent_context,
-            # which should be passed into ActionContext if available.
-
+        if action == EvolutionAction.MUTATE_EXISTING:
+            # Determine the target feature for mutation.
             current_features_list = action_context.current_features.features
-            # Prefer an explicit target from ActionContext if provided (e.g., from repair or specific mutation call)
             explicit_target_name = getattr(
                 action_context, "target_feature_name", None
             ) or getattr(action_context, "mutation_target", None)
@@ -968,19 +881,14 @@ class FeatureAgent(BaseAgent):
                 self.logger.info(
                     f"Using explicit target for {action.value}: {target_feature_name}"
                 )
-            elif (
-                current_features_list
-            ):  # If no explicit target, and population exists, pick one
+            elif current_features_list:
                 # Fallback: use the worst-performing feature if no explicit target is set.
-                # Note: get_worst_performing_feature() needs to be implemented robustly in ActionContext or rely on orchestrator to provide it.
-                # For now, we assume ActionContext.get_worst_performing_feature() might return a name.
                 target_feature_name = action_context.get_worst_performing_feature()
                 if target_feature_name:
                     self.logger.info(
                         f"No explicit target for {action.value}, selected worst feature: '{target_feature_name}' from context."
                     )
                 else:
-                    # If worst can't be determined (e.g. all equal, or method not fully implemented), pick the last one as a simple heuristic.
                     target_feature_name = current_features_list[-1].name
                     self.logger.warning(
                         f"Could not determine worst feature for {action.value}; picking last feature '{target_feature_name}' as target."
@@ -1005,84 +913,19 @@ class FeatureAgent(BaseAgent):
                 f"Prepared {action.value} prompt targeting: '{target_feature_name}'"
             )
 
-        elif action == MCTSAction.COMBINE:
-            features_to_combine_defs: List[FeatureDefinition] = []
-            # ActionContext could ideally specify which features to combine via a field like `features_to_combine_names: List[str]`
-            explicit_combine_targets = getattr(
-                action_context, "features_to_combine_names", None
-            )
-
-            if explicit_combine_targets and len(explicit_combine_targets) >= 2:
-                for name in explicit_combine_targets[
-                    :2
-                ]:  # Take the first two specified
-                    feat_def = action_context.current_features.get_feature_by_name(name)
-                    if feat_def:
-                        features_to_combine_defs.append(feat_def)
-                if len(features_to_combine_defs) >= 2:
-                    self.logger.info(
-                        f"Using explicit targets for COMBINE: {[f.name for f in features_to_combine_defs]}"
-                    )
-                else:
-                    features_to_combine_defs = []  # Reset if not enough valid names found
-
-            if (
-                not features_to_combine_defs
-                and len(action_context.current_features.features) >= 2
-            ):
-                # Fallback: combine the first two available features as a simple heuristic if no explicit ones found/valid.
-                features_to_combine_defs = action_context.current_features.features[:2]
-                self.logger.info(
-                    f"No explicit/valid targets for COMBINE, selected first two available: {[f.name for f in features_to_combine_defs]}"
-                )
-
-            if len(features_to_combine_defs) >= 2:
-                feature_1 = features_to_combine_defs[0]
-                feature_2 = features_to_combine_defs[1]
-                impl_1 = self._get_feature_implementation(
-                    feature_1.name, action_context
-                )
-                impl_2 = self._get_feature_implementation(
-                    feature_2.name, action_context
-                )
-
-                action_prompt = (
-                    action_prompt.replace("{{feature_1}}", feature_1.name)
-                    .replace("{{feature_2}}", feature_2.name)
-                    .replace("{{implementation_1}}", impl_1)
-                    .replace("{{implementation_2}}", impl_2)
-                )
-                self.logger.debug(
-                    f"Prepared COMBINE prompt for features: '{feature_1.name}' and '{feature_2.name}'"
-                )
-            else:
-                self.logger.warning(
-                    "Not enough features available or specified to COMBINE. Using generic placeholders in prompt."
-                )
-                # Generic fallback placeholders if not enough features are available
-                action_prompt = (
-                    action_prompt.replace("{{feature_1}}", "user_avg_rating (example)")
-                    .replace("{{feature_2}}", "user_rating_count (example)")
-                    .replace(
-                        "{{implementation_1}}", "df.groupby('user_id')['rating'].mean()"
-                    )
-                    .replace(
-                        "{{implementation_2}}",
-                        "df.groupby('user_id')['rating'].count()",
-                    )
-                )
+        action_prompt = action_prompt
         return action_prompt
 
     def _generate_heuristic_feature(
         self,
-        action: MCTSAction,
+        action: EvolutionAction,
         action_context: ActionContext,
         data_context: DataContext,
     ) -> Optional[FeatureDefinition]:
         """Generate feature using heuristic rules when LLM is not available.
 
         Args:
-            action: MCTS action to take.
+            action: EvolutionAction to take.
             action_context: Action context.
             data_context: Data context.
 
@@ -1092,7 +935,7 @@ class FeatureAgent(BaseAgent):
         # Simple heuristic feature generation
         feature_count = len(action_context.current_features.features)
 
-        if action == MCTSAction.ADD:
+        if action == EvolutionAction.GENERATE_NEW:
             # Generate basic statistical features
             if feature_count == 0:
                 return FeatureDefinition(

@@ -1,15 +1,19 @@
 """Progressive Feature Evolution Orchestrator for VULCAN."""
 
+import json
 import logging
+import math
 import random
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import Enum
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
+from torch.utils.tensorboard import SummaryWriter
 
 # Attempt to import for plotting, but make it optional
 try:
@@ -22,26 +26,19 @@ except ImportError:
 from vulcan.agents import FeatureAgent
 from vulcan.evaluation.recommendation_evaluator import RecommendationEvaluator
 from vulcan.features import FeatureExecutor
-from vulcan.types import (
+from vulcan.schemas import (
     ActionContext,
     DataContext,
+    EvolutionAction,
     FeatureDefinition,
     FeatureEvaluation,
     FeatureSet,
     FeatureType,
-    MCTSAction,
     VulcanConfig,
 )
 from vulcan.utils import ExperimentTracker, PerformanceTracker, get_vulcan_logger
 
 logger = structlog.get_logger(__name__)
-
-
-class EvolutionAction(Enum):
-    """Actions available to the RL agent."""
-
-    GENERATE_NEW = "generate_new"
-    MUTATE_EXISTING = "mutate_existing"
 
 
 @dataclass
@@ -56,6 +53,7 @@ class FeatureCandidate:
     execution_successful: bool = True
     error_message: Optional[str] = None
     repair_attempts: int = 0
+    evaluation_result: Optional[FeatureEvaluation] = None
 
 
 @dataclass
@@ -81,13 +79,11 @@ class ProgressiveEvolutionOrchestrator:
         config: VulcanConfig,
         performance_tracker: Optional[PerformanceTracker] = None,
         websocket_callback: Optional[callable] = None,
-        tensorboard_writer: Optional[Any] = None,  # Added for TensorBoard
     ) -> None:
         """Initialize the progressive evolution orchestrator."""
         self.config = config
         self.logger = get_vulcan_logger(__name__)
         self.websocket_callback = websocket_callback
-        self.tensorboard_writer = tensorboard_writer  # Store TensorBoard writer
 
         # Core components
         self.feature_agent = FeatureAgent(config)
@@ -102,12 +98,12 @@ class ProgressiveEvolutionOrchestrator:
 
         # Evolution parameters
         # Note: Parameters like population_size, generation_size, etc., are sourced from
-        # the config.mcts section. While "mcts" might be a legacy naming convention,
-        # these parameters are still fundamental to the progressive evolution algorithm.
-        self.population_size = getattr(config.mcts, "population_size", 50)
-        self.generation_size = getattr(config.mcts, "generation_size", 20)
-        self.max_repair_attempts = getattr(config.mcts, "max_repair_attempts", 3)
-        self.mutation_rate = getattr(config.mcts, "mutation_rate", 0.3)
+        # the config.experiment section now.
+        self.population_size = self.config.experiment.population_size
+        self.generation_size = self.config.experiment.generation_size
+        self.max_repair_attempts = self.config.experiment.max_repair_attempts
+        self.mutation_rate = self.config.experiment.mutation_rate
+        # UCB exploration constant will be added later as per step 2 instructions
 
         # Population management
         self.population: List[FeatureCandidate] = []
@@ -119,9 +115,63 @@ class ProgressiveEvolutionOrchestrator:
         self.current_generation = 0
         self.total_features_generated = 0
 
+        # UCB statistics for two arms: 0 = GENERATE_NEW, 1 = MUTATE_EXISTING
+        self.ucb_counts = [0, 0]  # number of times each arm was played
+        self.ucb_values = [0.0, 0.0]  # cumulative reward for each arm
+        self.total_ucb_pulls = 0  # total pulls so far
+        self.ucb_exploration_const = self.config.experiment.ucb_exploration_constant
+
         # Tracking
         self.best_score = 0.0
         self.best_candidate: Optional[FeatureCandidate] = None
+
+        # Create experiment folder, TensorBoard writer, and metadata.json
+        # Ensure experiments_root exists (taken from config.experiment.output_dir)
+        exp_root_path = Path(self.config.experiment.output_dir)
+        exp_root_path.mkdir(
+            parents=True, exist_ok=True
+        )  # Ensure base experiments dir exists
+
+        self.experiment_id = f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"  # Added UUID for more uniqueness
+        exp_dir_path = exp_root_path / self.experiment_id
+        exp_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Write metadata.json
+        metadata_path = exp_dir_path / "metadata.json"
+        try:
+            # Convert Pydantic config to dict for JSON serialization
+            config_dict = self.config.dict()
+            with open(metadata_path, "w") as f:
+                json.dump(
+                    {
+                        "experiment_id": self.experiment_id,
+                        "config": config_dict,  # Store the whole config
+                        "start_time": str(datetime.utcnow()),
+                        "status": "initialized",  # Initial status
+                    },
+                    f,
+                    indent=2,
+                )
+            self.logger.info(f"Metadata saved to {metadata_path}")
+        except Exception as e:
+            self.logger.error(
+                f"Failed to write metadata.json to {metadata_path}", error=str(e)
+            )
+
+        # TensorBoard logging subfolder:
+        self.tensorboard_logdir = exp_dir_path / "tensorboard"
+        self.tensorboard_logdir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.tb_writer = SummaryWriter(log_dir=str(self.tensorboard_logdir))
+            self.logger.info(
+                f"TensorBoard writer initialized. Log directory: {self.tensorboard_logdir}"
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Failed to initialize TensorBoard SummaryWriter at {self.tensorboard_logdir}",
+                error=str(e),
+            )
+            self.tb_writer = None  # Ensure tb_writer is None if init fails
 
     async def initialize(self) -> bool:
         """Initialize all components."""
@@ -184,6 +234,25 @@ class ProgressiveEvolutionOrchestrator:
                 # Update RL rewards
                 self._update_action_rewards(action, gen_stats)
 
+                # Update UCB statistics
+                # Map EvolutionAction back to arm index (0 for GENERATE_NEW, 1 for MUTATE_EXISTING)
+                chosen_arm_for_ucb_update = (
+                    0 if action == EvolutionAction.GENERATE_NEW else 1
+                )
+                # Use the best score from the generation as the reward for the chosen arm
+                # If no successful features, best_score might be low or an initial value, which is fine for UCB.
+                reward_for_ucb = gen_stats.best_score
+
+                self.ucb_counts[chosen_arm_for_ucb_update] += 1
+                self.total_ucb_pulls += 1
+                self.ucb_values[chosen_arm_for_ucb_update] += reward_for_ucb
+                self.logger.info(
+                    f"UCB stats updated for arm {chosen_arm_for_ucb_update} ({action.value}): "
+                    f"count={self.ucb_counts[chosen_arm_for_ucb_update]}, "
+                    f"value_sum={self.ucb_values[chosen_arm_for_ucb_update]:.4f}, "
+                    f"reward_this_gen={reward_for_ucb:.4f}, total_pulls={self.total_ucb_pulls}"
+                )
+
                 # Send real-time updates
                 await self._send_evolution_update()
 
@@ -208,7 +277,7 @@ class ProgressiveEvolutionOrchestrator:
             # Optional: Save plot of score curve if matplotlib is available and TensorBoard is not used
             if (
                 MATPLOTLIB_AVAILABLE
-                and not self.tensorboard_writer
+                and not self.tb_writer
                 and self.config.experiment.save_artifacts
             ):
                 try:
@@ -275,39 +344,56 @@ class ProgressiveEvolutionOrchestrator:
             self.logger.error("Evolution failed", error=str(e))
             raise
 
-    def _choose_action(self) -> EvolutionAction:
-        """Choose action using an epsilon-greedy RL policy.
-
-        The policy balances exploration and exploitation:
-        - Exploration: With a probability epsilon, a random action (generate new or mutate existing)
-          is chosen. Epsilon decays over generations, reducing random exploration as the
-          evolution progresses.
-        - Exploitation: With probability 1-epsilon, the action with the highest average historical
-          reward is chosen.
-        If mutation is chosen but the population is empty, it defaults to generating a new feature.
+    def _choose_action_ucb(self) -> int:
         """
-        # Epsilon-greedy exploration
-        epsilon = max(0.1, 1.0 - (self.current_generation / 50))  # Decay exploration
+        Return 0 for GenerateNew, 1 for MutateExisting, based on UCB1 formula:
+        UCB(a) = avg_reward(a) + c * sqrt(ln N / n_a)
+        Returns an integer: 0 for GENERATE_NEW, 1 for MUTATE_EXISTING.
+        """
+        # If any arm has never been tried, try it first:
+        for arm in (0, 1):
+            if self.ucb_counts[arm] == 0:
+                self.logger.info(f"UCB: Choosing arm {arm} (untried)")
+                return arm
 
-        if (
-            random.random() < epsilon
-            or len(self.action_rewards[EvolutionAction.GENERATE_NEW]) == 0
-        ):
-            # Explore: random action
-            action = random.choice(list(EvolutionAction))
-        else:
-            # Exploit: choose action with highest average reward
-            action_scores = {}
-            for action_type in EvolutionAction:
-                rewards = self.action_rewards[action_type]
-                action_scores[action_type] = (
-                    sum(rewards) / len(rewards) if rewards else 0.0
-                )
+        total = self.total_ucb_pulls
+        ucb_scores = []
+        for arm in (0, 1):
+            avg_reward = self.ucb_values[arm] / self.ucb_counts[arm]
+            bonus = self.ucb_exploration_const * math.sqrt(
+                math.log(total) / self.ucb_counts[arm]
+            )
+            ucb_scores.append(avg_reward + bonus)
+            self.logger.debug(
+                f"UCB Arm {arm}: avg_reward={avg_reward:.4f}, bonus={bonus:.4f}, score={ucb_scores[arm]:.4f}"
+            )
 
-            action = max(action_scores, key=action_scores.get)
+        # Choose the arm with the higher UCB score
+        chosen_arm = 0 if ucb_scores[0] >= ucb_scores[1] else 1
+        self.logger.info(
+            f"UCB: Scores GenNew={ucb_scores[0]:.4f}, MutEx={ucb_scores[1]:.4f}. Chosen arm: {chosen_arm}"
+        )
+        return chosen_arm
+
+    def _choose_action(self) -> EvolutionAction:
+        """Choose action using Upper Confidence Bound (UCB1) policy."""
+
+        chosen_arm_index = self._choose_action_ucb()  # Returns 0 or 1
+
+        if chosen_arm_index == 0:
+            action = EvolutionAction.GENERATE_NEW
+        else:  # chosen_arm_index == 1
+            action = EvolutionAction.MUTATE_EXISTING
+
+        self.logger.info(
+            f"UCB translated arm {chosen_arm_index} to action: {action.value}"
+        )
 
         # Can't mutate if population is empty
         if action == EvolutionAction.MUTATE_EXISTING and len(self.population) == 0:
+            self.logger.warning(
+                "UCB chose MUTATE_EXISTING, but population is empty. Defaulting to GENERATE_NEW."
+            )
             action = EvolutionAction.GENERATE_NEW
 
         return action
@@ -356,24 +442,25 @@ class ProgressiveEvolutionOrchestrator:
                 action_context = ActionContext(
                     current_features=self._get_population_features(),
                     performance_history=self._get_recent_evaluations(),
-                    available_actions=[MCTSAction.ADD],  # Use proper MCTSAction enum
+                    available_actions=[EvolutionAction.GENERATE_NEW],
                     max_features=count,
                     max_cost=100.0,
                 )
 
                 # Generate feature
-                agent_context = {
-                    "data_context": data_context,
-                    "action_context": action_context,
-                    "generation": self.current_generation,
-                    "diversity_pressure": True,
-                }
+                agent_context = dict(
+                    data_context=data_context,
+                    action_context=action_context,
+                    action_to_perform=EvolutionAction.GENERATE_NEW,
+                    generation=self.current_generation,
+                    candidate_index=i,
+                )
 
                 self.logger.info(
                     "Sending prompt to FeatureAgent for new feature",
                     generation=self.current_generation,
                     candidate_index=i,
-                    action=MCTSAction.ADD.value,  # Assuming ADD for new features
+                    action=EvolutionAction.GENERATE_NEW.value,
                 )
                 result = await self.feature_agent.execute(agent_context)
 
@@ -438,30 +525,30 @@ class ProgressiveEvolutionOrchestrator:
                 # Build mutation context with proper FeatureSet
                 parent_feature_set = FeatureSet(
                     features=[parent.feature],
-                    action_taken=MCTSAction.MUTATE,
+                    action_taken=EvolutionAction.MUTATE_EXISTING,
                 )
 
                 action_context = ActionContext(
                     current_features=parent_feature_set,
                     performance_history=self._get_recent_evaluations(),
-                    available_actions=[MCTSAction.MUTATE],  # Use proper MCTSAction enum
+                    available_actions=[EvolutionAction.MUTATE_EXISTING],
                     max_features=1,
                     max_cost=50.0,
                 )
-
-                agent_context = {
-                    "data_context": data_context,
-                    "action_context": action_context,
-                    "parent_feature": parent.feature,
-                    "generation": self.current_generation,
-                    "mutation_target": parent.feature.name,
-                }
+                agent_context = dict(
+                    data_context=data_context,
+                    action_context=action_context,
+                    action_to_perform=EvolutionAction.MUTATE_EXISTING,
+                    generation=self.current_generation,
+                    candidate_index=i,
+                    target_feature_name=parent.feature.name,
+                )
 
                 self.logger.info(
                     "Sending prompt to FeatureAgent for mutating feature",
                     generation=self.current_generation,
                     candidate_index=i,
-                    action=MCTSAction.MUTATE.value,
+                    action=EvolutionAction.MUTATE_EXISTING.value,
                     target_feature_name=parent.feature.name,
                 )
                 result = await self.feature_agent.execute(agent_context)
@@ -538,27 +625,33 @@ class ProgressiveEvolutionOrchestrator:
                     # Evaluate feature performance
                     feature_set = FeatureSet(features=[candidate.feature])
 
-                    evaluation = await self.feature_evaluator.evaluate_feature_set(
+                    eval_result = await self.feature_evaluator.evaluate_feature_set(
                         feature_set=feature_set,
                         feature_results=feature_results,  # Pass actual feature execution results
                         data_context=data_context,
                         iteration=self.current_generation,
                     )
 
-                    candidate.score = evaluation.overall_score
+                    candidate.score = eval_result.score
                     candidate.execution_successful = True
-                    evaluated.append(candidate)
+                    candidate.evaluation_result = (
+                        eval_result  # Store the full evaluation
+                    )
+
+                    # Log and store artifact if W&B enabled (or always if TensorBoard is primary)
+                    if self.experiment_tracker:
+                        self.experiment_tracker.log_feature_evaluation(eval_result)
 
                     log_payload = {
-                        "event": "feature_evaluation_success",
+                        "event_type": "feature_evaluation_success",
                         "generation": self.current_generation,
                         "feature_name": feature_name,
                         "score": candidate.score,
-                        "metrics": evaluation.metrics.dict(),  # Assuming metrics is a Pydantic model
+                        "metrics": eval_result.metrics.dict(),  # Assuming metrics is a Pydantic model
                     }
                     self.logger.info("Feature evaluated successfully", **log_payload)
-                    if self.tensorboard_writer:
-                        self.tensorboard_writer.add_scalar(
+                    if self.tb_writer:
+                        self.tb_writer.add_scalar(
                             f"FeatureScores/{feature_name.replace('_', '/')}",
                             candidate.score,
                             self.current_generation,
@@ -567,9 +660,9 @@ class ProgressiveEvolutionOrchestrator:
                         for (
                             metric_name,
                             metric_value,
-                        ) in evaluation.metrics.dict().items():
+                        ) in eval_result.metrics.dict().items():
                             if isinstance(metric_value, (int, float)):
-                                self.tensorboard_writer.add_scalar(
+                                self.tb_writer.add_scalar(
                                     f"FeatureMetrics/{feature_name.replace('_', '/')}/{metric_name}",
                                     metric_value,
                                     self.current_generation,
@@ -747,7 +840,7 @@ class ProgressiveEvolutionOrchestrator:
         features = [candidate.feature for candidate in self.population]
         return FeatureSet(
             features=features,
-            action_taken=MCTSAction.ADD,  # Default action
+            action_taken=EvolutionAction.GENERATE_NEW,
         )
 
     def _get_recent_evaluations(self) -> List[FeatureEvaluation]:
@@ -759,15 +852,126 @@ class ProgressiveEvolutionOrchestrator:
     ) -> GenerationStats:
         """Record statistics for the current generation."""
         successful = [
-            c for c in candidates if c.execution_successful and hasattr(c, "score")
+            c for c in candidates if c.execution_successful and c.score is not None
         ]
         failed = len(candidates) - len(successful)
-        repaired = sum(c.repair_attempts > 0 for c in candidates)
+        repaired = sum(
+            1 for c in candidates if c.repair_attempts > 0 and c.execution_successful
+        )
 
         avg_score = (
             sum(c.score for c in successful) / len(successful) if successful else 0.0
         )
         best_score_this_gen = max(c.score for c in successful) if successful else 0.0
+
+        # Calculate average clustering and recommendation metrics for successful candidates
+        avg_silhouette = 0.0
+        avg_num_clusters = 0.0
+        avg_ndcg_at_k = 0.0
+        metrics_count = 0
+
+        for cand in successful:
+            if cand.evaluation_result and cand.evaluation_result.metrics:
+                metrics = cand.evaluation_result.metrics
+                avg_silhouette += (
+                    getattr(metrics, "silhouette_score", 0) or 0
+                )  # Handle None
+                avg_num_clusters += (
+                    getattr(metrics, "num_clusters", 0) or 0
+                )  # Handle None
+                avg_ndcg_at_k += (
+                    getattr(metrics, "ndcg_at_k", {}).get("mean", 0) or 0
+                )  # ndcg_at_k might be a dict
+                metrics_count += 1
+
+        if metrics_count > 0:
+            avg_silhouette /= metrics_count
+            avg_num_clusters /= metrics_count
+            avg_ndcg_at_k /= metrics_count
+
+        progress_log_data = {
+            "generation": self.current_generation,
+            "action_taken": action.value,
+            "total_candidates": len(candidates),
+            "successful_features": len(successful),
+            "failed_features": failed,
+            "repaired_features": repaired,
+            "avg_score_this_gen": avg_score,
+            "best_score_this_gen": best_score_this_gen,
+            "current_best_overall_score": self.best_score,
+            "population_size": len(self.population),
+        }
+        self.logger.info("Generation completed", **progress_log_data)
+
+        if self.tb_writer:
+            self.tb_writer.add_scalar(
+                "Generation/AvgScore", avg_score, self.current_generation
+            )
+            self.tb_writer.add_scalar(
+                "Generation/BestScoreThisGen",
+                best_score_this_gen,
+                self.current_generation,
+            )
+            self.tb_writer.add_scalar(
+                "Generation/SuccessfulFeatures",
+                len(successful),
+                self.current_generation,
+            )
+            self.tb_writer.add_scalar(
+                "Generation/FailedFeatures", failed, self.current_generation
+            )
+            self.tb_writer.add_scalar(
+                "Generation/RepairedFeatures", repaired, self.current_generation
+            )
+            self.tb_writer.add_scalar(
+                "Generation/PopulationSize",
+                len(self.population),
+                self.current_generation,
+            )
+            self.tb_writer.add_scalar(
+                "OverallBestScore", self.best_score, self.current_generation
+            )
+            # Log UCB stats
+            self.tb_writer.add_scalar(
+                "UCB/TotalPulls", self.total_ucb_pulls, self.current_generation
+            )
+            self.tb_writer.add_scalar(
+                "UCB/ExplorationConstant",
+                self.ucb_exploration_const,
+                self.current_generation,
+            )
+            for arm_idx, arm_action in enumerate(
+                [EvolutionAction.GENERATE_NEW, EvolutionAction.MUTATE_EXISTING]
+            ):
+                arm_name = arm_action.value
+                self.tb_writer.add_scalar(
+                    f"UCB/Arm_{arm_name}_Pulls",
+                    self.ucb_counts[arm_idx],
+                    self.current_generation,
+                )
+                if self.ucb_counts[arm_idx] > 0:
+                    avg_reward_arm = self.ucb_values[arm_idx] / self.ucb_counts[arm_idx]
+                    self.tb_writer.add_scalar(
+                        f"UCB/Arm_{arm_name}_AvgReward",
+                        avg_reward_arm,
+                        self.current_generation,
+                    )
+
+            # Log average cluster/rec metrics for the generation
+            if metrics_count > 0:  # Only log if we had metrics to average
+                self.tb_writer.add_scalar(
+                    "GenerationMetrics/AvgSilhouette",
+                    avg_silhouette,
+                    self.current_generation,
+                )
+                self.tb_writer.add_scalar(
+                    "GenerationMetrics/AvgNumClusters",
+                    avg_num_clusters,
+                    self.current_generation,
+                )
+                self.tb_writer.add_scalar(
+                    "GenerationMetrics/AvgNDCG", avg_ndcg_at_k, self.current_generation
+                )
 
         stats = GenerationStats(
             generation=self.current_generation,
@@ -776,61 +980,11 @@ class ProgressiveEvolutionOrchestrator:
             failed_features=failed,
             repaired_features=repaired,
             avg_score=avg_score,
-            best_score=best_score_this_gen,  # Best score in *this* generation
+            best_score=best_score_this_gen,
             action_taken=action,
             population_size=len(self.population),
         )
-
         self.generation_history.append(stats)
-
-        # Enhanced logging for progress
-        progress_log_data = {
-            "event": "generation_progress",
-            "generation": self.current_generation,
-            "action_taken": action.value,
-            "candidates_generated": len(candidates),
-            "successful_evaluations": len(successful),
-            "failed_evaluations": failed,
-            "features_repaired": repaired,
-            "avg_score_this_gen": avg_score,
-            "best_score_this_gen": best_score_this_gen,
-            "current_population_size": len(self.population),
-            "overall_best_score": self.best_score,  # Best score found so far across all gens
-            # Consider adding time elapsed for this generation if easily trackable
-        }
-        self.logger.info("Generation completed", **progress_log_data)
-
-        if self.tensorboard_writer:
-            self.tensorboard_writer.add_scalar(
-                "Generation/AvgScore", avg_score, self.current_generation
-            )
-            self.tensorboard_writer.add_scalar(
-                "Generation/BestScoreThisGen",
-                best_score_this_gen,
-                self.current_generation,
-            )
-            self.tensorboard_writer.add_scalar(
-                "Generation/SuccessfulFeatures",
-                len(successful),
-                self.current_generation,
-            )
-            self.tensorboard_writer.add_scalar(
-                "Generation/FailedFeatures", failed, self.current_generation
-            )
-            self.tensorboard_writer.add_scalar(
-                "Generation/RepairedFeatures", repaired, self.current_generation
-            )
-            self.tensorboard_writer.add_scalar(
-                "Generation/PopulationSize",
-                len(self.population),
-                self.current_generation,
-            )
-            self.tensorboard_writer.add_scalar(
-                "OverallBestScore", self.best_score, self.current_generation
-            )
-            # Log action distribution if needed (e.g., using text or histogram)
-            # self.tensorboard_writer.add_text("Generation/ActionTaken", action.value, self.current_generation)
-
         return stats
 
     def _update_action_rewards(
@@ -969,9 +1123,16 @@ class ProgressiveEvolutionOrchestrator:
         }
 
     async def cleanup(self) -> None:
-        """Cleanup resources."""
-        await self.feature_agent.cleanup()
-        await self.feature_executor.cleanup()
-        if hasattr(self.feature_evaluator, "cleanup"):
-            await self.feature_evaluator.cleanup()
+        """Clean up resources."""
+        if self.feature_agent:
+            await self.feature_agent.cleanup()
+        if self.feature_executor:
+            await self.feature_executor.cleanup()
+        # if self.feature_evaluator: # RecommendationEvaluator might not have a cleanup method
+        #     await self.feature_evaluator.cleanup()
+
+        if self.tb_writer:
+            self.tb_writer.close()
+            self.logger.info("TensorBoard writer closed.")
+
         self.logger.info("Progressive Evolution Orchestrator cleaned up")

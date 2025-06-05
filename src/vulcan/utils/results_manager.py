@@ -7,7 +7,9 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 
-from vulcan.types import VulcanConfig
+from vulcan.schemas import (
+    VulcanConfig,
+)
 
 
 class ResultsManager:

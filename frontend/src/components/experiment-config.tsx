@@ -12,9 +12,10 @@ import { Play, Settings } from 'lucide-react'
 interface ExperimentConfigProps {
   onStartExperiment: (config: any) => void
   isRunning: boolean
+  onStop: () => void
 }
 
-export function ExperimentConfig({ onStartExperiment, isRunning }: ExperimentConfigProps) {
+export function ExperimentConfig({ onStartExperiment, isRunning, onStop }: ExperimentConfigProps) {
   const [config, setConfig] = useState({
     experimentName: 'Progressive Evolution Experiment',
     max_iterations: 20,

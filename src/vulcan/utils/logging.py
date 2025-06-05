@@ -9,7 +9,7 @@ import structlog
 from rich.console import Console
 from rich.logging import RichHandler
 
-from vulcan.types import LoggingConfig
+from vulcan.schemas import LoggingConfig
 
 # Constants
 DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -176,17 +176,6 @@ class VulcanLogger:
         if experiment_name:
             context["experiment_name"] = experiment_name
         return self.bind(**context)
-
-    def bind_node(self, node_id: str) -> "VulcanLogger":
-        """Bind MCTS node context.
-
-        Args:
-            node_id: Node ID.
-
-        Returns:
-            Logger with node context.
-        """
-        return self.bind(node_id=node_id)
 
     def bind_feature(self, feature_name: str) -> "VulcanLogger":
         """Bind feature context.

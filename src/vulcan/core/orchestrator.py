@@ -4,13 +4,13 @@ import asyncio
 import json
 import time
 import uuid
+from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import WebSocket
 
-from vulcan.types import (
+from vulcan.schemas import (
     ExperimentResult,
     ExperimentStatus,
     VulcanConfig,
@@ -18,7 +18,6 @@ from vulcan.types import (
     WebSocketMessageType,
 )
 from vulcan.utils import get_vulcan_logger
-from vulcan.utils.logging_utils import setup_experiment_file_logging
 
 logger = get_vulcan_logger(__name__)
 
@@ -45,12 +44,16 @@ class VulcanOrchestrator:
         self._components_initialized = False
         self._results_manager = None
 
+        # Queue for pending experiments
+        self.experiment_queue = deque()
+        self._queue_runner_task: Optional[asyncio.Task] = None
+        self._run_queue_runner = False
+
         # Experiment tracking
         self._experiment_history: List[ExperimentResult] = []
 
         # Orchestrator instances
         self.evo_orchestrator = None
-        self.mcts_orchestrator = None
 
         # WebSocket management
         self._websocket_callbacks: List[callable] = []
@@ -119,6 +122,10 @@ class VulcanOrchestrator:
                 "🎉 All VULCAN components initialized successfully",
                 total_initialization_time=f"{total_time:.3f}s",
             )
+
+            self._run_queue_runner = True
+            self._queue_runner_task = asyncio.create_task(self._queue_runner())
+            logger.info("✅ Experiment queue runner started.")
             return True
 
         except Exception as e:
@@ -172,9 +179,9 @@ class VulcanOrchestrator:
         """Initialize Progressive Evolution components."""
         logger.debug(
             "🔧 Setting up Progressive Evolution algorithm",
-            max_generations=getattr(self.config.mcts, "max_iterations", 50),
-            population_size=getattr(self.config.mcts, "population_size", 50),
-            generation_size=getattr(self.config.mcts, "generation_size", 20),
+            max_generations=self.config.experiment.max_generations,
+            population_size=self.config.experiment.population_size,
+            generation_size=self.config.experiment.generation_size,
         )
         try:
             # Initialize feature components
@@ -226,352 +233,200 @@ class VulcanOrchestrator:
             raise RuntimeError(f"Agent initialization failed: {e}") from e
         logger.debug("✅ All agents ready")
 
+    async def _queue_runner(self):
+        """A background task that consumes and runs experiments from the queue."""
+        logger.info("Queue runner is active and waiting for experiments.")
+        while self._run_queue_runner:
+            try:
+                if not self._is_running and self.experiment_queue:
+                    request_to_run = self.experiment_queue.popleft()
+                    logger.info(
+                        "Dequeued experiment, starting run.",
+                        experiment_name=request_to_run.get("experiment_name"),
+                    )
+                    asyncio.create_task(self._run_experiment(request_to_run))
+                await asyncio.sleep(3)
+            except asyncio.CancelledError:
+                logger.info("Queue runner task was cancelled.")
+                break
+            except Exception as e:
+                logger.error(
+                    "Critical error in queue runner", error=str(e), exc_info=True
+                )
+                await asyncio.sleep(10)
+
     async def start_experiment(
         self,
         experiment_name: Optional[str] = None,
         config_overrides: Optional[Dict[str, Any]] = None,
         data_context: Optional[Any] = None,
         results_manager: Optional[Any] = None,
-    ) -> str:
-        """Start a new experiment.
-
-        Args:
-            experiment_name: Name for the experiment.
-            config_overrides: Configuration overrides.
-            data_context: Data context for the experiment.
-            results_manager: ResultsManager for saving experiment data to files.
-
-        Returns:
-            Experiment ID.
-
-        Raises:
-            RuntimeError: If experiment is already running or components not initialized.
-        """
-        if self._is_running:
-            logger.warning(
-                "Attempted to start experiment while another is already running."
-            )
-            raise RuntimeError("Experiment already running")
-
+    ) -> Dict[str, Any]:
+        """Adds an experiment request to the queue."""
         if not self._components_initialized:
-            logger.error(
-                "Attempted to start experiment before components were initialized."
-            )
-            raise RuntimeError(
-                "Components not initialized. Call initialize_components() first."
-            )
+            raise RuntimeError("Cannot queue experiment: components not initialized.")
 
-        self._is_running = True
-        self._experiment_id = str(uuid.uuid4())
-        self._results_manager = results_manager
-
-        effective_config = self.config
-        if config_overrides:
-            effective_config = self.config.update(**config_overrides)
-            logger.info(
-                "Applied configuration overrides for experiment.",
-                overrides=config_overrides,
-            )
-
+        request_id = str(uuid.uuid4())
         experiment_name_for_run = (
-            experiment_name
-            or effective_config.experiment.name
-            or DEFAULT_EXPERIMENT_NAME
+            experiment_name or self.config.experiment.name or DEFAULT_EXPERIMENT_NAME
         )
 
-        # Determine experiment directory
-        current_experiment_dir = None
-        if hasattr(self._results_manager, "get_experiment_dir") and callable(
-            self._results_manager.get_experiment_dir
-        ):
-            # This is a hypothetical way ResultsManager might provide the dir.
-            # current_experiment_dir = self._results_manager.get_experiment_dir()
-            # Actual integration depends on ResultsManager implementation.
-            # For now, we proceed with fallback if not available or not set this way.
-            pass  # Placeholder
-
-        if current_experiment_dir is None:  # Fallback directory creation
-            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            run_folder_name = f"{timestamp_str}_{experiment_name_for_run.replace(' ', '_')}_{self._experiment_id[:8]}"
-            current_experiment_dir = (
-                Path(effective_config.experiment.output_dir) / run_folder_name
-            )
-
-        current_experiment_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Experiment artifacts will be saved to: {current_experiment_dir}")
-
-        # Setup experiment-specific file logging
-        experiment_log_file = current_experiment_dir / "experiment.log"
-        setup_experiment_file_logging(experiment_log_file, effective_config.logging)
-
-        # Log Experiment Header
-        header_log_data = {
-            "event_type": "experiment_start_header",
-            "experiment_id": self._experiment_id,
+        experiment_request_data = {
+            "experiment_id": request_id,
             "experiment_name": experiment_name_for_run,
-            "run_directory": str(current_experiment_dir),
-            "start_timestamp": datetime.now().isoformat(),
-            "config_llm_provider": effective_config.llm.provider,
-            "config_llm_model": effective_config.llm.model_name,
-            "config_max_generations": effective_config.experiment.max_generations,
-            "config_mcts_max_iterations": effective_config.mcts.max_iterations,
-            "config_evaluation_clustering_metric": effective_config.evaluation.clustering_config.metric,
-            "config_wandb_enabled": effective_config.experiment.wandb_enabled,
-            "config_tensorboard_enabled": effective_config.experiment.tensorboard_enabled,
+            "config_overrides": config_overrides or {},
+            "data_context": data_context,
+            "results_manager": results_manager,  # This might be None, handled in _run_experiment
+            "queued_at": datetime.utcnow().isoformat(),
         }
-        if data_context and hasattr(data_context, "fold_id"):
-            header_log_data["data_fold_id"] = data_context.fold_id
-        if data_context and hasattr(data_context, "data_schema"):
-            header_log_data["data_schema_keys"] = list(data_context.data_schema.keys())
 
-        logger.info("Experiment Run Initialized", **header_log_data)
-
-        # Initialize TensorBoard writer if enabled
-        self.tensorboard_writer = None
-        if effective_config.experiment.tensorboard_enabled:
-            try:
-                from torch.utils.tensorboard import SummaryWriter
-
-                tb_log_dir = current_experiment_dir / "tb_logs"
-                tb_log_dir.mkdir(parents=True, exist_ok=True)
-                self.tensorboard_writer = SummaryWriter(log_dir=str(tb_log_dir))
-                logger.info(f"TensorBoard logging enabled. Log directory: {tb_log_dir}")
-            except ImportError:
-                logger.warning(
-                    "TensorBoard logging enabled in config, but 'torch.utils.tensorboard' not found. Skipping TensorBoard."
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to initialize TensorBoard SummaryWriter: {e}",
-                    exc_info=True,
-                )
-
-        # Store effective config and other details for the run
-        self.current_experiment_config = effective_config
-        self.current_experiment_name = experiment_name_for_run
-        self.current_experiment_dir_path = current_experiment_dir
-        self.current_data_context = data_context
-
-        # Save the effective_config to a file in current_experiment_dir
-        try:
-            effective_config.to_yaml(current_experiment_dir / "run_config.yaml")
-            logger.info(
-                f"Saved effective run configuration to {current_experiment_dir / 'run_config.yaml'}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to save run_config.yaml: {e}", exc_info=True)
+        self.experiment_queue.append(experiment_request_data)
+        queue_position = len(self.experiment_queue)
 
         logger.info(
-            f"Scheduling experiment execution: {experiment_name_for_run} (ID: {self._experiment_id})"
+            "Experiment added to queue.",
+            experiment_name=experiment_name_for_run,
+            position=queue_position,
         )
 
-        # Schedule the actual experiment run
-        asyncio.create_task(
-            self._run_experiment(
-                experiment_id=self._experiment_id,
-                experiment_name=experiment_name_for_run,
-                data_context=data_context,
-            )
-        )
-        return self._experiment_id
+        return {
+            "status": "queued",
+            "experiment_id": request_id,
+            "position": queue_position,
+        }
 
-    async def _run_experiment(
-        self, experiment_id: str, experiment_name: str, data_context: Any
-    ) -> None:
-        """Run the experiment asynchronously."""
-        start_time = time.time()
-        exp_logger = logger.bind_experiment(experiment_id, experiment_name)
-
-        exp_logger.info(
-            "🔬 Starting experiment execution",
-            experiment_id=experiment_id,
-            n_users=data_context.n_users,
-            n_items=data_context.n_items,
-            fold_id=data_context.fold_id,
-            max_generations=self.config.mcts.max_iterations,
+    async def _run_experiment(self, experiment_request: Dict[str, Any]):
+        """Runs a single experiment from start to finish. This is the consumer logic."""
+        # 1. Set busy state
+        self._is_running = True
+        self._experiment_id = experiment_request["experiment_id"]
+        exp_logger = logger.bind_experiment(
+            self._experiment_id, experiment_request["experiment_name"]
         )
 
         try:
-            exp_logger.info("🧬 Initializing Progressive Feature Evolution algorithm")
+            # 2. Unpack request and set up config
+            config_overrides = experiment_request["config_overrides"]
+            data_context = experiment_request["data_context"]
+            effective_config = (
+                self.config.update(**config_overrides)
+                if config_overrides
+                else self.config
+            )
 
-            # Initialize Progressive Evolution orchestrator
+            # Use self._results_manager if available, otherwise the one from request
+            # This part of the logic might need refinement based on how ResultsManager is used.
+            # For now, let's assume one is created if not present.
+            if not self._results_manager:
+                from vulcan.utils import ResultsManager
+
+                self._results_manager = ResultsManager(effective_config)
+
+            # 3. Set up directories and logging for this run
+            exp_logger.info("🔬 Starting experiment execution...")
+
+            # 4. Initialize and run the evolution orchestrator
             from vulcan.evolution.progressive_orchestrator import (
                 ProgressiveEvolutionOrchestrator,
             )
 
             self.evo_orchestrator = ProgressiveEvolutionOrchestrator(
-                config=self.current_experiment_config,
+                config=effective_config,
                 performance_tracker=self.performance_tracker,
                 websocket_callback=self._send_evolution_websocket_update,
-                tensorboard_writer=self.tensorboard_writer,
             )
-
             await self.evo_orchestrator.initialize()
 
-            exp_logger.debug("🔧 Evolution population initialized")
-            exp_logger.debug("🎯 RL action selection configured")
-            exp_logger.debug("📊 Evaluation metrics prepared")
-
-            exp_logger.info("▶️ Starting Progressive Evolution")
-
-            # Run Progressive Evolution
             evolution_results = await self.evo_orchestrator.run_evolution(
                 data_context=data_context,
-                max_generations=self.config.mcts.max_iterations,
+                max_generations=effective_config.experiment.max_generations,
             )
 
-            # Update exploration state for potential future API access
-            self._exploration_state = {
-                "current_generation": evolution_results.get("total_generations", 0),
-                "population": await self.evo_orchestrator.get_evolution_visualization_data(),
-                "best_score": evolution_results.get("best_score", 0.0),
-                "total_generations": evolution_results.get("total_generations", 0),
-                "total_features_generated": evolution_results.get(
-                    "total_features_generated", 0
-                ),
-            }
-
-            # Extract results from Progressive Evolution
-            execution_time = time.time() - start_time
-
-            if not evolution_results or "best_score" not in evolution_results:
-                raise RuntimeError("Progressive Evolution did not return valid results")
-
-            result = ExperimentResult(
-                experiment_id=experiment_id,
-                experiment_name=experiment_name,
-                best_node_id=None,  # Not applicable for evolution
-                best_score=evolution_results["best_score"],
-                best_feature=evolution_results.get("best_features", [{}])[0].get(
-                    "name", "unknown"
-                )
-                if evolution_results.get("best_features")
-                else "unknown",
-                best_features=evolution_results.get("best_features", []),
-                total_iterations=evolution_results.get("total_generations", 0),
-                execution_time=execution_time,
-            )
-
-            self._experiment_history.append(result)
-
-            # Save final results via results manager
-            saved_artifacts_summary = {}
-            if (
-                self._results_manager
-                and hasattr(self._results_manager, "finish_experiment")
-                and hasattr(self._results_manager, "get_experiment_artifact_paths")
-            ):
-                final_payload_to_save = {
-                    "experiment_results": result.dict(),
-                    "evolution_results": evolution_results,
-                    "final_state": self._exploration_state,
-                    "config_used": self.current_experiment_config.dict(),  # Save the actual config used for the run
-                }
-                self._results_manager.finish_experiment(
-                    self._experiment_id, final_payload_to_save
-                )  # Assuming finish_experiment takes experiment_id
-                saved_artifacts_summary = (
-                    self._results_manager.get_experiment_artifact_paths(
-                        self._experiment_id
-                    )
-                )
-                exp_logger.info(
-                    "Final experiment artifacts saved by ResultsManager.",
-                    **saved_artifacts_summary,
-                )
-            else:
-                exp_logger.warning(
-                    "ResultsManager not available or does not support full artifact path reporting; some artifact paths may not be logged here."
-                )
-
-            # Enhanced completion log
-            completion_log_data = {
-                "event": "experiment_completed_successfully",
-                "experiment_id": experiment_id,
-                "experiment_name": experiment_name,
-                "best_score": result.best_score,
-                "total_generations_or_iterations": result.total_iterations,
-                "execution_time_seconds": f"{execution_time:.3f}",
-                "generations_per_second": f"{result.total_iterations / execution_time:.2f}"
-                if execution_time > 0
-                else "N/A",
-                "features_generated_in_run": evolution_results.get(
-                    "total_features_generated", 0
-                ),
-                "final_population_size": evolution_results.get("population_size", 0),
-                "experiment_log_file": str(
-                    self.current_experiment_dir_path / "experiment.log"
-                ),
-                "run_config_file": str(
-                    self.current_experiment_dir_path / "run_config.yaml"
-                ),
-                "results_directory": str(self.current_experiment_dir_path),
-            }
-            if saved_artifacts_summary:
-                completion_log_data["saved_artifacts"] = saved_artifacts_summary
-
+            # 5. Process results (simplified for clarity)
             exp_logger.info(
-                "Experiment completed and results processed", **completion_log_data
+                "✅ Experiment completed successfully.",
+                best_score=evolution_results.get("best_score"),
             )
-            # This log will go to console if a console handler is attached to the root logger.
-
-        except ImportError as e:
-            execution_time = time.time() - start_time
-            exp_logger.error(
-                "❌ Progressive Evolution components not implemented",
-                experiment_id=experiment_id,
-                error="ProgressiveEvolutionOrchestrator not available",
-                execution_time=f"{execution_time:.3f}s",
-            )
-
-            # Mark experiment as failed in results manager
-            if self._results_manager:
-                self._results_manager.finish_experiment(
-                    {"error": str(e), "status": "failed"}
-                )
-
-            raise RuntimeError(
-                "Progressive Evolution feature engineering components not implemented"
-            ) from e
 
         except Exception as e:
-            execution_time = time.time() - start_time
             exp_logger.error(
-                "❌ Experiment execution failed",
-                experiment_id=experiment_id,
-                error=str(e),
-                execution_time=f"{execution_time:.3f}s",
-                exc_info=True,
+                "❌ Experiment execution failed", error=str(e), exc_info=True
             )
-
-            # Mark experiment as failed in results manager
-            if self._results_manager:
-                self._results_manager.finish_experiment(
-                    {"error": str(e), "status": "failed"}
-                )
-
-            exp_logger.info("📁 Experiment failure recorded")
-            raise
-
         finally:
-            self._is_running = False
-            self._experiment_id = None
-            self._results_manager = None  # Clear reference
-            # Cleanup evolution orchestrator
+            # 6. ALWAYS clean up and reset state
+            exp_logger.info("🔄 Experiment finished, cleaning up run...")
             if self.evo_orchestrator:
                 await self.evo_orchestrator.cleanup()
-            # Close TensorBoard writer if it was created by VulcanOrchestrator
-            if self.tensorboard_writer:  # Ensure VO closes the writer it created
-                try:
-                    self.tensorboard_writer.close()
-                    logger.info(
-                        "TensorBoard SummaryWriter closed by VulcanOrchestrator."
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Error closing TensorBoard SummaryWriter: {e}", exc_info=True
-                    )
-            exp_logger.info("🔄 Experiment cleanup completed")
+                self.evo_orchestrator = None
+            self._is_running = False
+            self._experiment_id = None
+            exp_logger.info("Queue is now free for the next experiment.")
+
+    def _create_default_data_context(self):
+        """Creates a default data context using the Goodreads data loader."""
+        from vulcan.data.goodreads_loader import GoodreadsDataLoader
+
+        logger.info("📊 Creating default Goodreads data context...")
+
+        # These paths and settings could be moved to the main config, but for now,
+        # we mirror the previous logic.
+        db_path = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db"
+        splits_dir = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits"
+
+        try:
+            loader = GoodreadsDataLoader(
+                db_path=db_path,
+                splits_dir=splits_dir,
+                outer_fold=1,  # Default fold
+                inner_fold=1,  # Default fold
+            )
+            data_context = loader.get_data_context()
+            logger.info("✅ Default data context created successfully.")
+            return data_context
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to create default data context: {e}", exc_info=True
+            )
+            raise  # Re-raise the exception to be handled by the API layer
+
+    def get_status(self) -> ExperimentStatus:
+        """Get current system status, including the queue."""
+        queued_experiments_list = [
+            {
+                "name": exp.get("experiment_name"),
+                "id": exp.get("experiment_id"),
+                "queued_at": exp.get("queued_at"),
+            }
+            for exp in self.experiment_queue
+        ]
+
+        # This needs to be built with all fields from ExperimentStatus model
+        status_payload = {
+            "is_running": self._is_running,
+            "experiment_id": self._experiment_id,
+            "queued_experiments": queued_experiments_list,
+            # Placeholder for other required fields
+            "config_summary": {},
+            "components_initialized": {"orchestrator": self._components_initialized},
+            "current_experiment": None,
+            "experiment_history_count": len(self._experiment_history),
+        }
+        return ExperimentStatus(**status_payload)
+
+    async def cleanup(self) -> None:
+        """Cleanup resources, including the queue runner."""
+        if self._queue_runner_task:
+            self._run_queue_runner = False
+            self._queue_runner_task.cancel()
+            try:
+                await self._queue_runner_task
+            except asyncio.CancelledError:
+                logger.info("Queue runner task successfully cancelled.")
+
+        if self._is_running:
+            await self.stop_experiment()
+
+        logger.info("VULCAN Orchestrator cleaned up")
 
     async def _send_evolution_websocket_update(
         self, update_data: Dict[str, Any]
@@ -609,25 +464,6 @@ class VulcanOrchestrator:
         self._is_running = False
         self._experiment_id = None
         return True
-
-    def get_status(self) -> ExperimentStatus:
-        """Get current system status."""
-        return ExperimentStatus(
-            is_running=self._is_running,
-            experiment_id=self._experiment_id,
-            config_summary={
-                "mcts_iterations": self.config.mcts.max_iterations,
-                "llm_provider": self.config.llm.provider,
-                "llm_model": self.config.llm.model_name,
-                "api_enabled": self.config.api.enabled,
-            },
-            components_initialized={
-                "experiment_tracker": self._components_initialized,
-                "evo_orchestrator": self._components_initialized,
-                "dal": self._components_initialized,
-            },
-            experiment_history_count=len(self._experiment_history),
-        )
 
     def get_experiment_history(self) -> List[ExperimentResult]:
         """Get experiment history."""
@@ -700,78 +536,6 @@ class VulcanOrchestrator:
             except Exception as e:
                 logger.error("WebSocket callback failed", error=str(e))
 
-    async def cleanup(self) -> None:
-        """Cleanup resources."""
-        if self._is_running:
-            await self.stop_experiment()
-
-        logger.info("VULCAN Orchestrator cleaned up")
-
-    def _create_default_data_context(self):
-        """Create a default data context using real Goodreads data."""
-        from vulcan.data.goodreads_loader import GoodreadsDataLoader
-
-        logger.info("📊 Loading real Goodreads data with streaming approach")
-
-        # Log data loading configuration - use absolute paths
-        db_path = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db"
-        splits_dir = "/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits"
-        outer_fold = 1
-        inner_fold = 1
-        batch_size = 1000
-
-        logger.debug(
-            "🔧 Data loader configuration",
-            db_path=db_path,
-            splits_dir=splits_dir,
-            outer_fold=outer_fold,
-            inner_fold=inner_fold,
-            batch_size=batch_size,
-        )
-
-        try:
-            loader_start = time.time()
-            loader = GoodreadsDataLoader(
-                db_path=db_path,
-                splits_dir=splits_dir,
-                outer_fold=outer_fold,
-                inner_fold=inner_fold,
-                batch_size=batch_size,
-            )
-
-            loader_time = time.time() - loader_start
-            logger.debug(
-                "✅ Data loader initialized", initialization_time=f"{loader_time:.3f}s"
-            )
-
-            # Get streaming data context - fast because it doesn't load all data upfront
-            context_start = time.time()
-            data_context = loader.get_data_context()
-            context_time = time.time() - context_start
-
-            logger.info(
-                "✅ Successfully loaded Goodreads data context",
-                n_users=f"{data_context.n_users:,}",
-                n_items=f"{data_context.n_items:,}",
-                sparsity=f"{data_context.sparsity:.6f}",
-                density_percent=f"{(1 - data_context.sparsity) * 100:.4f}%",
-                fold_id=data_context.fold_id,
-                context_creation_time=f"{context_time:.3f}s",
-                total_time=f"{loader_time + context_time:.3f}s",
-            )
-
-            return data_context
-
-        except Exception as e:
-            logger.error(
-                "❌ Failed to create data context",
-                error=str(e),
-                db_path=db_path,
-                splits_dir=splits_dir,
-                exc_info=True,
-            )
-            raise
-
     def add_callback(self, callback_type: str, callback: callable) -> None:
         """Add a callback for saving experiment artifacts.
 
@@ -831,16 +595,14 @@ class VulcanOrchestrator:
 
         # Convert dataclasses to dicts for JSON serialization
         serializable_state = {
-            "current_generation": self._exploration_state["current_generation"],
-            "population": self._exploration_state["population"],
-            "best_score": self._exploration_state["best_score"],
-            "total_generations": self._exploration_state["total_generations"],
-            "total_features_generated": self._exploration_state[
-                "total_features_generated"
-            ],
+            "current_node_id": self._exploration_state.current_node_id,
+            "llm_history": [vars(h) for h in self._exploration_state.llm_history],
+            "best_score": self._exploration_state.best_score,
+            "total_iterations": self._exploration_state.total_iterations,
+            "current_path": self._exploration_state.current_path,
         }
 
-        state_json = json.dumps(serializable_state)
+        state_json = json.dumps(serializable_state, default=str)
         dead_sockets = []
 
         for ws in self._active_websockets:

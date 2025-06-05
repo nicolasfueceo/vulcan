@@ -16,9 +16,12 @@ streamlit>=1.28.0
 streamlit-plotly-events>=0.0.6
 
 # Database
-sqlite3
 
 # Development
 pytest>=7.0.0
 black>=22.0.0
-flake8>=5.0.0 
+flake8>=5.0.0
+
+# For TensorBoard Logging
+tensorboard>=2.10.0
+torch>=1.13.0 # For torch.utils.tensorboard.SummaryWriter 

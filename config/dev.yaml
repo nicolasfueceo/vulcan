@@ -1,0 +1,55 @@
+# Minimal development configuration for VULCAN testing
+api:
+  host: localhost
+  port: 8000 # Explicitly set port for test_system.py
+  reload: false # Disable reload for stable testing
+  cors_origins: [\"http://localhost:3000\", \"http://localhost:8000\"] # Allow local frontend and API itself
+  websocket_enabled: true
+
+llm:
+  provider: local # Use local to avoid API key dependencies for this test
+  model_name: mock_model 
+  temperature: 0.1
+  max_tokens: 500
+  prompt_memory_type: none # Keep prompts simple for testing
+
+experiment:
+  output_dir: experiments_test # Use a specific test output directory
+  name: vulcan_dev_test
+  max_generations: 5 
+  population_size: 10
+  generation_size: 5
+  max_repair_attempts: 1
+  mutation_rate: 0.2
+  ucb_exploration_constant: 1.414
+  wandb_enabled: false
+  tensorboard_enabled: true # Enable tensorboard as per recent changes
+  save_artifacts: true
+
+data:
+  # Using absolute paths for critical data files to ensure they are found.
+  # User needs to ensure these paths are correct for their setup or use relative paths carefully.
+  base_path: null # Set to null if db paths below are absolute
+  train_db: \"/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db\" # Example absolute path
+  test_db: \"/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db\"  # Example absolute path
+  validation_db: \"/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db\" # Example absolute path
+  outer_fold: 1
+  inner_fold: 1
+
+logging:
+  level: DEBUG # More verbose logging for testing
+  structured: false # Easier to read for quick tests, can be true for JSON
+  file: logs/vulcan_test_system.log # Specific log file for this test run
+
+# Other sections like evaluation can use defaults or be minimal
+evaluation:
+  sample_size: 1000
+  scoring_mode: cluster # or 'recommender'
+
+# Default directories (usually fine as is for testing if relative to project root)
+results_dir: \"results_test\"
+states_dir: \"states_test\"
+configs_dir: \"config_test\" # This script creates its own config/dev.yaml
+
+random_seed: 42
+debug_mode: true 

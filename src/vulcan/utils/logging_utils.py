@@ -5,7 +5,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from vulcan.types import LoggingConfig
+from vulcan.schemas import LoggingConfig
 
 # Configure structlog if it's the primary logging system
 # This is a basic setup; actual structlog configuration might be more complex

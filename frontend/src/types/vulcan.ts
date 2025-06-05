@@ -19,6 +19,15 @@ export interface EvolutionGenerationHistory {
   population_size: number
 }
 
+export interface EvolutionStats {
+  total_nodes: number
+  max_depth: number
+  best_score: number
+  iterations_completed: number
+  avg_branching_factor: number
+  failed_nodes?: number
+}
+
 export interface EvolutionData {
   population: EvolutionIndividual[]
   generation_history: EvolutionGenerationHistory[]
@@ -31,6 +40,7 @@ export interface EvolutionData {
     score: number
     generation: number
   }
+  stats: EvolutionStats
 }
 
 // MCTS Types
@@ -64,6 +74,7 @@ export interface MCTSStats {
   best_score: number
   iterations_completed: number
   avg_branching_factor: number
+  failed_nodes?: number
 }
 
 export interface MCTSData {

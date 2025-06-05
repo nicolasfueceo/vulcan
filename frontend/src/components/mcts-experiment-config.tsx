@@ -12,9 +12,10 @@ import { Play, Settings, Brain } from 'lucide-react'
 interface MCTSConfigProps {
   onStartExperiment: (config: any) => void
   isRunning: boolean
+  onStop: () => void
 }
 
-export function MCTSExperimentConfig({ onStartExperiment, isRunning }: MCTSConfigProps) {
+export function MCTSExperimentConfig({ onStartExperiment, isRunning, onStop }: MCTSConfigProps) {
   const [config, setConfig] = useState({
     experimentName: 'MCTS Feature Engineering',
     algorithm: 'mcts',

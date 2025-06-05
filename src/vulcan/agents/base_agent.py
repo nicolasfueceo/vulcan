@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import structlog
 
-from vulcan.types import VulcanConfig
+from vulcan.schemas import VulcanConfig
 from vulcan.utils import get_vulcan_logger
 
 logger = structlog.get_logger(__name__)

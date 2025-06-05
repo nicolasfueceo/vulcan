@@ -6,7 +6,7 @@ from typing import Dict, List
 import structlog
 
 from vulcan.evaluation.base_evaluator import BaseFeatureEvaluator
-from vulcan.types import (
+from vulcan.schemas import (
     DataContext,
     FeatureEvaluation,
     FeatureMetrics,

@@ -1,8 +1,10 @@
 """FastAPI server for VULCAN system."""
 
 import argparse
+import json
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List
 
 import structlog
@@ -12,9 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from vulcan.core import ConfigManager, VulcanOrchestrator
-from vulcan.types import (
+from vulcan.schemas import (
     ApiResponse,
-    ErrorResponse,
     ExperimentRequest,
     HealthResponse,
     StatusResponse,
@@ -255,95 +256,6 @@ def create_app(config: VulcanConfig) -> FastAPI:
             logger.error(f"Error starting experiment: {str(e)}")
             return ApiResponse(status="error", message=str(e))
 
-    @app.post("/api/mcts/start")
-    async def start_mcts_experiment(request: ExperimentRequest):
-        """Start a new MCTS experiment with given configuration."""
-        global orchestrator, config, results_manager
-
-        try:
-            if not orchestrator:
-                # Initialize orchestrator with proper config
-                orchestrator = VulcanOrchestrator(config)
-                await orchestrator.initialize_components()
-
-            # Extract configuration overrides
-            config_overrides = request.config_overrides or {}
-
-            # Update config for MCTS
-            config.mcts.max_iterations = config_overrides.get("max_iterations", 10)
-            config.mcts.max_depth = config_overrides.get("max_depth", 5)
-            config.mcts.exploration_factor = config_overrides.get(
-                "exploration_factor", 1.4
-            )
-            config.llm.temperature = config_overrides.get("llm_temperature", 0.7)
-            config.llm.model_name = config_overrides.get("llm_model", "gpt-4o-mini")
-
-            # Start experiment tracking in results manager
-            experiment_id = f"mcts_{request.experiment_name}"
-            experiment_metadata = {
-                "algorithm": "mcts",
-                "experiment_name": request.experiment_name,
-                "config_overrides": config_overrides,
-            }
-
-            experiment_dir = results_manager.start_experiment(
-                experiment_id, experiment_metadata
-            )
-
-            # Create data context based on configuration
-            outer_fold = config_overrides.get("outer_fold", 1)
-            inner_fold = config_overrides.get("inner_fold", 1)
-            data_sample_size = config_overrides.get("data_sample_size", 20000)
-
-            from vulcan.data.goodreads_loader import GoodreadsDataLoader
-
-            loader = GoodreadsDataLoader(
-                db_path="/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db",
-                splits_dir="/Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/splits",
-                outer_fold=outer_fold,
-                inner_fold=inner_fold,
-            )
-
-            # Load data context
-            data_context = loader.get_data_context(sample_size=data_sample_size)
-
-            # Create MCTS orchestrator
-            from vulcan.mcts.mcts_orchestrator import MCTSOrchestrator
-            from vulcan.utils import PerformanceTracker
-
-            performance_tracker = PerformanceTracker(max_history=100)
-            mcts_orchestrator = MCTSOrchestrator(config, performance_tracker)
-            await mcts_orchestrator.initialize()
-
-            # Store reference for later access
-            orchestrator.mcts_orchestrator = mcts_orchestrator
-
-            # Start the MCTS search asynchronously and save results
-            import asyncio
-
-            async def run_mcts():
-                results = await mcts_orchestrator.run_search(
-                    data_context=data_context,
-                    max_iterations=config.mcts.max_iterations,
-                    results_manager=results_manager,  # Pass results manager
-                )
-                # Mark experiment as finished
-                results_manager.finish_experiment({"final_results": results})
-
-            # Run in background
-            asyncio.create_task(run_mcts())
-
-            experiment_result_id = (
-                f"mcts_{request.experiment_name}_{outer_fold}_{inner_fold}"
-            )
-
-            return ApiResponse(
-                status="success", data={"experiment_id": experiment_result_id}
-            )
-        except Exception as e:
-            logger.error(f"Error starting MCTS experiment: {str(e)}")
-            return ApiResponse(status="error", message=str(e))
-
     @app.post("/api/experiments/stop")
     async def stop_experiment():
         """Stop the current experiment."""
@@ -360,13 +272,6 @@ def create_app(config: VulcanConfig) -> FastAPI:
             ):
                 await orchestrator.evo_orchestrator.cleanup()
                 orchestrator.evo_orchestrator = None
-
-            if (
-                hasattr(orchestrator, "mcts_orchestrator")
-                and orchestrator.mcts_orchestrator
-            ):
-                await orchestrator.mcts_orchestrator.cleanup()
-                orchestrator.mcts_orchestrator = None
 
             # Finish current experiment in results manager
             if results_manager:
@@ -514,6 +419,75 @@ def create_app(config: VulcanConfig) -> FastAPI:
         except Exception as e:
             logger.error(f"Error getting data stats: {str(e)}")
             return ApiResponse(status="error", message=str(e))
+
+    @app.get("/api/experiments/list")
+    async def list_experiments():
+        """List all experiments and their TensorBoard log availability."""
+        if not config or not config.experiment or not config.experiment.output_dir:
+            logger.error("Experiment output directory is not configured.")
+            return ApiResponse(
+                status="error", message="Experiment output directory not configured."
+            )
+
+        experiments_root_str = config.experiment.output_dir
+        experiments_root = Path(experiments_root_str)
+        experiment_details = []
+
+        if not experiments_root.is_dir():
+            logger.warning(
+                f"Experiments root directory does not exist: {experiments_root_str}"
+            )
+            return {
+                "experiments": experiment_details
+            }  # Return empty list if root dir doesn't exist
+
+        for run_dir in experiments_root.iterdir():
+            if run_dir.is_dir():
+                exp_id = run_dir.name
+                tensorboard_log_dir = run_dir / "tensorboard"
+                has_tensorboard = tensorboard_log_dir.is_dir()
+
+                metadata = {
+                    "id": exp_id,
+                    "name": exp_id,
+                    "start_time": None,
+                    "status": "unknown",
+                }
+                metadata_path = run_dir / "metadata.json"
+
+                if metadata_path.exists():
+                    try:
+                        with open(metadata_path) as f:
+                            data = json.load(f)
+                            metadata["name"] = data.get(
+                                "experiment_id", exp_id
+                            )  # Use experiment_id from metadata if present
+                            metadata["start_time"] = data.get("start_time")
+                            metadata["status"] = data.get("status", "unknown")
+                            # Potentially add other relevant fields from metadata if needed by UI
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to read metadata.json for {exp_id}: {str(e)}"
+                        )
+
+                experiment_details.append(
+                    {
+                        "id": exp_id,
+                        "name": metadata["name"],  # User-friendly name
+                        "has_tensorboard_logs": has_tensorboard,
+                        "tensorboard_log_path": str(tensorboard_log_dir.resolve())
+                        if has_tensorboard
+                        else None,  # Absolute path
+                        "metadata": metadata,
+                    }
+                )
+
+        # Sort experiments by start_time descending (most recent first), if available
+        experiment_details.sort(
+            key=lambda x: x["metadata"].get("start_time") or "", reverse=True
+        )
+
+        return {"experiments": experiment_details}
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request, exc):

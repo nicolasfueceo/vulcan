@@ -18,7 +18,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
 from vulcan.evaluation.base_evaluator import BaseFeatureEvaluator
-from vulcan.types import (
+from vulcan.schemas import (
     DataContext,
     FeatureEvaluation,
     FeatureMetrics,

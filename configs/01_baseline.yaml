@@ -1,0 +1,30 @@
+api:
+  host: localhost
+  port: 8000
+  reload: true
+llm:
+  provider: openai
+  model_name: gpt-4o-mini
+  temperature: 0.7
+  api_key_env: OPENAI_API_KEY
+data:
+  db_path: /Users/nicolasdhnr/Documents/Imperial/Imperial Thesis/Code/VULCAN/data/goodreads.db
+  splits_dir: data/splits
+  outer_fold: 1
+  inner_fold: 1
+  sample_size: 10000
+logging:
+  level: INFO
+evaluation:
+  sample_size: 5000
+  scoring_mode: cluster
+experiment:
+  output_dir: experiments
+  tensorboard_enabled: true
+  wandb_enabled: false
+  name: Baseline_Medium
+  max_generations: 50
+  population_size: 50
+  generation_size: 10
+  mutation_rate: 0.3
+  ucb_exploration_constant: 1.4

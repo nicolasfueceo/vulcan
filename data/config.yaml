@@ -2,7 +2,7 @@
 
 # Data Paths
 data_paths:
-  train_db: "data/train.db"
+  train_db: "data/goodreads.db"
   test_db: "data/test.db"
   validation_db: "data/validation.db"
   splits_dir: "data/splits"

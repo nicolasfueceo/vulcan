@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 
-from vulcan.types import ExperimentConfig, ExperimentResult, FeatureEvaluation
+from vulcan.schemas import ExperimentConfig, ExperimentResult, FeatureEvaluation
 
 logger = structlog.get_logger(__name__)
 
@@ -164,30 +164,6 @@ class ExperimentTracker:
             metrics["davies_bouldin"] = evaluation.metrics.davies_bouldin
 
         self.log_metrics(metrics, step=evaluation.iteration)
-
-    def log_mcts_iteration(
-        self,
-        iteration: int,
-        best_score: float,
-        nodes_explored: int,
-        current_depth: int,
-    ) -> None:
-        """Log MCTS iteration progress.
-
-        Args:
-            iteration: Current iteration number.
-            best_score: Best score achieved so far.
-            nodes_explored: Number of nodes explored.
-            current_depth: Current tree depth.
-        """
-        metrics = {
-            "mcts/best_score": best_score,
-            "mcts/nodes_explored": nodes_explored,
-            "mcts/current_depth": current_depth,
-            "mcts/iteration": iteration,
-        }
-
-        self.log_metrics(metrics, step=iteration)
 
     def save_artifact(
         self,

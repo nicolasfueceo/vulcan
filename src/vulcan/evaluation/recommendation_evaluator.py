@@ -19,7 +19,7 @@ from lightfm import LightFM
 from lightfm.evaluation import precision_at_k
 
 from vulcan.evaluation.base_evaluator import BaseFeatureEvaluator
-from vulcan.types import (
+from vulcan.schemas import (
     DataContext,
     FeatureEvaluation,
     FeatureMetrics,
