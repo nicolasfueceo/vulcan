@@ -131,7 +131,7 @@ export default function Home() {
               <Zap className="mr-2 h-4 w-4" />
               Start New Experiment
             </Button>
-          </div>
+        </div>
         </header>
 
         {isLoading && !experimentData && <p className="text-center">Loading experiment data...</p>}
@@ -183,21 +183,21 @@ export default function Home() {
                     </CardContent>
                   </Card>
                   <Card>
-                    <CardHeader>
+            <CardHeader>
                       <CardTitle>Population Size</CardTitle>
-                    </CardHeader>
-                    <CardContent>
+            </CardHeader>
+            <CardContent>
                       <p className="text-3xl font-bold">{populationSize}</p>
                     </CardContent>
                   </Card>
-                </CardContent>
-              </Card>
+            </CardContent>
+          </Card>
             </TabsContent>
 
             <TabsContent value="plots">
               <div className="mt-4">
                 <ExperimentCharts data={experimentData} />
-              </div>
+        </div>
             </TabsContent>
 
             <TabsContent value="logs">
