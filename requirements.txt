@@ -1,27 +1,33 @@
-# Core dependencies
-pandas>=1.5.0
-numpy>=1.21.0
-scikit-learn>=1.1.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
-plotly>=5.10.0
-lightfm>=1.16
-pyyaml>=6.0
-networkx>=3.1
-matplotlib>=3.7.1
-numpy>=1.24.3
+# Core data analysis libraries
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
 
-# Dashboard dependencies
-streamlit>=1.28.0
-streamlit-plotly-events>=0.0.6
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.18.0
+
+# Graph analysis
+networkx>=3.1
+python-louvain>=0.16
+
+# NLP
+nltk>=3.8.1
+spacy>=3.7.0
 
 # Database
+duckdb>=0.9.0
 
-# Development
-pytest>=7.0.0
-black>=22.0.0
-flake8>=5.0.0
+# Google Cloud & AI
+google-cloud-aiplatform>=1.36.0
+vertexai>=0.0.1
 
-# For TensorBoard Logging
-tensorboard>=2.10.0
-torch>=1.13.0 # For torch.utils.tensorboard.SummaryWriter 
+# Utilities
+jsonschema>=4.19.0
+loguru>=0.7.0
+autogen[gemini]>=0.2.0
+
+# Additional dependencies
+tensorboard>=2.14.0

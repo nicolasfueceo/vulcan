@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["schema_overview", "global_stats", "samples", "insights", "plots", "hypotheses"],
+  "properties": {
+    "schema_overview": {
+      "type": "object",
+      "description": "Database schema information including tables and their columns"
+    },
+    "global_stats": {
+      "type": "object",
+      "description": "Summary statistics for each table"
+    },
+    "samples": {
+      "type": "object",
+      "description": "Representative samples from each table"
+    },
+    "insights": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric", "value", "comment"],
+        "properties": {
+          "metric": {"type": "string"},
+          "value": {"type": ["number", "string"]},
+          "comment": {"type": "string"}
+        }
+      }
+    },
+    "plots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "caption"],
+        "properties": {
+          "path": {"type": "string"},
+          "caption": {"type": "string"}
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+} 
