@@ -4,7 +4,7 @@ import duckdb
 
 # Define paths
 db_path = "data/goodreads_curated.duckdb"
-curation_steps_dir = "scripts/curation_steps"
+curation_steps_dir = "data_curation/sql"
 
 # Ensure the old DB is removed
 if os.path.exists(db_path):

@@ -1,0 +1,93 @@
+### Tool Usage Guide
+
+You have one primary tool: `execute_python`. This tool runs Python code in a sandboxed environment that has access to the database and a set of powerful helper functions.
+
+**ALL actions you take MUST be performed by calling `execute_python` with the appropriate Python code.**
+
+**Available Python Helper Functions:**
+
+These functions are available for you to use *inside the code* you pass to `execute_python`.
+
+*   **`get_table_sample(table_name: str, n_samples: int = 5) -> str`**:
+    Returns a markdown-formatted string of `n_samples` random rows from the specified `table_name`.
+    *Example:*
+    ```python
+    # See a sample of the curated_books table
+    print(get_table_sample(table_name="curated_books", n_samples=3))
+    ```
+
+*   **`conn`**:
+    A DuckDB connection object to the main database (`data/goodreads_curated.duckdb`). Use this for any SQL queries.
+    *Example:*
+    ```python
+    # Get the top 5 publishers by average rating
+    sql_query = """
+        SELECT publisher_name, AVG(avg_rating) as avg_rating
+        FROM curated_books
+        GROUP BY publisher_name
+        ORDER BY avg_rating DESC
+        LIMIT 5;
+    """
+    top_publishers_df = conn.execute(sql_query).fetchdf()
+    print("Top 5 Publishers by Average Rating:")
+    print(top_publishers_df.to_markdown(index=False))
+    ```
+
+*   **`save_plot(filename: str)`**:
+    Saves the current `matplotlib.pyplot` figure to the run's output directory. **You must call this to save any visualization.**
+    *Example:*
+    ```python
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # (Code to create top_publishers_df from previous example)
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=top_publishers_df, x='avg_rating', y='publisher_name')
+    plt.title('Top 5 Publishers by Average Rating')
+    save_plot('top_publishers_by_rating.png') # Always include the file extension
+    print("Saved plot to 'top_publishers_by_rating.png'")
+    ```
+
+*   **`add_insight_to_report(title: str, finding: str, supporting_evidence: str, confidence: float)`**:
+    Call this to save a structured insight you have discovered. This is critical for building the final report.
+    *Example:*
+    ```python
+    # (Code to discover a finding about publishers)
+
+    title = "Correlation Between Publisher Size and Average Rating"
+    finding = "Initial analysis suggests that smaller, independent publishers tend to have higher average ratings than large publishing houses."
+    evidence = "A query grouping by publisher and counting books shows a negative correlation with average rating. See 'publisher_analysis.csv' for full data."
+    confidence = 0.75 # A score from 0.0 to 1.0
+
+    # This function is available in the environment, just call it.
+    add_insight_to_report(title, finding, evidence, confidence)
+    
+    print("Insight added to the report.")
+    ```
+
+*   **`finalize_hypotheses(hypotheses: List[Dict])`**:
+    *(For EngineerAgent only)* Call this at the end of the strategy loop to save the final, vetted hypotheses.
+    *Example:*
+    ```python
+    final_hypotheses = [
+        {
+            "hypothesis": "Books with more pages have higher average ratings.",
+            "justification": "Longer books may be more immersive, leading to higher ratings.",
+            "strategy": "Query curated_books, plot num_pages vs. avg_rating, and run correlation analysis."
+        }
+    ]
+    # This function is available in the environment, just call it.
+    finalize_hypotheses(final_hypotheses)
+    print("Final hypotheses have been saved.")
+    ```
+
+Remember: **Always wrap your Python code in an `execute_python` call.**
+
+**2. Insight & Hypothesis Management**
+
+- `add_insight_to_report(title: str, finding: str, ...)`: Call this tool to save a structured insight you have discovered. This is critical for building the final report.
+- `finalize_hypotheses(hypotheses: List[Dict])`: The EngineerAgent calls this tool at the end of the strategy loop to save the final, vetted hypotheses.
+
+**3. Vision Tool**
+- `vision_tool(image_path: str, prompt: str)`: Use this to analyze any plots or images you generate. You can use it to interpret a plot and generate a detailed analysis for an insight. 

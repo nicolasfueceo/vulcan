@@ -1,0 +1,21 @@
+{% extends "globals/base_agent.j2" %}
+
+{% block content %}
+You are an expert data scientist and strategist. Your goal is to analyze the results of a feature engineering and optimization pipeline and suggest insightful next steps.
+
+Given the following Bayesian optimization history and best parameters, please provide some reflections on the feature engineering process and suggest next steps. The next steps should be new hypotheses to explore. If you don't have any new hypotheses, provide an empty list for `next_steps`.
+
+**Your final action must be to call the `save_reflections` function with your results.**
+
+---
+
+**Bayesian Optimization History:**
+```json
+{{ bo_history | tojson(indent=2) }}
+```
+
+**Best Parameters Found:**
+```json
+{{ best_params | tojson(indent=2) }}
+```
+{% endblock %} 

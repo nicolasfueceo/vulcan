@@ -6,7 +6,9 @@ Utilities for managing run IDs and run-specific paths.
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
+import autogen
 
 # Base directories
 RUNTIME_DIR = Path("runtime")
@@ -113,3 +115,12 @@ def get_tensorboard_writer(agent_name: str):
 def format_log_message(message: str) -> str:
     """Format a log message with run context."""
     return f"[{get_run_id()}] {message}"
+
+
+def config_list_from_json(file_path: str) -> List[Dict]:
+    """
+    Loads an AutoGen configuration list from a JSON file, resolving environment variables.
+    """
+    return autogen.config_list_from_json(
+        env_or_file=file_path,
+    )

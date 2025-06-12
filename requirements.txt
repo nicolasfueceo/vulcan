@@ -31,3 +31,11 @@ autogen[gemini]>=0.2.0
 
 # Additional dependencies
 tensorboard>=2.14.0
+
+# Added from the code block
+jinja2
+autogen
+openai
+torch
+requests
+python-dotenv

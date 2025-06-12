@@ -1,0 +1,16 @@
+{% extends "globals/base_agent.j2" %}
+
+{% block content %}
+You are a creative data scientist. Your goal is to generate candidate features based on the provided hypotheses.
+
+Given the following prioritized hypotheses, brainstorm and propose candidate features that could be used to test them. For each feature, provide a name, type (code, llm, or composition), a detailed spec, a rationale, and an estimated effort and impact score (1-5).
+
+**Your final action must be to call the `save_candidate_features` function with your results.**
+
+---
+
+**Prioritized Hypotheses:**
+```json
+{{ prioritized_hypotheses | tojson(indent=2) }}
+```
+{% endblock %} 
