@@ -1,7 +1,16 @@
+import json
 import logging
 import os
 import sys
 from pathlib import Path
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional
 
 # This is no longer needed with a proper project structure and installation.
 # # Add project root to Python path for proper imports
@@ -15,13 +24,15 @@ from src.agents.discovery_team.insight_discovery_agents import (
 )
 from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
 from src.config.logging import setup_logging
-from src.utils.run_utils import config_list_from_json, init_run
+from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
 from src.utils.session_state import SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
-    execute_python,
+    create_analysis_view,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
+    get_table_sample,
+    run_sql_query,
     vision_tool,
 )
 
@@ -62,41 +73,53 @@ def run_discovery_loop(session_state: SessionState):
 
     llm_config = {"config_list": config_list, "cache_seed": None}
 
-    # Create proper UserProxy for tool execution
+    # This agent will execute code blocks and call functions
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=30,  # Per-agent limit, not total conversation limit
+        max_consecutive_auto_reply=10,
         is_termination_msg=lambda x: "TERMINATE" in x.get("content", ""),
-        code_execution_config=False,
+        code_execution_config={"work_dir": str(get_run_dir())},  # Enable code execution
     )
 
     assistant_agents = get_insight_discovery_agents(llm_config)
 
-    # Register tools using autogen.register_function for each assistant
-    add_insight_func = get_add_insight_tool(session_state)
-
+    # Register the granular tools for the agents
     for agent in assistant_agents.values():
         autogen.register_function(
-            execute_python,
+            run_sql_query,
             caller=agent,
             executor=user_proxy,
-            name="execute_python",
-            description="Executes Python code in a sandboxed environment with database connection",
+            name="run_sql_query",
+            description="Executes a read-only SQL query and returns the result as markdown.",
+        )
+        autogen.register_function(
+            get_table_sample,
+            caller=agent,
+            executor=user_proxy,
+            name="get_table_sample",
+            description="Retrieves a random sample of rows from a specified table.",
+        )
+        autogen.register_function(
+            create_analysis_view,
+            caller=agent,
+            executor=user_proxy,
+            name="create_analysis_view",
+            description="Creates a SQL view with documentation for complex analysis.",
         )
         autogen.register_function(
             vision_tool,
             caller=agent,
             executor=user_proxy,
             name="vision_tool",
-            description="Analyzes image files using vision AI",
+            description="Analyzes image files using vision AI.",
         )
         autogen.register_function(
-            add_insight_func,
+            get_add_insight_tool(session_state),
             caller=agent,
             executor=user_proxy,
             name="add_insight_to_report",
-            description="Saves structured insights to the session report",
+            description="Saves structured insights to the session report.",
         )
 
     # Enhanced GroupChat with intelligent context management
@@ -263,7 +286,7 @@ COMPRESSED SUMMARY (preserve all insights and key findings):"""
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",  # Use mini for cost efficiency in compression
                     messages=[{"role": "user", "content": compression_prompt}],
-                    max_tokens=800,
+                    max_tokens=64000,
                     temperature=0.1,  # Low temperature for consistent compression
                 )
 
@@ -409,7 +432,21 @@ COMPRESSED SUMMARY (preserve all insights and key findings):"""
                         self.groupchat.messages.append(guidance_msg)
 
                 # Call the parent implementation
-                return super().run_chat(messages, sender, config)
+                res = super().run_chat(messages, sender, config)
+                # super() returns a tuple (final, reply). If reply is None, substitute a fallback.
+                if isinstance(res, tuple) and len(res) == 2:
+                    final, reply = res
+                    if reply is None:
+                        logging.warning(
+                            "Parent run_chat returned None reply; substituting fallback message to avoid crash."
+                        )
+                        reply = {
+                            "role": "assistant",
+                            "content": "ERROR: Reply generation failed (empty). Please review the previous tool call outputs and ensure a proper assistant response.",
+                        }
+                    return final, reply
+                # In unexpected cases, just return res as-is
+                return res
 
         # Create the enhanced manager
         smart_manager = SmartGroupChatManager(
@@ -423,6 +460,18 @@ COMPRESSED SUMMARY (preserve all insights and key findings):"""
         logging.info(
             f"Exploration completed after {smart_manager.round_count} rounds with {insights_count} insights"
         )
+
+        logging.info("--- FINAL INSIGHTS SUMMARY ---")
+        logging.info(session_state.get_final_insight_report())
+
+        run_dir = get_run_dir()
+        views_file = run_dir / "generated_views.json"
+        if views_file.exists():
+            with open(views_file, "r") as f:
+                views_data = json.load(f)
+            logging.info(f"Total views created: {len(views_data.get('views', []))}")
+        else:
+            logging.info("Total views created: 0")
 
     finally:
         # Reopen the connection after agent execution
@@ -476,7 +525,7 @@ def run_strategy_loop(session_state: SessionState):
 
     user_proxy.register_function(
         function_map={
-            "execute_python": execute_python,
+            "run_sql_query": run_sql_query,
             "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
         }
     )
@@ -496,7 +545,7 @@ def run_strategy_loop(session_state: SessionState):
     try:
         user_proxy.initiate_chat(
             manager,
-            message=f"""Welcome strategists. Your task is to refine the following insights into a set of concrete, testable hypotheses. You can use `execute_python` to re-verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
+            message=f"""Welcome strategists. Your task is to refine the following insights into a set of concrete, testable hypotheses. You can use `run_sql_query` to re-verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
 
 --- INSIGHTS REPORT ---
 {insights_report}
@@ -543,8 +592,8 @@ def main():
         session_state.close_connection()
 
         # Clean up any generated views
-        cleanup_result = cleanup_analysis_views(Path(session_state.run_dir))
-        logging.info(f"View cleanup: {cleanup_result}")
+        cleanup_analysis_views(Path(session_state.run_dir))
+        logging.info("View cleanup process initiated.")
 
         logging.info("Run finished. Session state saved.")
 

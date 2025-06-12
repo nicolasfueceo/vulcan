@@ -3489,3 +3489,136 @@ def vision_tool(image_path: str, prompt: str) -> str:
 ---
 
 *This documentation was generated automatically. It includes all text-based source files and their complete contents.*
+
+
+# 📜 Prompts Directory (src/prompts)
+
+This document contains the complete source code structure and contents of the `src/prompts` directory.
+
+## 📁 Full Directory Structure
+
+```
+├── .gitignore
+├── Dockerfile.dataanalysis
+├── README.md
+├── config/
+│   └── OAI_CONFIG_LIST.json
+├── data/
+│   ├── .gitkeep
+│   └── __init__.py
+├── data_curation/
+│   ├── README.md
+│   ├── clean_data.py
+│   ├── run.py
+│   ├── sql/
+│   │   ├── 00_setup.sql
+│   │   └── 01_curate_goodreads.sql
+│   └── steps/
+│       ├── analyze_db.py
+│       ├── drop_useless_tables.py
+│       ├── get_curated_schema.py
+│       ├── inspect_raw_dates.py
+│       └── verify_curated_dates.py
+├── docker-compose.yml
+├── docs/
+│   ├── context.md
+│   ├── core_mission.md
+│   ├── experiments.md
+│   ├── project_status_report.md
+│   └── test.md
+├── generate_src_docs.py
+├── requirements.txt
+├── scripts/
+│   └── test_prompt.py
+├── src/
+│   ├── agents/
+│   │   ├── discovery_team/
+│   │   │   ├── __pycache__/
+│   │   │   └── insight_discovery_agents.py
+│   │   └── strategy_team/
+│   │       ├── __pycache__/
+│   │       ├── evaluation_agent.py
+│   │       ├── feature_realization_agent.py
+│   │       ├── hypothesis_agents.py
+│   │       ├── optimization_agent.py
+│   │       ├── reasoning_agent.py
+│   │       └── reflection_agent.py
+│   ├── config/
+│   │   ├── __pycache__/
+│   │   ├── logging.py
+│   │   ├── settings.py
+│   │   └── tensorboard.py
+│   ├── core/
+│   │   ├── __pycache__/
+│   │   ├── database.py
+│   │   ├── llm.py
+│   │   └── tools.py
+│   ├── orchestrator.py
+│   ├── prompts/
+│   │   ├── agents/
+│   │   │   ├── discovery_team/
+│   │   │   │   ├── base_analyst.j2
+│   │   │   │   ├── data_representer.j2
+│   │   │   │   ├── pattern_seeker.j2
+│   │   │   │   └── quantitative_analyst.j2
+│   │   │   ├── feature_ideator.j2
+│   │   │   ├── reflection_agent.j2
+│   │   │   └── strategy_team/
+│   │   │       ├── engineer_agent.j2
+│   │   │       ├── hypothesis_agent.j2
+│   │   │       └── strategist_agent.j2
+│   │   ├── globals/
+│   │   │   ├── base_agent.j2
+│   │   │   ├── base_analyst.j2
+│   │   │   ├── base_strategy.j2
+│   │   │   └── core_mission.j2
+│   │   └── helpers/
+│   │       ├── db_schema.j2
+│   │       └── tool_usage.j2
+│   ├── schemas/
+│   │   ├── __pycache__/
+│   │   ├── eda_report_schema.json
+│   │   └── models.py
+│   └── utils/
+│       ├── __pycache__/
+│       ├── data_utils.py
+│       ├── decorators.py
+│       ├── feature_registry.py
+│       ├── logging_utils.py
+│       ├── prompt_utils.py
+│       ├── pubsub.py
+│       ├── run_utils.py
+│       ├── sampling.py
+│       ├── session_state.py
+│       ├── testing_utils.py
+│       └── tools.py
+├── src_documentation.md
+├── src_documentation_with_prompts.md
+├── temp_prompts.md
+└── tests/
+    ├── __init__.py
+    ├── conftest.py
+    ├── multi_agent_pipeline/
+    │   ├── test_feature_ideation_agent_e2e.py
+    │   ├── test_feature_realization.py
+    │   ├── test_feature_realization_agent_e2e.py
+    │   ├── test_optimization_agent_e2e.py
+    │   ├── test_orchestrator_smoke.py
+    │   ├── test_reflection_agent_e2e.py
+    │   └── test_research_agent_e2e.py
+    ├── schemas/
+    │   └── feature_proposal_schema.json
+    └── test_feature_realization_agent.py
+```
+
+## 📄 File Contents (src directory only)
+
+## 📊 Summary
+
+- **Total files processed:** 0
+- **Directory:** `src/prompts`
+- **Generated:** 2025-06-12 20:28:44
+
+---
+
+*This documentation was generated automatically. It includes all text-based source files and their complete contents.*

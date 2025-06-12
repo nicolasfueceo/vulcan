@@ -33,6 +33,12 @@ class FeatureRealizationAgent:
 3. Handle both simple features and complex compositions
 4. Validate the code against the specification
 5. Add appropriate error handling and logging""",
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=10,
+            code_execution_config={
+                "work_dir": "runtime/code_execution",
+                "use_docker": False,
+            },
         )
         self.user_proxy = autogen.UserProxyAgent(
             name="UserProxy_FeatureRealization",

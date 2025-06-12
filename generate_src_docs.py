@@ -316,6 +316,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--include-tests", action="store_true", help="Also include tests directory"
     )
+    parser.add_argument(
+        "--include-prompts",
+        action="store_true",
+        help="Also include the prompts directory (e.g., src/prompts)",
+    )
 
     args = parser.parse_args()
 
@@ -355,3 +360,38 @@ if __name__ == "__main__":
         # Cleanup
         os.remove("temp_tests.md")
         print(f"✅ Combined documentation generated: {tests_output}")
+
+    # Optionally include prompts directory
+    if args.include_prompts and os.path.exists("src/prompts"):
+        prompts_output = args.output.replace(
+            ".md", "_with_prompts.md" if not args.include_tests else "_full.md"
+        )
+
+        # If we've already combined with tests, start from that file; else from src doc
+        base_file = (
+            tests_output
+            if args.include_tests and os.path.exists(tests_output)
+            else args.output
+        )
+
+        with open(prompts_output, "w", encoding="utf-8") as f:
+            # Combine base documentation
+            with open(base_file, "r", encoding="utf-8") as base_f:
+                f.write(base_f.read())
+
+            f.write("\n\n# 📜 Prompts Directory (src/prompts)\n\n")
+
+        # Generate prompts documentation separately
+        print("\n📜 Also processing prompts directory...")
+        generate_src_documentation("src/prompts", "temp_prompts.md")
+
+        # Append prompts content, skipping only the first 4 header lines
+        with open(prompts_output, "a", encoding="utf-8") as f:
+            with open("temp_prompts.md", "r", encoding="utf-8") as prompts_f:
+                prompts_content = prompts_f.read()
+                prompts_lines = prompts_content.split("\n")
+                f.write("\n".join(prompts_lines[4:]))
+
+        # Cleanup
+        os.remove("temp_prompts.md")
+        print(f"✅ Combined documentation generated: {prompts_output}")

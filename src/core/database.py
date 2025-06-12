@@ -4,7 +4,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-DB_PATH = "data/goodreads_curated.duckdb"
+from src.config.settings import DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +84,15 @@ def get_db_schema_string() -> str:
     with summary statistics. Connects in-process to avoid file locking issues.
     """
     schema_parts = []
+    db_path = str(DB_PATH)  # Ensure it's a string for DuckDB
+
     try:
+        logger.debug(f"Generating database schema from: {db_path}")
+
         # Connect in-process to an in-memory database to avoid file locks
         with duckdb.connect() as conn:
             # Attach the main database file in READ_ONLY mode, giving it an alias 'db'
-            conn.execute(f"ATTACH '{DB_PATH}' AS db (READ_ONLY);")
+            conn.execute(f"ATTACH '{db_path}' AS db (READ_ONLY);")
 
             # Query the information_schema to find tables in the attached database's 'main' schema
             tables_df = conn.execute(
@@ -99,11 +103,18 @@ def get_db_schema_string() -> str:
                 # Fallback to a simpler SHOW TABLES if the schema query fails
                 try:
                     tables_df = conn.execute("SHOW TABLES FROM db;").fetchdf()
+                    logger.debug("Used SHOW TABLES fallback method")
                 except Exception:
+                    logger.error(
+                        "Failed to list tables via both information_schema and SHOW TABLES"
+                    )
                     return "ERROR: No tables found in the attached database. Could not list tables via information_schema or SHOW TABLES."
 
             if tables_df.empty:
+                logger.warning("No tables found in the database")
                 return "ERROR: No tables found in the attached database."
+
+            logger.debug(f"Found {len(tables_df)} tables in database")
 
             for _, row in tables_df.iterrows():
                 table_name = row["table_name"] if "table_name" in row else row["name"]
@@ -111,45 +122,58 @@ def get_db_schema_string() -> str:
                 # We must use the 'db' alias to refer to tables in the attached database
                 qualified_table_name = f'db."{table_name}"'
 
-                row_count_result = conn.execute(
-                    f"SELECT COUNT(*) FROM {qualified_table_name};"
-                ).fetchone()
-                row_count = row_count_result[0] if row_count_result else 0
-                schema_parts.append(f"TABLE: {table_name} ({row_count:,} rows)")
+                try:
+                    row_count_result = conn.execute(
+                        f"SELECT COUNT(*) FROM {qualified_table_name};"
+                    ).fetchone()
+                    row_count = row_count_result[0] if row_count_result else 0
+                    schema_parts.append(f"TABLE: {table_name} ({row_count:,} rows)")
 
-                # Use the SUMMARIZE command to get schema and statistics
-                summary_df = conn.execute(
-                    f"SUMMARIZE {qualified_table_name};"
-                ).fetchdf()
+                    # Use the SUMMARIZE command to get schema and statistics
+                    summary_df = conn.execute(
+                        f"SUMMARIZE {qualified_table_name};"
+                    ).fetchdf()
 
-                for _, summary_row in summary_df.iterrows():
-                    col_name = summary_row["column_name"]
-                    col_type = summary_row["column_type"]
-                    null_pct = summary_row["null_percentage"]
+                    for _, summary_row in summary_df.iterrows():
+                        col_name = summary_row["column_name"]
+                        col_type = summary_row["column_type"]
+                        null_pct = summary_row["null_percentage"]
 
-                    stats = [f"NULLs: {null_pct}%"]
+                        stats = [f"NULLs: {null_pct}%"]
 
-                    # Add type-specific stats for a richer summary
-                    if "VARCHAR" in col_type.upper():
-                        unique_count = summary_row.get("approx_unique")
-                        if unique_count is not None:
-                            stats.append(f"~{int(unique_count)} unique values")
-                    elif any(
-                        t in col_type.upper()
-                        for t in ["INTEGER", "BIGINT", "DOUBLE", "FLOAT", "DECIMAL"]
-                    ):
-                        min_val = summary_row.get("min")
-                        max_val = summary_row.get("max")
-                        if min_val is not None and max_val is not None:
-                            stats.append(f"range: [{min_val}, {max_val}]")
+                        # Add type-specific stats for a richer summary
+                        if "VARCHAR" in col_type.upper():
+                            unique_count = summary_row.get("approx_unique")
+                            if unique_count is not None:
+                                stats.append(f"~{int(unique_count)} unique values")
+                        elif any(
+                            t in col_type.upper()
+                            for t in ["INTEGER", "BIGINT", "DOUBLE", "FLOAT", "DECIMAL"]
+                        ):
+                            min_val = summary_row.get("min")
+                            max_val = summary_row.get("max")
+                            if min_val is not None and max_val is not None:
+                                stats.append(f"range: [{min_val}, {max_val}]")
 
-                    schema_parts.append(
-                        f"  - {col_name} ({col_type}) [{', '.join(stats)}]"
+                        schema_parts.append(
+                            f"  - {col_name} ({col_type}) [{', '.join(stats)}]"
+                        )
+                    schema_parts.append("")
+
+                except Exception as table_error:
+                    logger.warning(
+                        f"Failed to analyze table {table_name}: {table_error}"
                     )
-                schema_parts.append("")
+                    schema_parts.append(f"TABLE: {table_name} (analysis failed)")
+                    schema_parts.append("")
 
-        return "\n".join(schema_parts)
+        result = "\n".join(schema_parts)
+        logger.debug(f"Generated schema string with {len(result)} characters")
+        return result
+
     except Exception as e:
         logger.error(f"Failed to get database schema using SUMMARIZE method: {e}")
         logger.exception(e)
-        return "ERROR: Could not retrieve database schema."
+        return (
+            f"ERROR: Could not retrieve database schema from {db_path}. Error: {str(e)}"
+        )

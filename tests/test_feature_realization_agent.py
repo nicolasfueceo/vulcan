@@ -8,9 +8,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.agents.data_analysis_agent import DataAnalysisAgent
 from src.agents.feature_ideation_agent import FeatureIdeationAgent
-from src.agents.feature_realization_agent import FeatureRealizationAgent
 from src.agents.hypothesis_agent import HypothesisAgent
-from src.agents.reasoning_agent import ReasoningAgent
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
+from src.agents.strategy_team.reasoning_agent import ReasoningAgent
 from src.utils.db_api import ingest_sqlite_to_duckdb
 from src.utils.memory import get_mem, set_mem
 

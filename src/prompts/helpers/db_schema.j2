@@ -1,5 +1,16 @@
-### Database Schema
+**DATABASE SCHEMA & SUMMARY STATISTICS**
 
-Here is the complete schema of the database you are connected to. Use this as your reference for available tables and columns.
+The following is the complete database schema with summary statistics generated using DuckDB's SUMMARIZE command. This provides both table structure and statistical insights about the data distribution.
 
+**You must ONLY use the tables and columns listed in this schema for your queries. Do not hallucinate table names.**
+
+```
 {{ db_schema }} 
+```
+
+**Key Information:**
+- All tables include row counts and column statistics
+- NULL percentages show data completeness
+- Numeric columns show value ranges [min, max]
+- Text columns show approximate unique value counts
+- Use this schema to understand data relationships and plan your analysis 

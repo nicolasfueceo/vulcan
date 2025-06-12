@@ -1,194 +1,89 @@
+# -*- coding: utf-8 -*-
 import json
-import subprocess
+import logging
+import os
+from datetime import datetime
 from pathlib import Path
 
 import duckdb
+import matplotlib.pyplot as plt
 
+from src.config.settings import DB_PATH
+from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
 
-# Database path constant
-DB_PATH = "/Users/nicolasdhnr/Documents/VULCAN/data/goodreads_curated.duckdb"
+logger = logging.getLogger(__name__)
 
-# The preamble provides the helper functions and the database connection
-# that will be available to the agent's code.
-_PYTHON_TOOL_PREAMBLE = f"""
-import pandas as pd
-import duckdb
-import networkx as nx
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-from pathlib import Path
-import os
-import json
-from datetime import datetime
 
-# Use absolute path to the database with read-write access (orchestrator connection is closed)
-DB_PATH = "{DB_PATH}"
+def run_sql_query(query: str) -> str:
+    """
+    Executes a read-only SQL query against the database and returns the result as a markdown string.
+    This tool should be used for all SELECT queries.
+    """
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            df = conn.execute(query).fetchdf()
+            if df.empty:
+                return "Query executed successfully, but returned no results."
+            return df.to_markdown(index=False)
+    except Exception as e:
+        logger.error(f"SQL query failed: {query} | Error: {e}")
+        return f"ERROR: SQL query failed: {e}"
 
-# Set better plotting defaults
-plt.style.use('default')
-sns.set_palette("husl")
+
+def get_table_sample(table_name: str, n_samples: int = 5) -> str:
+    """Retrieves a random sample of rows from a specified table in the database."""
+    return run_sql_query(f'SELECT * FROM "{table_name}" USING SAMPLE {n_samples} ROWS;')
+
 
 def save_plot(filename: str):
-    '''Saves the current matplotlib plot to a file in the run's plot directory with optimized settings.'''
-    plots_dir = Path("./plots") # It will be executed from the run directory
+    """Saves the current matplotlib figure to the run-local 'plots' directory."""
+    plots_dir = get_run_dir() / "plots"
     plots_dir.mkdir(exist_ok=True)
-    
-    # Ensure the filename ends with .png, but don't add it if it already does.
-    if not filename.lower().endswith('.png'):
-        filename += '.png'
-        
-    path = plots_dir / filename
-    
-    # Apply better plot formatting
+    basename = Path(filename).name
+    if not basename.lower().endswith(".png"):
+        basename += ".png"
+    path = plots_dir / basename
     plt.tight_layout()
-    
-    # Auto-set reasonable axis limits if not already set
-    ax = plt.gca()
-    if hasattr(ax, 'get_xlim'):
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        # Only adjust if using default limits
-        if xlim == (0.0, 1.0) or any(abs(x) > 1e6 for x in xlim):
-            # Get data bounds and add small margin
-            try:
-                lines = ax.get_lines()
-                if lines:
-                    xdata = np.concatenate([line.get_xdata() for line in lines])
-                    if len(xdata) > 0:
-                        x_margin = (np.max(xdata) - np.min(xdata)) * 0.05
-                        ax.set_xlim(np.min(xdata) - x_margin, np.max(xdata) + x_margin)
-            except:
-                pass
-    
-    plt.savefig(path, dpi=300, bbox_inches='tight')
-    plt.close() # Close the plot to free memory
-    print(f"PLOT_SAVED:{{path.resolve()}}") # Use a special token to signal a plot was saved
-    return str(path.resolve())
+    plt.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close()
+    abs_path = path.resolve()
+    print(f"PLOT_SAVED:{abs_path}")
+    return str(abs_path)
 
-def create_analysis_view(view_name: str, sql_query: str):
-    '''Creates a permanent view for analysis and tracks it for cleanup.'''
-    # Use a non-read-only connection just for view creation
+
+def create_analysis_view(view_name: str, sql_query: str, rationale: str):
+    """Creates a permanent view for analysis, documents it, and tracks it for cleanup."""
     with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
-        # Create the view
-        full_sql = f"CREATE OR REPLACE VIEW {{view_name}} AS {{sql_query}}"
+        existing_views = [v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()]
+        actual_name = view_name
+        version = 2
+        while actual_name in existing_views:
+            actual_name = f"{view_name}_v{version}"
+            version += 1
+        if actual_name != view_name:
+            print(
+                f"View '{view_name}' already exists. Creating '{actual_name}' instead."
+            )
+        full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
         write_conn.execute(full_sql)
-        
-        # Track the view for cleanup
-        views_file = Path("./generated_views.json")
-        if views_file.exists():
-            with open(views_file, 'r') as f:
-                views_data = json.load(f)
-        else:
-            views_data = {{"views": []}}
-        
-        views_data["views"].append({{
-            "name": view_name,
-            "sql": full_sql,
-            "created_at": datetime.now().isoformat()
-        }})
-        
-        with open(views_file, 'w') as f:
-            json.dump(views_data, f, indent=2)
-            
-        print(f"VIEW_CREATED:{{view_name}}")
-        return f"Successfully created view: {{view_name}}"
-
-def analyze_and_plot(data_df, title="Data Analysis", x_col=None, y_col=None, plot_type="auto"):
-    '''Helper function to both analyze data numerically AND create bounded visualizations.'''
-    print(f"\\n=== NUMERICAL ANALYSIS: {{title}} ===")
-    print(f"Dataset shape: {{data_df.shape}}")
-    print(f"\\nSummary statistics:")
-    print(data_df.describe())
-    
-    if len(data_df.columns) > 1:
-        print(f"\\nCorrelation matrix:")
-        numeric_cols = data_df.select_dtypes(include=[np.number])
-        if len(numeric_cols.columns) > 1:
-            print(numeric_cols.corr())
-    
-    # Create visualization with bounded axes
-    plt.figure(figsize=(10, 6))
-    
-    if plot_type == "scatter" and x_col and y_col:
-        plt.scatter(data_df[x_col], data_df[y_col], alpha=0.6)
-        plt.xlabel(x_col)
-        plt.ylabel(y_col)
-        # Set bounded limits
-        x_min, x_max = data_df[x_col].min(), data_df[y_col].max()
-        y_min, y_max = data_df[y_col].min(), data_df[y_col].max()
-        x_margin = (x_max - x_min) * 0.05
-        y_margin = (y_max - y_min) * 0.05
-        plt.xlim(x_min - x_margin, x_max + x_margin)
-        plt.ylim(y_min - y_margin, y_max + y_margin)
-    elif plot_type == "hist" or (plot_type == "auto" and len(data_df.columns) == 1):
-        col = data_df.columns[0] if not x_col else x_col
-        data_df[col].hist(bins=30, alpha=0.7)
-        plt.xlabel(col)
-        plt.ylabel("Frequency")
-        # Set bounded x limits
-        x_min, x_max = data_df[col].min(), data_df[col].max()
-        x_margin = (x_max - x_min) * 0.05
-        plt.xlim(x_min - x_margin, x_max + x_margin)
-    
-    plt.title(title)
-    plt.grid(True, alpha=0.3)
-    
-    return title.lower().replace(" ", "_").replace(":", "")
-
-# The user's code will run inside this 'with' block with read-write access
-with duckdb.connect(database=str(DB_PATH), read_only=False) as conn:
-"""
-
-
-def execute_python(code: str) -> str:
-    """
-    Executes a string of Python code in a sandboxed environment with a pre-configured
-    database connection (`conn`) and helper functions (`save_plot`).
-
-    Args:
-        code: The string of Python code to execute.
-
-    Returns:
-        A string containing the captured STDOUT and STDERR from the execution.
-    """
-
-    # Always use the standard preamble for now (simplified approach)
-    indented_code = "    " + code.replace("\n", "\n    ")
-    full_script = f"{_PYTHON_TOOL_PREAMBLE}\n{indented_code}"
-
-    # Use the run-specific directory for sandboxing
-    run_dir = get_run_dir()
-    script_path = run_dir / "temp_agent_script.py"
-
-    with open(script_path, "w") as f:
-        f.write(full_script)
-
-    try:
-        # Execute the script in a new process for isolation
-        result = subprocess.run(
-            ["python", str(script_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # This will raise CalledProcessError if the script fails (exit code != 0)
-            timeout=120,  # Add a timeout to prevent runaway processes
-            cwd=str(run_dir),  # Set the working directory to the run directory
+        views_file = get_run_dir() / "generated_views.json"
+        views_data = (
+            json.load(open(views_file)) if views_file.exists() else {"views": []}
         )
-        output = f"STDOUT:\n{result.stdout}"
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        return output
-
-    except subprocess.CalledProcessError as e:
-        # This block catches script failures (e.g., Python exceptions)
-        return f"EXECUTION FAILED:\nSTDOUT:\n{e.stdout}\nSTDERR:\n{e.stderr}"
-    except subprocess.TimeoutExpired:
-        return "EXECUTION FAILED: Code execution timed out after 120 seconds."
-    finally:
-        # Clean up the temporary script
-        if script_path.exists():
-            script_path.unlink()
+        views_data["views"].append(
+            {
+                "name": actual_name,
+                "original_name": view_name,
+                "sql": sql_query,
+                "rationale": rationale,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
+        with open(views_file, "w") as f:
+            json.dump(views_data, f, indent=2)
+        print(f"VIEW_CREATED:{actual_name}")
+        return f"Successfully created view: {actual_name}"
 
 
 def cleanup_analysis_views(run_dir: Path):
@@ -198,16 +93,16 @@ def cleanup_analysis_views(run_dir: Path):
         print("No views to clean up.")
         return
 
-    with open(views_file, "r") as f:
-        views_data = json.load(f)
-
-    views_to_drop = [view["name"] for view in views_data["views"]]
-
-    if not views_to_drop:
-        print("No views to clean up.")
-        return
-
     try:
+        with open(views_file, "r") as f:
+            views_data = json.load(f)
+
+        views_to_drop = [view["name"] for view in views_data["views"]]
+
+        if not views_to_drop:
+            print("No views to clean up.")
+            return
+
         with duckdb.connect(database=DB_PATH, read_only=False) as conn:
             for view_name in views_to_drop:
                 try:
@@ -219,3 +114,125 @@ def cleanup_analysis_views(run_dir: Path):
         # views_file.unlink()
     except Exception as e:
         print(f"Error during view cleanup: {e}")
+
+
+def get_add_insight_tool(session_state):
+    """Returns a function that can be used as an AutoGen tool to add insights."""
+
+    def add_insight_to_report(
+        title: str,
+        finding: str,
+        source_representation: str,
+        supporting_code: str = None,
+        plot_path: str = None,
+        plot_interpretation: str = None,
+    ) -> str:
+        """
+        Adds a structured insight to the session report.
+
+        Args:
+            title: A concise, descriptive title for the insight
+            finding: The detailed finding or observation
+            source_representation: The name of the SQL View or Graph used for analysis
+            supporting_code: The exact SQL or Python code used to generate the finding
+            plot_path: The path to the plot that visualizes the finding
+            plot_interpretation: LLM-generated analysis of what the plot shows
+
+        Returns:
+            Confirmation message
+        """
+        insight = Insight(
+            title=title,
+            finding=finding,
+            source_representation=source_representation,
+            supporting_code=supporting_code,
+            plot_path=plot_path,
+            plot_interpretation=plot_interpretation,
+        )
+
+        session_state.add_insight(insight)
+        logger.info(f"Insight '{insight.title}' added.")
+        return f"Successfully added insight: '{title}' to the report."
+
+    return add_insight_to_report
+
+
+def get_finalize_hypotheses_tool(session_state):
+    """Returns a function that can be used as an AutoGen tool to finalize hypotheses."""
+
+    def finalize_hypotheses(hypotheses_data: list) -> str:
+        """
+        Finalizes the list of vetted hypotheses.
+
+        Args:
+            hypotheses_data: List of dictionaries containing hypothesis information
+            Each dict should have: id, description, strategic_critique, feasibility_critique
+
+        Returns:
+            Confirmation message
+        """
+        hypotheses = []
+        for h_data in hypotheses_data:
+            hypothesis = Hypothesis(
+                id=h_data["id"],
+                description=h_data["description"],
+                strategic_critique=h_data["strategic_critique"],
+                feasibility_critique=h_data["feasibility_critique"],
+            )
+            hypotheses.append(hypothesis)
+
+        session_state.finalize_hypotheses(hypotheses)
+        logger.info(f"Finalized {len(hypotheses)} hypotheses.")
+        return f"Successfully finalized {len(hypotheses)} hypotheses."
+
+    return finalize_hypotheses
+
+
+def vision_tool(image_path: str, prompt: str) -> str:
+    """Analyzes an image file using OpenAI's GPT-4o vision model."""
+    import base64
+    from pathlib import Path
+
+    from openai import OpenAI
+
+    try:
+        # Try to resolve path relative to current working directory
+        full_path = Path(image_path)
+        if not full_path.exists():
+            # Try relative to run directory if available
+            run_dir = get_run_dir()
+            full_path = run_dir / image_path
+
+        if not full_path.exists():
+            return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
+
+        # Initialize OpenAI client
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # Read and encode the image
+        with open(full_path, "rb") as image_file:
+            base64_image = base64.b64encode(image_file.read()).decode("utf-8")
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            max_tokens=1000,
+        )
+        return response.choices[0].message.content
+    except ImportError:
+        return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
+    except Exception as e:
+        return f"ERROR: An unexpected error occurred while analyzing the image: {e}"

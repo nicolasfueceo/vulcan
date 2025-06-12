@@ -39,3 +39,7 @@ openai
 torch
 requests
 python-dotenv
+pydantic
+redis
+tensorboardX
+tiktoken
