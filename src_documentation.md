@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-14 18:10:43
+Generated on: 2025-06-14 20:50:32
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -11,17 +11,37 @@ This document contains the complete source code structure and contents of the `s
 ├── .ruff_cache/
 │   ├── .gitignore
 │   ├── 0.11.13/
+│   │   ├── 10035001097010849136
+│   │   ├── 10209213205140466974
+│   │   ├── 11256956069432148776
 │   │   ├── 1231301740235175813
 │   │   ├── 12404207031273964348
+│   │   ├── 12986171790077239247
 │   │   ├── 13043826984468259098
+│   │   ├── 13450541447674714635
+│   │   ├── 14130817377459621375
+│   │   ├── 14195369555485797494
 │   │   ├── 14303290313017948516
+│   │   ├── 1639093997070980232
+│   │   ├── 16701771181186239481
+│   │   ├── 16789539735357863146
 │   │   ├── 17033856446843569390
+│   │   ├── 18047837004551977747
+│   │   ├── 18076770827875221276
+│   │   ├── 2172303405870675659
 │   │   ├── 3096963027186623868
+│   │   ├── 3102837809023614707
 │   │   ├── 3495669085465520408
 │   │   ├── 450221922813433944
 │   │   ├── 5320217578922298852
+│   │   ├── 644445844811209309
+│   │   ├── 711651472226615739
+│   │   ├── 8332078308367618719
 │   │   ├── 8475453963848076840
-│   │   └── 901234538733284022
+│   │   ├── 8584604848142013301
+│   │   ├── 901234538733284022
+│   │   ├── 9394952767601150040
+│   │   └── 9713079930055746817
 │   └── CACHEDIR.TAG
 ├── README.md
 ├── config/
@@ -60,6 +80,7 @@ This document contains the complete source code structure and contents of the `s
 ├── docs/
 │   └── code_mindmap.mermaid
 ├── generate_src_docs.py
+├── pyproject.toml
 ├── report/
 │   ├── .DS_Store
 │   └── plan/
@@ -111,6 +132,8 @@ This document contains the complete source code structure and contents of the `s
 │   │   └── feature_matrix.py
 │   ├── evaluation/
 │   │   ├── __pycache__/
+│   │   ├── beyond_accuracy.py
+│   │   ├── clustering.py
 │   │   └── scoring.py
 │   ├── orchestration/
 │   │   ├── __pycache__/
@@ -166,8 +189,16 @@ This document contains the complete source code structure and contents of the `s
 └── tests/
     ├── __init__.py
     ├── __pycache__/
+    ├── agents/
+    │   └── strategy_team/
+    │       ├── __pycache__/
+    │       └── test_evaluation_agent.py
     ├── conftest.py
     ├── debug_db_connection.py
+    ├── evaluation/
+    │   ├── __pycache__/
+    │   ├── test_beyond_accuracy.py
+    │   └── test_clustering.py
     ├── test_optimization_agent.py
     ├── test_optimization_end_to_end.py
     └── test_orchestrator_e2e.py
@@ -232,7 +263,7 @@ def get_insight_discovery_agents(
 
 ### `agents/strategy_team/evaluation_agent.py`
 
-**File size:** 1,996 bytes
+**File size:** 7,500 bytes
 
 ```python
 # src/agents/evaluation_agent.py
@@ -252,39 +283,134 @@ class EvaluationAgent:
     @agent_run_decorator("EvaluationAgent")
     def run(self, session_state: SessionState):
         """
-        Runs a final evaluation on the best model and logs metrics.
-        This is a procedural step called by the orchestrator.
+        Runs a final, paper-ready evaluation on the best model and logs metrics and artifacts.
         """
-        logger.info("Starting final evaluation...")
+        import json
+        from pathlib import Path
+        import pandas as pd
+        import numpy as np
+        from src.data.cv_data_manager import CVDataManager
+        from src.evaluation.scoring import _train_and_evaluate_lightfm
+        from src.evaluation.clustering import cluster_users_kmeans
+        from src.evaluation.beyond_accuracy import (
+            compute_novelty, compute_diversity, compute_catalog_coverage
+        )
+        from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 
+        logger.info("Starting final evaluation...")
         opt_results = session_state.get_state("optimization_results", {})
         best_trial = opt_results.get("best_trial")
+        realized_features = session_state.get_state("realized_features", [])
+        run_dir = getattr(session_state, 'run_dir', Path("runtime/runs/unknown"))
+        artifacts_dir = Path(run_dir) / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
 
         if not best_trial:
             logger.warning("No optimization results found. Skipping evaluation.")
             return
-
         best_params = best_trial.params
-        best_value = best_trial.value
-
-        # In a real implementation, this would involve retraining and testing on a holdout set.
-        # For now, we'll consider the best validation score as the final metric.
-        logger.info(f"Final evaluation with best params: {best_params}")
-        logger.info(f"Best validation score (e.g., RMSE): {best_value}")
-
-        # Log metrics to TensorBoard
-        self.writer.add_scalar("final_test_metric", best_value, self.run_count)
-        self.writer.add_hparams(best_params, {"hparam/final_test_metric": best_value})
-
-        # Store final results in the session state
-        evaluation_results = {
-            "final_metric": best_value,
+        # --- 1. Load hold-out data ---
+        data_manager = CVDataManager(
+            db_path=session_state.db_path,
+            splits_dir="data/processed/cv_splits",
+        )
+        n_folds = data_manager.get_fold_summary().get("n_folds", 1)
+        full_train_df, test_df = data_manager.get_fold_data(fold_idx=n_folds-1, split_type="full_train")
+        # --- 2. Generate feature matrices ---
+        X_train = VULCANOptimizer._generate_feature_matrix(full_train_df, realized_features, best_params)
+        X_test = VULCANOptimizer._generate_feature_matrix(test_df, realized_features, best_params)
+        # --- 3. Global LightFM model ---
+        from lightfm.data import Dataset
+        dataset = Dataset()
+        all_users = pd.concat([full_train_df["user_id"], test_df["user_id"]]).unique()
+        all_items = pd.concat([full_train_df["book_id"], test_df["book_id"]]).unique()
+        dataset.fit(users=all_users, items=all_items)
+        (test_interactions, _) = dataset.build_interactions(
+            [(row["user_id"], row["book_id"]) for _, row in test_df.iterrows()]
+        )
+        user_features_train = dataset.build_user_features(
+            (user_id, {col: X_train.loc[user_id, col] for col in X_train.columns})
+            for user_id in X_train.index
+        )
+        global_metrics = {}
+        for k in [5, 10, 20]:
+            scores = _train_and_evaluate_lightfm(
+                dataset, full_train_df, test_interactions, user_features=user_features_train, k=k
+            )
+            global_metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
+            global_metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
+            global_metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
+        # --- 4. Clustering and Intra-Cluster Models ---
+        cluster_labels = cluster_users_kmeans(X_train, n_clusters=5, random_state=42)
+        clusters = {}
+        cluster_metrics = {}
+        for label in set(cluster_labels.values()):
+            user_ids = [user_id for user_id, cluster_label in cluster_labels.items() if cluster_label == label]
+            train_sub = full_train_df[full_train_df["user_id"].isin(user_ids)]
+            test_sub = test_df[test_df["user_id"].isin(user_ids)]
+            X_train_sub = X_train.loc[user_ids]
+            user_features_sub = dataset.build_user_features(
+                (user_id, {col: X_train_sub.loc[user_id, col] for col in X_train_sub.columns})
+                for user_id in X_train_sub.index
+            )
+            (test_interactions_sub, _) = dataset.build_interactions(
+                [(row["user_id"], row["book_id"]) for _, row in test_sub.iterrows()]
+            )
+            metrics = {}
+            for k in [5, 10, 20]:
+                scores = _train_and_evaluate_lightfm(
+                    dataset, train_sub, test_interactions_sub, user_features=user_features_sub, k=k
+                )
+                metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
+                metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
+                metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
+            cluster_metrics[label] = metrics
+            clusters[label] = user_ids
+        # --- 5. Beyond-Accuracy Metrics ---
+        def get_recommendations(model, dataset, user_ids, k):
+            # Recommend top-k for each user (returns a sparse matrix)
+            recs = {}
+            for i, user_id in enumerate(user_ids):
+                scores = model.predict(i, np.arange(len(all_items)), user_features=None)
+                top_items = np.argsort(-scores)[:k]
+                rec_items = [all_items[j] for j in top_items]
+                recs[user_id] = rec_items
+            return recs
+        # Global recommendations for beyond-accuracy
+        # (Assume last trained model is global)
+        from lightfm import LightFM
+        model = LightFM(loss="warp", random_state=42)
+        (train_interactions, _) = dataset.build_interactions(
+            [(row["user_id"], row["book_id"]) for _, row in full_train_df.iterrows()]
+        )
+        model.fit(train_interactions, user_features=user_features_train, epochs=5, num_threads=4)
+        global_recs = get_recommendations(model, dataset, list(X_test.index), k=10)
+        novelty = compute_novelty(global_recs, full_train_df)
+        diversity = compute_diversity(global_recs)
+        catalog = set(all_items)
+        coverage = compute_catalog_coverage(global_recs, catalog)
+        global_metrics.update({"novelty": novelty, "diversity": diversity, "catalog_coverage": coverage})
+        # Cluster beyond-accuracy
+        for label, user_ids in clusters.items():
+            recs = get_recommendations(model, dataset, user_ids, k=10)
+            cluster_metrics[label]["novelty"] = compute_novelty(recs, full_train_df)
+            cluster_metrics[label]["diversity"] = compute_diversity(recs)
+            cluster_metrics[label]["catalog_coverage"] = compute_catalog_coverage(recs, catalog)
+        # --- 6. Logging and Artifact Saving ---
+        self.writer.add_hparams(best_params, global_metrics)
+        session_state.set_state("final_evaluation_metrics", {
+            "global": global_metrics,
+            "clusters": cluster_metrics
+        })
+        # Save final report
+        report = {
             "best_params": best_params,
-            "status": "success",
+            "global_metrics": global_metrics,
+            "cluster_metrics": cluster_metrics,
         }
-        session_state.set_state("evaluation_results", evaluation_results)
-
-        logger.info("Final evaluation complete. Results saved to session state.")
+        with open(artifacts_dir / "final_report.json", "w") as f:
+            json.dump(report, f, indent=2, default=str)
+        logger.info("Final evaluation complete. Results and artifacts saved.")
         self.run_count += 1
         self.writer.close()
 ```
@@ -1572,12 +1698,11 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
 
 ### `baselines/featuretools_baseline.py`
 
-**File size:** 3,363 bytes
+**File size:** 3,337 bytes
 
 ```python
 import featuretools as ft
 import pandas as pd
-from loguru import logger
 
 
 def run_featuretools_baseline(
@@ -1666,12 +1791,11 @@ def run_featuretools_baseline(
 
 ### `baselines/popularity_baseline.py`
 
-**File size:** 1,074 bytes
+**File size:** 1,028 bytes
 
 ```python
 import pandas as pd
-import numpy as np
-from src.baselines.ranking_utils import get_top_n_recommendations, calculate_ndcg
+from src.baselines.ranking_utils import calculate_ndcg
 
 def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
     """
@@ -1702,7 +1826,7 @@ def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n
 
 ### `baselines/ranking_utils.py`
 
-**File size:** 2,192 bytes
+**File size:** 2,169 bytes
 
 ```python
 import numpy as np
@@ -1752,7 +1876,6 @@ def calculate_ndcg(
     ground_truth: {user_id: [item1, item2, ...]}
     batch_size: Number of users to process at once (to avoid OOM)
     """
-    import numpy as np
     user_ids = list(recommendations.keys())
     ndcgs = []
     for i in range(0, len(user_ids), batch_size):
@@ -3246,6 +3369,109 @@ def generate_feature_matrix(
 
     logger.info(f"Generated feature matrix X with shape: {X.shape}")
     return X
+```
+
+### `evaluation/beyond_accuracy.py`
+
+**File size:** 2,770 bytes
+
+```python
+# src/evaluation/beyond_accuracy.py
+"""
+Metrics for beyond-accuracy evaluation of recommender systems.
+Implements novelty, diversity, and catalog coverage.
+"""
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Set, Any
+
+def compute_novelty(recommendations: Dict[Any, List[Any]], train_df: pd.DataFrame) -> float:
+    """
+    Novelty: Inverse log-popularity of recommended items (higher is more novel).
+    Args:
+        recommendations: {user_id: [item_id, ...]}
+        train_df: DataFrame with columns ['user_id', 'item_id'] (training interactions)
+    Returns:
+        Mean novelty across all recommendations.
+    """
+    item_counts = train_df['item_id'].value_counts().to_dict()
+    total_users = train_df['user_id'].nunique()
+    novelty_scores = []
+    for user, recs in recommendations.items():
+        for item in recs:
+            pop = item_counts.get(item, 1)
+            novelty = -np.log2(pop / total_users)
+            novelty_scores.append(novelty)
+    return float(np.mean(novelty_scores)) if novelty_scores else 0.0
+
+def compute_diversity(recommendations: Dict[Any, List[Any]], item_features: pd.DataFrame = None) -> float:
+    """
+    Diversity: Mean pairwise dissimilarity between recommended items (per user, then averaged).
+    If item_features is None, uses unique item count as a proxy.
+    Args:
+        recommendations: {user_id: [item_id, ...]}
+        item_features: DataFrame indexed by item_id (optional)
+    Returns:
+        Mean diversity across users.
+    """
+    from itertools import combinations
+    diversities = []
+    for user, recs in recommendations.items():
+        if not recs or len(recs) == 1:
+            diversities.append(1.0)
+            continue
+        if item_features is not None:
+            feats = item_features.loc[recs].values
+            sims = [np.dot(feats[i], feats[j]) / (np.linalg.norm(feats[i]) * np.linalg.norm(feats[j]) + 1e-8)
+                    for i, j in combinations(range(len(recs)), 2)]
+            mean_sim = np.mean(sims)
+            diversities.append(1 - mean_sim)
+        else:
+            # Proxy: fraction of unique items
+            diversities.append(len(set(recs)) / len(recs))
+    return float(np.mean(diversities)) if diversities else 0.0
+
+def compute_catalog_coverage(recommendations: Dict[Any, List[Any]], catalog: Set[Any]) -> float:
+    """
+    Catalog coverage: Fraction of catalog items recommended to any user.
+    Args:
+        recommendations: {user_id: [item_id, ...]}
+        catalog: Set of all item_ids
+    Returns:
+        Fraction of unique recommended items over catalog size.
+    """
+    recommended = set()
+    for recs in recommendations.values():
+        recommended.update(recs)
+    return len(recommended) / len(catalog) if catalog else 0.0
+```
+
+### `evaluation/clustering.py`
+
+**File size:** 733 bytes
+
+```python
+# src/evaluation/clustering.py
+"""
+User clustering utility for evaluation (e.g., KMeans).
+"""
+from typing import Dict, Any
+import pandas as pd
+from sklearn.cluster import KMeans
+
+def cluster_users_kmeans(X: pd.DataFrame, n_clusters: int = 5, random_state: int = 42) -> Dict[Any, int]:
+    """
+    Clusters users via KMeans on their feature vectors.
+    Args:
+        X: pd.DataFrame, indexed by user_id, user feature matrix
+        n_clusters: number of clusters
+        random_state: for reproducibility
+    Returns:
+        Dict mapping user_id to cluster label
+    """
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    labels = kmeans.fit_predict(X.values)
+    return dict(zip(X.index, labels))
 ```
 
 ### `evaluation/scoring.py`
@@ -4852,7 +5078,7 @@ _refresh_database_schema()
 
 ### `utils/run_utils.py`
 
-**File size:** 5,761 bytes
+**File size:** 5,771 bytes
 
 ```python
 #!/usr/bin/env python3
@@ -4988,7 +5214,7 @@ def config_list_from_json(file_path: str) -> List[Dict]:
         return []
 
 
-def restart_pipeline(config: Dict[str, Any] = None) -> None:
+def restart_pipeline(config: Optional[Dict[str, Any]] = None) -> None:
     """
     Restarts the pipeline with an optional configuration update.
     This function should be called by the ReflectionAgent when deciding to continue.
@@ -5089,16 +5315,15 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 14,203 bytes
+**File size:** 14,114 bytes
 
 ```python
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import duckdb
 from loguru import logger
-
 
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
@@ -5164,9 +5389,7 @@ class SessionState:
 
                 # Load run counters
                 self.ideation_run_count = data.get("ideation_run_count", 0)
-                self.feature_realization_run_count = data.get(
-                    "feature_realization_run_count", 0
-                )
+                self.feature_realization_run_count = data.get("feature_realization_run_count", 0)
                 self.reflection_run_count = data.get("reflection_run_count", 0)
 
                 logger.info(
@@ -5340,7 +5563,7 @@ class SessionState:
         self,
         image_path: str,
         prompt: str,
-    ) -> str:
+    ) -> Union[str, None]:
         """
         Analyzes an image file using OpenAI's GPT-4o vision model.
         This tool automatically resolves the path relative to the run's output directory.
@@ -5374,9 +5597,7 @@ class SessionState:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                },
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
                             },
                         ],
                     }
@@ -5460,7 +5681,7 @@ class SessionState:
 
 ### `utils/testing_utils.py`
 
-**File size:** 1,542 bytes
+**File size:** 1,547 bytes
 
 ```python
 import json
@@ -5482,7 +5703,7 @@ def assert_json_schema(instance: dict, schema_path: str) -> None:
 
 def load_test_data(
     n_reviews: int, n_items: int, n_users: int
-) -> (pd.DataFrame, pd.DataFrame):
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Creates a synthetic toy dataset with random ratings, random words."""
     # Create reviews data
     review_data = {
@@ -5523,13 +5744,13 @@ def load_test_data(
 import json
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import duckdb
 import matplotlib.pyplot as plt
-import subprocess
-import sys
 from openai import BadRequestError
 
 from src.config.settings import DB_PATH
@@ -5856,9 +6077,9 @@ def execute_python(code: str, timeout: int = 60) -> str:
 
 ## 📊 Summary
 
-- **Total files processed:** 40
+- **Total files processed:** 42
 - **Directory:** `src`
-- **Generated:** 2025-06-14 18:10:43
+- **Generated:** 2025-06-14 20:50:32
 
 ---
 
