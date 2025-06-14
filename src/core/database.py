@@ -1,8 +1,13 @@
 import logging
+import os
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import duckdb
 import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.config.settings import DB_PATH
 
@@ -177,3 +182,99 @@ def get_db_schema_string() -> str:
         return (
             f"ERROR: Could not retrieve database schema from {db_path}. Error: {str(e)}"
         )
+
+
+def get_db_connection() -> duckdb.DuckDBPyConnection:
+    """Returns a read-write connection to the main DuckDB database."""
+    return duckdb.connect(database=str(DB_PATH), read_only=False)
+
+
+class DatabaseConnection:
+    def __init__(
+        self, connection_string: Optional[str] = None, engine: Optional[Engine] = None
+    ):
+        """Initialize database connection
+
+        Args:
+            connection_string: SQLAlchemy connection string
+            engine: Existing SQLAlchemy engine (for testing)
+        """
+        if engine:
+            self.engine = engine
+        else:
+            connection_string = connection_string or os.getenv(
+                "DATABASE_URL",
+                "sqlite:///data/vulcan.db",  # Default to SQLite
+            )
+            self.engine = create_engine(connection_string)
+
+        # Test connection
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("Database connection successful")
+        except SQLAlchemyError as e:
+            logger.error(f"Database connection failed: {str(e)}")
+            raise
+
+    def execute_query(self, query: str) -> Dict[str, Any]:
+        """Execute SQL query and return results
+
+        Args:
+            query: SQL query string
+
+        Returns:
+            Dictionary with query results
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query))
+                if result.returns_rows:
+                    df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    return {"data": df.to_dict(orient="records")}
+                return {"affected_rows": result.rowcount}
+        except SQLAlchemyError as e:
+            logger.error(f"Query execution failed: {str(e)}")
+            raise
+
+    def create_view(self, view_name: str, query: str, version: Optional[int] = None):
+        """Create or replace a view
+
+        Args:
+            view_name: Name of the view
+            query: SQL query defining the view
+            version: Optional version number to append to view name
+        """
+        if version:
+            view_name = f"{view_name}_v{version}"
+
+        create_view_sql = f"CREATE OR REPLACE VIEW {view_name} AS {query}"
+
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text(create_view_sql))
+                conn.commit()
+            logger.info(f"View {view_name} created successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to create view {view_name}: {str(e)}")
+            raise
+
+    def drop_view(self, view_name: str):
+        """Drop a view if it exists
+
+        Args:
+            view_name: Name of the view to drop
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text(f"DROP VIEW IF EXISTS {view_name}"))
+                conn.commit()
+            logger.info(f"View {view_name} dropped successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to drop view {view_name}: {str(e)}")
+            raise
+
+    def close(self):
+        """Close database connection"""
+        self.engine.dispose()
+        logger.info("Database connection closed")

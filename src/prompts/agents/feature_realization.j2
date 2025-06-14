@@ -1,0 +1,56 @@
+You are an expert Python data scientist responsible for writing feature engineering functions.
+Your task is to write a single, complete Python function based on the provided specification.
+
+**CRITICAL INSTRUCTIONS:**
+1.  The function MUST be named `{{ name }}`.
+2.  The function MUST accept a pandas DataFrame `df` as its first argument.
+3.  The function MUST accept the following tunable parameters as keyword arguments with their specified default values:
+    {% for param, config in params.items() %}
+    - `{{ param }}` (type: {{ config.type }}, default: {{ config.default | default(1.0) }})
+    {% endfor %}
+4.  The function MUST include a detailed docstring explaining its purpose, parameters, and what it returns.
+5.  The function MUST return a pandas Series with the same index as the input DataFrame `df`.
+6.  The code MUST be wrapped in a `try...except` block to handle potential runtime errors gracefully.
+
+**FEATURE SPECIFICATION:**
+- **Name:** `{{ name }}`
+- **Rationale:** {{ rationale }}
+- **Logic (Spec):** `{{ spec }}`
+- **Tunable Parameters:** {{ params | tojson }}
+
+**YOUR RESPONSE MUST BE ONLY THE PYTHON CODE, INSIDE A MARKDOWN BLOCK.**
+
+**EXAMPLE CODE STRUCTURE TO FOLLOW:**
+```python
+import pandas as pd
+import numpy as np
+
+def {{ name }}(df: pd.DataFrame, {% for param, config in params.items() %}{{ param }}: {{ 'int' if config.type == 'int' else 'float' }} = {{ config.default | default(1.0) }}{% if not loop.last %}, {% endif %}{% endfor %}) -> pd.Series:
+    """
+    (Your detailed docstring here explaining the feature's purpose)
+
+    Args:
+        df (pd.DataFrame): The input dataframe, containing columns like 'user_id', 'book_id', 'rating'.
+        {% for param, config in params.items() %}
+        {{ param }} ({{ 'int' if config.type == 'int' else 'float' }}): (Your description of this parameter).
+        {% endfor %}
+
+    Returns:
+        pd.Series: A Series containing the calculated feature values, indexed by the original df index.
+    """
+    try:
+        #
+        # YOUR IMPLEMENTATION of the feature logic `{{ spec }}` goes here.
+        #
+        
+        # Example:
+        # result = df['rating'] * {{ params.keys() | list | first | default('param') }}
+        
+        # Ensure the output is a pandas Series with the correct name and index
+        # return pd.Series(result, index=df.index, name='{{ name }}')
+
+    except Exception as e:
+        # Return a series of NaNs or a default value on failure
+        print(f"Error calculating feature '{{ name }}': {e}")
+        return pd.Series(np.nan, index=df.index, name='{{ name }}')
+```

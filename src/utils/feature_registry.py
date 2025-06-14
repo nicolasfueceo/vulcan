@@ -1,3 +1,6 @@
+from loguru import logger
+
+
 class FeatureRegistry:
     def __init__(self):
         self._registry = {}
@@ -5,7 +8,7 @@ class FeatureRegistry:
     def register(self, name: str, feature_data: dict):
         """Registers a feature function and its metadata."""
         if name in self._registry:
-            print(f"Warning: Feature {name} is already registered. Overwriting.")
+                        logger.warning(f"Feature {name} is already registered. Overwriting.")
         self._registry[name] = feature_data
 
     def get(self, name: str) -> dict:

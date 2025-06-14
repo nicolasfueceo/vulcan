@@ -7,36 +7,30 @@ from typing import Dict
 
 import autogen
 
-from src.utils.prompt_utils import load_prompt
-
 
 def get_hypothesis_agents(
-    llm_config: Dict, insights_report: str
+    llm_config: Dict, system_prompt: str
 ) -> Dict[str, autogen.ConversableAgent]:
     """
     Initializes and returns the agents for the hypothesis and strategy loop.
-    Uses Jinja2 templates from src/prompts/agents/strategy_team/
+    All agents will share the same system prompt to ensure a shared context.
+    Individual roles are defined in separate, more concise prompts.
     """
+    # Define agent roles
+    agent_roles = {
+        "HypothesisAgent": "Your role is to propose initial hypotheses based on the insight report.",
+        "StrategistAgent": "Your role is to critique hypotheses for business and scientific value.",
+        "EngineerAgent": "Your role is to critique hypotheses for technical feasibility and finalize the list.",
+    }
 
-    # Load agent prompts from Jinja2 templates
-    hypothesis_prompt = load_prompt(
-        "agents/strategy_team/hypothesis_agent.j2", insights_report=insights_report
-    )
-    strategist_prompt = load_prompt("agents/strategy_team/strategist_agent.j2")
-    engineer_prompt = load_prompt("agents/strategy_team/engineer_agent.j2")
-
-    agent_defs = [
-        ("HypothesisAgent", hypothesis_prompt),
-        ("StrategistAgent", strategist_prompt),
-        ("EngineerAgent", engineer_prompt),
-    ]
-
-    # Create agents with loaded prompts
+    # Create agents with a shared system prompt and specific roles
     agents = {
         name: autogen.AssistantAgent(
-            name=name, system_message=prompt, llm_config=llm_config
+            name=name,
+            system_message=system_prompt + "\n\n**YOUR SPECIFIC ROLE:**\n" + role,
+            llm_config=llm_config,
         )
-        for name, prompt in agent_defs
+        for name, role in agent_roles.items()
     }
 
     user_proxy = autogen.UserProxyAgent(

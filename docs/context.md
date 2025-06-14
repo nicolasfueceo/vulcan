@@ -1,141 +1,93 @@
-# Project Overview: LLM-Driven Feature Engineering for Recommender Systems
+Of course. Creating a clear, up-to-date context document is essential for maintaining project alignment, especially for an LLM that needs to understand the current state of a complex system.
 
-## 1. Project Objectives
+Based on the latest `src_documentation.md` you provided, here is a detailed script outlining what the VULCAN system is and what remains to be built.
 
-1. **Automated Feature Discovery via LLMs**  
-   - Use a Large Language Model (LLM) to autonomously generate, mutate, and refine user/item features from Goodreads review and rating data.  
-   - Evolve a population of candidate features in a progressive, generation-based loop.  
-   - Leverage a reward signal that balances:
-     - **Cluster separability** (e.g. silhouette score, number of clusters)  
-     - **Recommendation quality** (e.g. intra-cluster RMSE or Precision@K improvements)  
+---
+### **Project VULCAN: System Architecture & Implementation Roadmap**
 
-2. **Warm-Start Recommendation (Intra-Cluster Models)**  
-   - For each candidate feature, cluster users based on that feature alone.  
-   - Train simple recommender models (e.g. LightFM, SVD, KNN) on each cluster’s user-item interactions.  
-   - Evaluate resulting Precision@K, NDCG, and clustering metrics—combine them into a scalar “feature reward.”  
-   - Retain top-scoring features, so that the final set produces highly separated clusters and strong within-cluster recommendations.
+**Version:** 1.5 (as of 2025-06-13)
+**Audience:** Project LLM / New Collaborator
+**Purpose:** To provide a comprehensive overview of the current system architecture and the remaining implementation tasks.
 
-3. **RL-Guided Search Strategy**  
-   - Benchmark a basic **ε-greedy** policy (exploration vs exploitation) for choosing **“Generate New Feature”** vs **“Mutate Existing Feature.”**  
-   - Integrate more advanced bandit or tree-search strategies (e.g. **UCB**, **Thompson Sampling**, or **MCTS with priors**) to improve how quickly the search converges on high-reward features.  
-   - Maintain ε-greedy as a baseline for comparison.  
+### **1. High-Level Project Goal**
 
-4. **Cold-Start User Assignment via Bayesian Q&A (Future Phase)**  
-   - Once clusters and their archetypal feature profiles are finalized, design a short conversational questionnaire to assign a brand-new user to the most likely cluster.  
-   - Use a Bayesian updating framework: ask questions that maximize expected information gain about which cluster the user belongs to.  
-   - Quickly identify the user’s segment, then serve recommendations from that cluster’s model.
+We are building VULCAN, a self-improving, multi-agent feature engineering system designed to autonomously discover, create, validate, and optimize features for a book recommendation engine. The system's core objective is to find feature transformations that improve the quality of user clusters, which in turn enhances the accuracy of intra-cluster recommendations.
 
-5. **Rigorous Evaluation & Benchmarking**  
-   - During the **iterative search**, perform a **fast-mode evaluation** on a small subsample (e.g. 10% of users, 20% of items) to score candidate features without full-scale training.  
-   - At the **final generation**, run a **full evaluation** on the entire train/test split—train multiple recommenders (LightFM with more epochs, Surprise SVD, KNN) and compute Precision@5/10, Recall@K, NDCG@K, and clustering metrics.  
-   - Compare advanced RL strategies (UCB, Thompson) against ε-greedy on:
-     - Cumulative reward curve over generations  
-     - Convergence speed (generations to reach X% of max reward)  
-     - Final cluster separation and recommendation lift  
-   - Save all results, tree structures, and metrics for post-hoc analysis and frontend visualization.
+---
+### **2. Current Architecture ("What We Are Building")**
 
-6. **Logging & Visualization**  
-   - Use **TensorBoard** (or the internal logging framework) to track:
-     - **Reward vs. Generation**  
-     - **Optimal Number of Clusters vs. Generation**  
-     - **Silhouette Score vs. Generation**  
-     - **Recommendation Metrics (Precision@K, NDCG@K) vs. Generation**  
-   - Export the evolving **feature tree** as JSON (nodes/edges with IDs, parent IDs, scores, action types) so the frontend can render it.  
-   - Produce metrics JSON or CSV logs for easy plotting of historical performance in the custom frontend.
+The system is architected as a multi-phase, procedurally-driven pipeline managed by a central orchestrator. It leverages `autogen` for multi-agent conversations and has a strong emphasis on modularity, structured prompting, and robust state management.
 
-## 2. Data Flow & Pipeline Components
+**2.1. Orchestration (`src/orchestrator.py`)**
 
-1. **Data Preparation**  
-   - Input: Goodreads reviews and ratings stored in SQLite databases (`train.db`, `val.db`, `test.db`).  
-   - Split Strategy:
-     - **Design Set** (e.g. 80% of users) for feature engineering and clustering.
-       - Nested CV:  
-         - Outer K-fold splits: Partition users into “TrainFE” vs “ValClusters.”  
-         - Inner M-fold splits (within TrainFE) for training vs validating candidate features.  
-     - **Hold-Out Set** (20% of users) reserved for final cold-start and end-to-end evaluation.
+* The main entry point is `orchestrator.py`, which initializes a run-specific context and a `SessionState` object that acts as the single source of truth for the entire pipeline run.
+* The orchestrator manages a primary `while True:` loop, allowing for continuous, multi-run operation, with the `ReflectionAgent` controlling the decision to loop or terminate.
+* It sequentially calls modular scripts for each phase of the pipeline (`run_discovery_loop`, `run_strategy_loop`, `run_feature_ideation`, etc.).
 
-2. **LLM-Based Feature Generation (FeatureAgent)**  
-   - **Prompt Construction:**  
-     - Provide the LLM with:  
-       - Task description (recommender objective)  
-       - Metadata for existing features (names, descriptions)  
-       - A small sample of user-item interactions/aggregates (serialized).  
-       - Action context: either “GENERATE_NEW” or “MUTATE_EXISTING” with parent feature details.  
-     - Instruct the LLM to output a Python snippet (or structured JSON) that computes a new feature as a pandas Series (indexed by user).  
-   - **Candidate Mutation:**  
-     - When “MUTATE_EXISTING” is chosen, the agent receives the code or description of the worst-performing feature and is told to produce a variant (e.g., apply a transformation or combine it with another simple statistic).  
-   - **Code Repair Loop:**  
-     - If the LLM’s generated code fails to execute, automatically invoke the LLM again (with the original prompt + error traceback) to fix syntax or logic, up to a configured number of attempts.
+**2.2. Phase 1: Insight & Strategy**
 
-3. **Feature Execution & Fast-Mode Evaluation**  
-   - **Fast-Mode Sampling:**  
-     - Randomly subsample a fraction of users and items per feature (fractions configurable).  
-     - Execute the candidate’s code on that mini-dataset to produce feature values.  
-   - **Mini-Cluster & Mini-Recommendation:**  
-     - Cluster sampled users using the candidate feature (e.g. KMeans on 1D feature values).  
-     - Train a quick LightFM model (5–10 epochs) on the sampled training interactions.  
-     - Evaluate Precision@5 (or NDCG@5) on held-out sample interactions.  
-   - **Fast Reward Computation:**  
-     - Compute normalized silhouette on the clustered subsample.  
-     - Combine silhouette + mini-Precision@K (weighted) into a scalar “fast reward.”  
-     - Return this score to the orchestrator for ranking in that generation.
+This phase uses two collaborative `GroupChat` sessions to simulate a research and strategy team.
 
-4. **Progressive Evolution Orchestrator (RL Loop)**  
-   - **Initialize:**  
-     - Start with a **seed population** of newly generated features (N features).  
-     - Evaluate them in fast mode; keep top M features (population size).  
-   - **Each Generation:**  
-     1. **Action Selection:** Use an RL strategy (ε-greedy, UCB, or Thompson Sampling) to decide:
-        - **Generate_New:** ask the LLM for a completely new feature (prompt with existing population context).  
-        - **Mutate_Existing:** select one parent feature (e.g. worst performer or via tournament) and prompt the LLM to mutate it.  
-     2. **Candidate Creation:** Receive 1–B candidate features from the LLM.  
-     3. **Fast-Mode Scoring:** For each candidate, run fast-mode evaluation and compute fast reward.  
-     4. **Selection:** Add candidates to the population, sort by reward, discard lowest until population size is M.  
-     5. **Log & Visualize:** Record generation metrics (best_reward, avg_reward, cluster_count, silhouette) to TensorBoard and JSON logs. Append any new tree nodes to `tree.json`.  
-   - **Terminate:** After `max_generations` or convergence, switch to **full evaluation** for the **final population**.  
+* **Insight Discovery Team (`run_discovery_loop`):**
+    * **Purpose:** To perform a comprehensive Exploratory Data Analysis (EDA).
+    * **Agents:** A `GroupChat` consisting of `DataRepresenter`, `QuantitativeAnalyst`, and `PatternSeeker`.
+    * **Workflow:** The team uses a set of granular tools (`run_sql_query`, `create_analysis_view`, `vision_tool`) to explore the database. Findings are saved as structured `Insight` objects to the `SessionState` via the `add_insight_to_report` tool.
+    * **Advanced Features:** This loop is managed by a `SmartGroupChatManager` that handles advanced context compression and progress guidance to keep the conversation on track.
 
-5. **Full Evaluation (Final Phase)**  
-   - Use **entire dataset** (train/test splits) with no subsampling.  
-   - Train multiple recommenders per cluster:
-     - **LightFM** (e.g. 50 epochs, grid-tuned hyperparameters).  
-     - **Surprise SVD** (e.g. 50 factors, 20 epochs).  
-     - **KNN-Basic** (e.g. user–user or item–item).  
-   - Evaluate on test set:  
-     - Precision@5/10, Recall@K, NDCG@5/10.  
-     - Compute final silhouette and cluster count.  
-     - Derive “full reward” or “overall score” for each feature.  
-   - Identify the **best feature** (or top K features) from the final population according to full reward.
+* **Strategy Team (`run_strategy_loop`):**
+    * **Purpose:** To refine raw insights into a vetted list of testable hypotheses.
+    * **Agents:** A `GroupChat` of `HypothesisAgent`, `StrategistAgent`, and `EngineerAgent`.
+    * **Workflow:** The team engages in a structured debate to critique proposed hypotheses on their strategic value and technical feasibility. The final list is saved to `SessionState` via the `finalize_hypotheses` tool.
 
-6. **Cold-Start Questionnaire (Future Work)**  
-   - For each of the final clusters, identify “archetypal” features (small set of features that best distinguish that cluster).  
-   - Build a **Bayesian Q&A engine** that:
-     - Maintains a prior distribution over cluster membership for a new user.  
-     - At each question turn, selects the question expected to yield the highest information gain (given archetypal feature values).  
-     - Updates posterior belief as user answers (mapping answer to a feature value estimate).  
-     - Stops when confidence in a cluster assignment exceeds a threshold, then assigns the user to that cluster’s recommender.
+**2.3. Phase 2: Feature Generation & Optimization**
 
-## 3. Configuration & Extensibility
+The orchestrator calls these steps sequentially after the strategy loop.
 
-- **Configurable RL Strategy** (`config.rl.strategy`):  
-  - `"epsilon"` (baseline)  
-  - `"ucb"` (Upper Confidence Bound)  
-  - `"thompson"` (Thompson Sampling)  
-  - Optionally: `"mcts_prior"` (MCTS with heuristic or learned priors)  
+* **Feature Ideation (`orchestration/ideation.py`):**
+    * Takes the vetted hypotheses from `SessionState` and uses the `FeatureIdeationAgent` to brainstorm `CandidateFeature` specifications, including tunable parameters.
+* **Feature Realization (`orchestration/realization.py`):**
+    * Takes the candidate features and uses the `FeatureRealizationAgent` to generate and perform a sandboxed test on the feature's Python code.
+* **Optimization (`agents/strategy_team/optimization_agent_v2.py`):**
+    * The `VULCANOptimizer` class uses `optuna` to perform Bayesian Optimization on the realized features' hyperparameters, evaluating them with cross-validation.
 
-- **Reward Weights** (`config.reward.weights`):  
-  - `silhouette_weight` (e.g. 0.3)  
-  - `cluster_count_weight` (e.g. 0.3)  
-  - `rmse_weight` (e.g. 0.4)  
+**2.4. Core Utilities**
 
-- **Fast-Mode Sampling Rates** (`config.evaluation.fast_user_fraction`, `fast_item_fraction`):  
-  - Default: 0.10 (users), 0.20 (items).  
+* **Prompt Management (`src/utils/prompt_utils.py`):** The system uses a sophisticated Jinja2-based templating engine to dynamically build and load all agent prompts, separating logic from prompt content.
+* **State Management (`src/utils/session_state.py`):** The `SessionState` class is the central, authoritative object for managing all artifacts within a single run.
+* **Schemas (`src/schemas/models.py`):** A single file defines all Pydantic models (`Insight`, `Hypothesis`, `CandidateFeature`, etc.) for structured data exchange.
 
-- **Logging Flags** (`config.logging`):  
-  - `use_tensorboard: true/false`  
-  - `save_tree_json: true/false`  
-  - `log_dir: "experiments/logs"`  
+---
+### **3. Remaining Tasks ("What Is Remaining to Build")**
 
-- **Ablation Modes** (`config.ablation`):  
-  - Toggle individual components for ablations (e.g. override `rl.strategy`, adjust `reward.weights`, swap clustering method, etc.).  
+While the high-level architecture is in place and connected, several downstream components are still using legacy patterns and need to be refactored to fully align with the modern V2 architecture.
 
-- **Output Structure**  
+**3.1. High Priority: Core Refactoring & Integration**
+
+* **Unify State Management:**
+    * **Task:** Refactor the `EvaluationAgent` and `ReflectionAgent`. They currently import and use `get_mem` from the legacy `src/utils/memory.py` module.
+    * **Action:** Modify their `run()` methods to accept `session_state: SessionState` as an argument. All data they need must be read from this object, and their results must be written back to it. Once no agents use `memory.py`, it can be deleted.
+
+* **Unify Orchestration Model:**
+    * **Task:** The `EvaluationAgent` and `ReflectionAgent` are still designed around a `pubsub` event-driven model.
+    * **Action:** Refactor them to be simple classes whose `run()` methods are called procedurally by the main `orchestrator.py`, just like the ideation and realization steps. Once complete, `src/utils/pubsub.py` can be deleted.
+
+* **Consolidate Optimization Agents:**
+    * **Task:** The project contains both `optimization_agent.py` (using `skopt`) and the more advanced `optimization_agent_v2.py` (using `optuna`).
+    * **Action:** Formally deprecate and delete the older `optimization_agent.py`. Ensure the orchestrator exclusively uses the `VULCANOptimizer` from `optimization_agent_v2.py`.
+
+* **Cleanup Redundant Code:**
+    * **Task:** Delete agents and utilities that have been fully superseded.
+    * **Action:** Delete `src/agents/strategy_team/reasoning_agent.py` (role is now part of the `Strategy Team` chat). Delete `src/utils/sql_views.py` as its logic is now contained within `src/utils/tools.py`.
+
+**3.2. Future Work: Research & Meta-Learning Capabilities**
+
+Once the core V1.4 pipeline is fully refactored and stable, the following advanced features (from our previous discussions) can be implemented.
+
+* **Implement the `DomainExpertAgent`:**
+    * **Task:** Introduce a new agent into the `Insight Discovery Team` that uses the LLM itself as a tool for qualitative analysis and injection of external domain knowledge.
+
+* **Implement Rich Observability:**
+    * **Task:** Enhance the `OptimizationAgent` and `EvaluationAgent` to log detailed metrics, hyperparameters, and artifacts to TensorBoard and a structured `final_report.md` for each run.
+
+* **Implement the Meta-Learning Cycle:**
+    * **Task:** Build the persistent `feature_store` and add the logic to the orchestrator to trigger the "meta-analysis cycle," where the `Insight Discovery Team` is re-invoked to perform EDA on the results of previous successful runs.

@@ -3,14 +3,14 @@ Script to extract and cache metadata from the database for use in prompt templat
 """
 
 import json
-import logging
+from loguru import logger
 from pathlib import Path
 from typing import Any, Dict
 
 import duckdb
 import pandas as pd
 
-from src.config.logging import setup_logging
+from src.config.log_config import setup_logging
 from src.utils.run_utils import init_run
 
 
@@ -24,7 +24,7 @@ def extract_table_samples(n_samples: int = 5) -> Dict[str, pd.DataFrame]:
     Returns:
         Dictionary mapping table names to sample DataFrames
     """
-    logger = logging.getLogger(__name__)
+
     samples = {}
 
     with duckdb.connect("data/goodreads_curated.duckdb") as conn:
@@ -41,7 +41,7 @@ def extract_table_samples(n_samples: int = 5) -> Dict[str, pd.DataFrame]:
         ]
 
         for table in tables:
-            logger.info(f"Sampling {table}...")
+            logger.info("Sampling {}...", table)
 
             # For reviews, sample by user to get complete user histories
             if table == "curated_reviews":
@@ -109,7 +109,7 @@ def extract_column_stats() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dictionary mapping table names to column statistics
     """
-    logger = logging.getLogger(__name__)
+
     stats = {}
 
     with duckdb.connect("data/goodreads_curated.duckdb") as conn:
@@ -125,7 +125,7 @@ def extract_column_stats() -> Dict[str, Dict[str, Any]]:
         ]
 
         for table in tables:
-            logger.info(f"Analyzing {table}...")
+            logger.info("Analyzing {}...", table)
             table_stats = {}
 
             # Get column info
@@ -188,7 +188,7 @@ def cache_metadata():
     """
     Extracts and caches metadata from the database.
     """
-    logger = logging.getLogger(__name__)
+
 
     # Create config directory if it doesn't exist
     Path("config").mkdir(exist_ok=True)
@@ -198,7 +198,7 @@ def cache_metadata():
     samples = extract_table_samples()
     samples_dict = {name: df.to_dict(orient="records") for name, df in samples.items()}
 
-    with open("config/samples.json", "w") as f:
+    with open("config/samples.json", "w", encoding="utf-8") as f:
         json.dump(samples_dict, f, indent=2)
     logger.info("Saved samples to config/samples.json")
 
@@ -206,7 +206,7 @@ def cache_metadata():
     logger.info("Extracting column statistics...")
     stats = extract_column_stats()
 
-    with open("config/summary_stats.json", "w") as f:
+    with open("config/summary_stats.json", "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
     logger.info("Saved summary statistics to config/summary_stats.json")
 

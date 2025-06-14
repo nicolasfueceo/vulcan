@@ -1,4 +1,5 @@
 import subprocess
+from loguru import logger
 from typing import Optional
 
 from torch.utils.tensorboard import SummaryWriter
@@ -17,7 +18,7 @@ def start_tensorboard() -> None:
             stderr=subprocess.DEVNULL,
         )
     except Exception as e:
-        print(f"Warning: Could not start TensorBoard: {e}")
+        logger.warning(f"Could not start TensorBoard: {e}")
 
 
 def get_tensorboard_writer() -> SummaryWriter:

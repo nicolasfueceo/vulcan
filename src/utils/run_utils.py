@@ -3,12 +3,14 @@
 Utilities for managing run IDs and run-specific paths.
 """
 
+import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import autogen
+from src.data.cv_data_manager import CVDataManager
 
 # Base directories
 RUNTIME_DIR = Path("runtime")
@@ -17,6 +19,8 @@ RUNS_DIR = RUNTIME_DIR / "runs"
 # Global variable to store current run ID
 _run_id: Optional[str] = None
 _run_dir: Optional[Path] = None
+
+logger = logging.getLogger(__name__)
 
 
 def init_run() -> Tuple[str, Path]:
@@ -118,9 +122,62 @@ def format_log_message(message: str) -> str:
 
 
 def config_list_from_json(file_path: str) -> List[Dict]:
+    """Load OpenAI config list from a JSON file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load config list from {file_path}: {e}")
+        return []
+
+
+def restart_pipeline(config: Dict[str, Any] = None) -> None:
     """
-    Loads an AutoGen configuration list from a JSON file, resolving environment variables.
+    Restarts the pipeline with an optional configuration update.
+    This function should be called by the ReflectionAgent when deciding to continue.
+
+    Args:
+        config: Optional dictionary of configuration parameters for the next run
     """
-    return autogen.config_list_from_json(
-        env_or_file=file_path,
-    )
+    global _run_id, _run_dir
+
+    # Save current run ID
+    old_run_id = _run_id
+
+    # Initialize a new run
+    new_run_id, new_run_dir = init_run()
+
+    # If config is provided, save it
+    if config:
+        config_path = new_run_dir / "config" / "next_cycle_config.json"
+        config_path.parent.mkdir(exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+
+    logger.info(f"Pipeline restarted. Old run: {old_run_id}, New run: {new_run_id}")
+    return new_run_id, new_run_dir
+
+
+def terminate_pipeline() -> None:
+    """
+    Terminates the pipeline gracefully.
+    This function should be called by the ReflectionAgent when deciding to stop.
+    """
+    # Close any open database connections
+    CVDataManager.close_global_connection_pool()
+
+    global _run_id, _run_dir
+
+    if _run_id:
+        logger.info(f"Pipeline terminated. Final run: {_run_id}")
+
+        # Create a termination marker file
+        termination_file = _run_dir / "pipeline_terminated.txt"
+        with open(termination_file, "w", encoding="utf-8") as f:
+            f.write(f"Pipeline terminated at {datetime.now().isoformat()}\n")
+
+        # Reset global variables
+        _run_id = None
+        _run_dir = None
+    else:
+        logger.warning("Attempted to terminate pipeline but no run was active.")

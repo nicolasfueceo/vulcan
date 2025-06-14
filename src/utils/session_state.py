@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import duckdb
+from loguru import logger
+
 
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
@@ -35,15 +37,9 @@ class SessionState:
         # Load existing state if available
         self._load_from_disk()
 
+        # Database connection attributes
         self.db_path = "data/goodreads_curated.duckdb"
-        try:
-            # Connect in read-write mode to allow for TEMP view creation
-            self.conn = duckdb.connect(database=self.db_path, read_only=False)
-            print(f"Successfully connected to {self.db_path} in read-write mode.")
-        except Exception as e:
-            print(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
-            self.conn = None
-            raise e
+        self.conn: Optional[duckdb.DuckDBPyConnection] = None
 
     def _load_from_disk(self):
         """Loads existing session state from disk if available."""
@@ -79,25 +75,25 @@ class SessionState:
                 )
                 self.reflection_run_count = data.get("reflection_run_count", 0)
 
-                print(
+                logger.info(
                     f"Loaded existing session state with {len(self.insights)} insights and {len(self.hypotheses)} hypotheses."
                 )
             except Exception as e:
-                print(
+                logger.error(
                     f"Warning: Failed to load existing session state: {e}. Starting with fresh state."
                 )
         else:
-            print("No existing session state found. Starting with fresh state.")
+            logger.info("No existing session state found. Starting with fresh state.")
 
     def add_insight(self, insight: Insight):
         self.insights.append(insight)
         self.save_to_disk()
-        print(f"Added and saved new insight: '{insight.title}'")
+        logger.info(f"Added and saved new insight: '{insight.title}'")
 
     def finalize_hypotheses(self, hypotheses: List[Hypothesis]):
         self.hypotheses.extend(hypotheses)
         self.save_to_disk()
-        print(f"Finalized and saved {len(hypotheses)} hypotheses.")
+        logger.info(f"Finalized and saved {len(hypotheses)} hypotheses.")
 
     # Prioritized hypotheses management
     def set_prioritized_hypotheses(self, hypotheses: List[Dict]):
@@ -236,18 +232,24 @@ class SessionState:
         """Returns the final list of vetted hypotheses."""
         return self.hypotheses if self.hypotheses else None
 
-    def vision_tool(self, image_path: str, prompt: str) -> str:
+    def vision_tool(
+        self,
+        image_path: str,
+        prompt: str,
+    ) -> str:
         """
         Analyzes an image file using OpenAI's GPT-4o vision model.
         This tool automatically resolves the path relative to the run's output directory.
         """
-        import base64
-        import os
-
-        from openai import OpenAI
-
         try:
-            full_path = self.get_run_output_dir() / image_path
+            import base64
+            import os
+
+            from openai import OpenAI
+
+            # Construct the full path to the image
+            full_path = self.run_dir / image_path
+
             if not full_path.exists():
                 logger.error(f"Vision tool failed: File not found at {full_path}")
                 return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
@@ -284,6 +286,13 @@ class SessionState:
             logger.error(f"Vision tool failed with an unexpected error: {e}")
             return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
 
+    def get_state_file_path(self) -> Optional[str]:
+        """Returns the path to the session state file if it exists."""
+        state_file = self.run_dir / "session_state.json"
+        if state_file.exists():
+            return str(state_file)
+        return None
+
     def save_to_disk(self):
         """Saves the current session state to disk."""
         output = {
@@ -307,22 +316,39 @@ class SessionState:
             json.dump(output, f, indent=4)
 
     def close_connection(self):
-        """Closes the database connection."""
+        """Closes the database connection and resets the connection attribute."""
         if self.conn:
-            self.conn.close()
-            print("Database connection closed.")
+            try:
+                self.conn.close()
+                logger.info("Database connection closed.")
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
+        self.conn = None
 
     def reconnect(self):
-        """Reopens the database connection."""
+        """Reopens the database connection in read-write mode."""
+        self.close_connection()  # Ensure any existing connection is closed first
         try:
             self.conn = duckdb.connect(database=self.db_path, read_only=False)
-            print(f"Successfully reconnected to {self.db_path} in read-write mode.")
+            logger.info(f"Successfully reconnected to {self.db_path} in read-write mode.")
         except Exception as e:
-            print(f"FATAL: Failed to reconnect to database at {self.db_path}: {e}")
+            logger.error(f"FATAL: Failed to reconnect to database at {self.db_path}: {e}")
             self.conn = None
             raise e
 
     @property
-    def db_connection(self):
-        """Returns the current database connection."""
+    def db_connection(self) -> duckdb.DuckDBPyConnection:
+        """
+        Provides a lazy-loaded, read-only database connection.
+        The connection is created on first access.
+        """
+        if self.conn is None:
+            try:
+                logger.info(f"Connecting to {self.db_path} in read-only mode...")
+                self.conn = duckdb.connect(database=self.db_path, read_only=True)
+                logger.info(f"Successfully connected to {self.db_path} in read-only mode.")
+            except Exception as e:
+                logger.error(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
+                self.conn = None
+                raise e
         return self.conn

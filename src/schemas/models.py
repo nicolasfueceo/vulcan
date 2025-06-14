@@ -1,7 +1,8 @@
 # src/utils/schemas.py
-from typing import List, Optional
+import ast
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class Insight(BaseModel):
@@ -26,19 +27,40 @@ class Insight(BaseModel):
 
 class Hypothesis(BaseModel):
     id: str = Field(
-        ..., description="A unique identifier for the hypothesis, e.g., 'H-01'."
-    )
-    description: str = Field(
-        ..., description="The full text of the hypothesis, clearly stated."
-    )
-    strategic_critique: str = Field(
         ...,
-        description="A detailed critique from the Strategist on how this hypothesis aligns with the Core Objective.",
+        description="A unique, sequential identifier for the hypothesis, e.g., 'H-01'.",
     )
-    feasibility_critique: str = Field(
+    summary: str = Field(
+        ..., description="A concise, one-sentence statement of the hypothesis."
+    )
+    rationale: str = Field(
         ...,
-        description="A detailed critique from the Engineer on the technical feasibility and computational cost.",
+        description="A clear explanation of why this hypothesis is useful and worth testing.",
     )
+    source_insight: Optional[str] = Field(
+        None,
+        description="The title of the insight from the report that inspired this hypothesis.",
+    )
+    estimated_gain: float = Field(
+        ...,
+        ge=0,
+        le=10,
+        description="A subjective estimate of the potential value (0-10) if the hypothesis is true.",
+    )
+    difficulty: Literal["low", "medium", "high"] = Field(
+        ...,
+        description="The estimated difficulty to implement and test this hypothesis.",
+    )
+    tags: List[str] = Field(
+        ...,
+        description="A list of relevant tags, e.g., ['per-user', 'temporal', 'text-based'].",
+    )
+
+    @validator("rationale")
+    def rationale_must_be_non_empty(cls, v):  # noqa: N805
+        if not v or not v.strip():
+            raise ValueError("Rationale cannot be empty.")
+        return v
 
 
 class PrioritizedHypothesis(BaseModel):
@@ -53,31 +75,101 @@ class PrioritizedHypothesis(BaseModel):
 
 
 class CandidateFeature(BaseModel):
-    name: str = Field(
-        ..., description="A descriptive, camel-case name for the feature."
-    )
-    type: str = Field(
-        ..., description="The type of feature: 'code', 'llm', or 'composition'."
+    name: str = Field(..., description="A unique, descriptive name for the feature.")
+    type: Literal["code", "llm", "composition"] = Field(
+        ..., description="The type of feature to be realized."
     )
     spec: str = Field(
         ...,
-        description="The feature specification (e.g., DSL for code, prompt for llm).",
+        description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
     )
-    depends_on: Optional[List[str]] = Field(
-        [], description="A list of other features this feature depends on."
+    depends_on: List[str] = Field(
+        default_factory=list,
+        description="A list of other feature names this feature depends on (for compositions).",
+    )
+    params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="A dictionary of tunable parameters for the feature.",
     )
     rationale: str = Field(
-        ..., description="A brief explanation of why this feature is useful."
+        ..., description="A detailed explanation of why this feature is useful."
     )
-    effort: int = Field(
-        ...,
-        ge=1,
-        le=5,
-        description="The estimated effort to implement this feature (1-5).",
-    )
-    impact: int = Field(
-        ...,
-        ge=1,
-        le=5,
-        description="The estimated impact of this feature on the model (1-5).",
-    )
+
+    def validate_spec(self):
+        """
+        Validates the 'spec' field based on the feature type.
+        Raises ValueError for invalid specs.
+        """
+        if self.type == "code":
+            try:
+                ast.parse(self.spec)
+            except SyntaxError as e:
+                raise ValueError(
+                    f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
+                )
+        # Add more validation for 'llm' or 'composition' types if needed
+        return True
+
+
+class VettedFeature(CandidateFeature):
+    pass
+
+
+class RealizedFeature(BaseModel):
+    """
+    Represents a feature that has been converted into executable code.
+    """
+
+    name: str
+    code_str: str
+    params: Dict[str, Any]
+    passed_test: bool
+    type: Literal["code", "llm", "composition"]
+    source_candidate: CandidateFeature
+
+    def validate_code(self) -> None:
+        """
+        Validates the generated code string for correctness.
+        - Parses the code to ensure it's valid Python.
+        - Checks that the function name matches the feature name.
+        - Verifies that all specified params are in the function signature.
+        """
+        try:
+            tree = ast.parse(self.code_str)
+        except SyntaxError as e:
+            raise ValueError(
+                f"Invalid Python syntax in generated code for '{self.name}': {e}"
+            )
+
+        # Find the function definition in the AST
+        func_defs = [
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        ]
+        if not func_defs or len(func_defs) > 1:
+            raise ValueError(
+                f"Generated code for '{self.name}' must contain exactly one function definition."
+            )
+
+        func_def = func_defs[0]
+
+        # Check function name
+        if func_def.name != self.name:
+            raise ValueError(
+                f"Function name '{func_def.name}' does not match feature name '{self.name}'."
+            )
+
+        # Check for expected parameters in the function signature
+        arg_names = {arg.arg for arg in func_def.args.args}
+        expected_params = set(self.params.keys())
+
+        # The function should accept 'df' plus all tunable params
+        if "df" not in arg_names:
+            raise ValueError(
+                f"Generated function for '{self.name}' must accept a 'df' argument."
+            )
+
+        missing_params = expected_params - (arg_names - {"df"})
+        if missing_params:
+            raise ValueError(
+                f"Missing parameters in function signature for '{self.name}': {missing_params}"
+            )

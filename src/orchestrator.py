@@ -1,8 +1,11 @@
 import json
-import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import autogen
+from loguru import logger
 
 # Load environment variables from .env file if it exists
 try:
@@ -12,18 +15,13 @@ try:
 except ImportError:
     pass  # dotenv is optional
 
-# This is no longer needed with a proper project structure and installation.
-# # Add project root to Python path for proper imports
-# project_root = Path(__file__).parent.parent
-# sys.path.insert(0, str(project_root))
-import autogen
-from loguru import logger
-
 from src.agents.discovery_team.insight_discovery_agents import (
     get_insight_discovery_agents,
 )
-from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
-from src.config.logging import setup_logging
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
+from src.agents.strategy_team.reflection_agent import ReflectionAgent
+from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
+from src.config.log_config import setup_logging
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
 from src.utils.session_state import SessionState
 from src.utils.tools import (
@@ -36,573 +34,294 @@ from src.utils.tools import (
     vision_tool,
 )
 
-# Load environment variables
+
+# --- Helper Functions for SmartGroupChatManager ---
+
+def should_continue_exploration(
+    session_state: SessionState, round_count: int
+) -> bool:
+    """Determines if exploration should continue based on insights and coverage."""
+    insights = session_state.insights
+    if not insights:
+        return True  # Must find at least one insight
+
+    high_quality_insights = [i for i in insights if i.quality_score >= 8]
+    if len(high_quality_insights) >= 5:
+        logger.info("Termination condition: Found 5+ high-quality insights.")
+        return False
+
+    if len(insights) >= 15:
+        logger.info("Termination condition: Found 15+ total insights.")
+        return False
+
+    if round_count > 50:
+        last_insight_round = max((i.metadata.get("round_added", 0) for i in insights), default=0)
+        if round_count - last_insight_round > 20:
+            logger.info("Termination condition: No new insights in the last 20 rounds.")
+            return False
+
+    if len(insights) > 5:
+        tables_in_insights = {t for i in insights for t in i.tables_used}
+        all_tables = set(session_state.get_all_table_names())
+        coverage = len(tables_in_insights) / len(all_tables) if all_tables else 0
+        if coverage < 0.3:
+            logger.info(f"Continuation condition: Low table coverage ({coverage:.1%}). Encouraging more exploration.")
+            return True
+        if coverage > 0.7 and len(insights) >= 8:
+            logger.info(f"Termination condition: High table coverage ({coverage:.1%}) with sufficient insights.")
+            return False
+
+    return True
+
+def get_progress_prompt(session_state: SessionState, round_count: int) -> Optional[str]:
+    """Generate a progress prompt to guide agents when they seem stuck."""
+    insights = session_state.insights
+    if not insights:
+        return "It's been a while and no insights have been reported. As a reminder, your goal is to find interesting patterns. Please review the schema and propose a query."
+
+    tables_in_insights = {t for i in insights for t in i.tables_used}
+    all_tables = set(session_state.get_all_table_names())
+    unexplored_tables = all_tables - tables_in_insights
+
+    if round_count > 20 and unexplored_tables:
+        return f"Great work so far. We've analyzed {len(tables_in_insights)} tables, but these remain unexplored: {', '.join(list(unexplored_tables)[:3])}. Consider formulating a hypothesis involving one of these."
+
+    low_detail_insights = [i for i in insights if len(i.description) < 100]
+    if low_detail_insights:
+        return f"The insight '{low_detail_insights[0].title}' is a bit brief. Can the DataScientist elaborate on its significance or provide more supporting evidence?"
+
+    return None
+
+def _fallback_compression(messages: List[Dict], keep_recent: int = 20) -> List[Dict]:
+    """Fallback keyword-based compression if LLM compression fails."""
+    logger.warning("Executing fallback context compression.")
+    if len(messages) <= keep_recent:
+        return messages
+
+    compressed_messages = []
+    keywords = ["insight", "hypothesis", "important", "significant", "surprising"]
+    for msg in messages[:-keep_recent]:
+        if any(keyword in msg.get("content", "").lower() for keyword in keywords):
+            new_content = f"(Summarized): {msg['content'][:200]}..."
+            compressed_messages.append({**msg, "content": new_content})
+
+    return compressed_messages + messages[-keep_recent:]
+
+def compress_conversation_context(messages: List[Dict], keep_recent: int = 20) -> List[Dict]:
+    """Intelligently compress conversation context using LLM summarization."""
+    if len(messages) <= keep_recent:
+        return messages
+
+    logger.info(f"Compressing conversation context, keeping last {keep_recent} messages.")
+    try:
+        config_list = config_list_from_json("OAI_CONFIG_LIST", filter_dict={"model": {"gpt-4-turbo-preview"}})
+        if not config_list:
+            raise ValueError("No config found for summarization model.")
+
+        summarizer_llm_config = {"config_list": config_list, "cache_seed": None, "temperature": 0.2}
+        summarizer_client = autogen.AssistantAgent("summarizer", llm_config=summarizer_llm_config)
+
+        conversation_to_summarize = "\n".join([f"{m.get('role')}: {m.get('content')}" for m in messages[:-keep_recent]])
+        prompt = f"Please summarize the key findings, decisions, and unresolved questions from the following conversation history. Be concise, but do not lose critical information. The summary will be used as context for an ongoing AI agent discussion.\n\n---\n{conversation_to_summarize}\n---"
+
+        response = summarizer_client.generate_reply(messages=[{"role": "user", "content": prompt}])
+        summary_message = {"role": "system", "content": f"## Conversation Summary ##\n{response}"}
+        return [summary_message] + messages[-keep_recent:]
+    except Exception as e:
+        logger.error(f"LLM-based context compression failed: {e}")
+        return _fallback_compression(messages, keep_recent)
 
 
-def run_discovery_loop(session_state: SessionState):
+# --- Enhanced Conversation Manager ---
+
+class SmartGroupChatManager(autogen.GroupChatManager):
+    def run_chat(self, messages, sender, config):
+        """Override the main chat runner to add smart features."""
+        session_state = config.get("session_state")
+        if not session_state:
+            logger.error("SessionState not found in config for SmartGroupChatManager.")
+            return super().run_chat(messages, sender, config)
+
+        self.round_count += 1
+
+        if self.round_count % 10 == 0:
+            insights_count = len(session_state.insights)
+            logger.info("Exploration progress: Round {}, {} insights captured", self.round_count, insights_count)
+
+        if self.round_count % 25 == 0:
+            try:
+                self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
+                logger.info("Applied LLM context compression at round {}", self.round_count)
+            except Exception as e:
+                logger.warning("Context compression failed: {}", e)
+
+        if self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
+            logger.info("Exploration criteria met, terminating conversation")
+            self.groupchat.messages.append({"role": "assistant", "content": "TERMINATE", "name": "SystemCoordinator"})
+            return True, None
+
+        if self.round_count > 5 and self.round_count % 15 == 0:
+            if progress_prompt := get_progress_prompt(session_state, self.round_count):
+                logger.info("Adding progress guidance at round {}", self.round_count)
+                self.groupchat.messages.append({"role": "user", "content": progress_prompt, "name": "SystemCoordinator"})
+
+        return super().run_chat(messages, sender, config)
+
+
+# --- Orchestration Loops ---
+
+def run_discovery_loop(session_state: SessionState) -> str:
     """Orchestrates the Insight Discovery Team to find patterns in the data."""
-    logging.info("--- Running Insight Discovery Loop ---")
-
-    config_list = config_list_from_json(
-        os.getenv("OAI_CONFIG_LIST", "config/OAI_CONFIG_LIST.json")
-    )
-
-    # Validate and substitute the API key
+    logger.info("--- Running Insight Discovery Loop ---")
+    config_list = config_list_from_json("OAI_CONFIG_LIST", filter_dict={"model": {"gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-32k"}})
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key.strip() == "":
-        raise ValueError("OPENAI_API_KEY environment variable is empty or not set.")
+    if api_key: [c.update({"api_key": api_key}) for c in config_list]
 
-    logging.info(f"API key loaded with length: {len(api_key)}")
-
-    # Manually substitute the API key to ensure it's loaded
-    for config in config_list:
-        if config.get("api_key") == "${OPENAI_API_KEY}":
-            config["api_key"] = api_key
-            logging.info("Substituted API key in config")
-        elif not config.get("api_key"):
-            raise ValueError(f"No API key found in config: {config}")
-
-    # Validate final config
-    for i, config in enumerate(config_list):
-        if not config.get("api_key") or config.get("api_key").strip() == "":
-            raise ValueError(
-                f"Config {i} has empty API key after substitution: {config}"
-            )
-
-    logging.info(f"Final config list validated with {len(config_list)} configurations")
+    if not config_list or not all(c.get("api_key") or c.get("base_url") for c in config_list):
+        raise ValueError("No valid LLM configurations found. Check OAI_CONFIG_LIST or OPENAI_API_KEY.")
 
     llm_config = {"config_list": config_list, "cache_seed": None}
-
-    # This agent will execute code blocks and call functions
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
         max_consecutive_auto_reply=10,
-        is_termination_msg=lambda x: "TERMINATE" in x.get("content", ""),
-        code_execution_config={"work_dir": str(get_run_dir())},  # Enable code execution
+        is_termination_msg=lambda x: "TERMINATE" in x.get("content", "").strip(),
+        code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
 
     assistant_agents = get_insight_discovery_agents(llm_config)
-
-    # Register the granular tools for the agents
     for agent in assistant_agents.values():
-        autogen.register_function(
-            run_sql_query,
-            caller=agent,
-            executor=user_proxy,
-            name="run_sql_query",
-            description="Executes a read-only SQL query and returns the result as markdown.",
-        )
-        autogen.register_function(
-            get_table_sample,
-            caller=agent,
-            executor=user_proxy,
-            name="get_table_sample",
-            description="Retrieves a random sample of rows from a specified table.",
-        )
-        autogen.register_function(
-            create_analysis_view,
-            caller=agent,
-            executor=user_proxy,
-            name="create_analysis_view",
-            description="Creates a SQL view with documentation for complex analysis.",
-        )
-        autogen.register_function(
-            vision_tool,
-            caller=agent,
-            executor=user_proxy,
-            name="vision_tool",
-            description="Analyzes image files using vision AI.",
-        )
-        autogen.register_function(
-            get_add_insight_tool(session_state),
-            caller=agent,
-            executor=user_proxy,
-            name="add_insight_to_report",
-            description="Saves structured insights to the session report.",
-        )
+        autogen.register_function(run_sql_query, caller=agent, executor=user_proxy, name="run_sql_query", description="Run a SQL query.")
+        autogen.register_function(get_table_sample, caller=agent, executor=user_proxy, name="get_table_sample", description="Get a sample of rows from a table.")
+        autogen.register_function(create_analysis_view, caller=agent, executor=user_proxy, name="create_analysis_view", description="Create a temporary SQL view.")
+        autogen.register_function(vision_tool, caller=agent, executor=user_proxy, name="vision_tool", description="Analyze an image.")
+        autogen.register_function(get_add_insight_tool(session_state), caller=agent, executor=user_proxy, name="add_insight_to_report", description="Saves insights to the report.")
 
-    # Enhanced GroupChat with intelligent context management
-    group_chat = autogen.GroupChat(
-        agents=[user_proxy] + list(assistant_agents.values()),
-        messages=[],
-        max_round=500,  # High limit instead of -1 (uncapped), our SmartGroupChatManager will handle termination
-        allow_repeat_speaker=True,
-    )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    group_chat = autogen.GroupChat(agents=[user_proxy] + list(assistant_agents.values()), messages=[], max_round=500, allow_repeat_speaker=True)
+    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
-    # Close the session database connection to avoid lock conflicts during agent execution
-    logging.info("Closing database connection for agent execution...")
+    logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
-
-    def should_continue_exploration(
-        session_state: SessionState, round_count: int
-    ) -> bool:
-        """Determines if exploration should continue based on insights and coverage."""
-        insights = len(session_state.insights)
-        min_insights = 8  # Minimum insights needed for comprehensive analysis
-
-        # Always continue if we don't have enough insights
-        if insights < min_insights:
-            logging.info(
-                f"Continuing exploration: {insights}/{min_insights} insights captured"
-            )
-            return True
-
-        # After minimum insights, check for completeness every 10 rounds
-        if round_count % 10 == 0 and insights >= min_insights:
-            logging.info(
-                f"Evaluating exploration completeness: {insights} insights, round {round_count}"
-            )
-
-            # Check if we have coverage across major areas
-            insight_titles = [
-                insight.title.lower() for insight in session_state.insights
-            ]
-            coverage_areas = {
-                "rating": any("rating" in title for title in insight_titles),
-                "genre": any(
-                    any(term in title for term in ["genre", "shelf", "category"])
-                    for title in insight_titles
-                ),
-                "author": any("author" in title for title in insight_titles),
-                "temporal": any(
-                    any(term in title for term in ["time", "year", "date", "temporal"])
-                    for title in insight_titles
-                ),
-                "user": any("user" in title for title in insight_titles),
-            }
-
-            covered_areas = sum(coverage_areas.values())
-            if covered_areas >= 4:  # Need coverage of at least 4/5 major areas
-                logging.info(
-                    f"Sufficient coverage achieved: {covered_areas}/5 areas covered"
-                )
-                return False
-
-        # Safety limit - don't run indefinitely
-        if round_count > 200:
-            logging.warning(
-                f"Reached maximum round limit ({round_count}), stopping exploration"
-            )
-            return False
-
-        # Continue if we haven't reached the insight threshold or coverage
-        return True
-
-    def get_progress_prompt(session_state: SessionState, round_count: int) -> str:
-        """Generate a progress prompt to guide agents when they seem stuck."""
-        insights = len(session_state.insights)
-
-        if insights == 0 and round_count > 5:
-            return "\n\nIMPORTANT: No insights have been captured yet. Please ensure you call `add_insight_to_report()` after each analysis to record your findings. Focus on generating actual insights, not just data exploration."
-
-        if insights < 4 and round_count > 15:
-            return f"\n\nPROGRESS CHECK: Only {insights} insights captured after {round_count} rounds. Please focus on generating concrete insights using `add_insight_to_report()` and ensure comprehensive coverage of rating patterns, genres, authors, and user behavior."
-
-        # Check coverage gaps
-        insight_titles = [insight.title.lower() for insight in session_state.insights]
-        missing_areas = []
-        if not any("rating" in title for title in insight_titles):
-            missing_areas.append("rating analysis")
-        if not any(
-            any(term in title for term in ["genre", "shelf", "category"])
-            for title in insight_titles
-        ):
-            missing_areas.append("genre/category analysis")
-        if not any("author" in title for title in insight_titles):
-            missing_areas.append("author analysis")
-        if not any(
-            any(term in title for term in ["time", "year", "date", "temporal"])
-            for title in insight_titles
-        ):
-            missing_areas.append("temporal analysis")
-        if not any("user" in title for title in insight_titles):
-            missing_areas.append("user behavior analysis")
-
-        if missing_areas and round_count % 20 == 0:
-            return f"\n\nCOVERAGE GAP: Missing analysis in: {', '.join(missing_areas)}. Please prioritize these areas in your next analysis."
-
-        return ""
-
-    def compress_conversation_context(
-        messages: list, keep_recent: int = 20, llm_config: dict = None
-    ) -> list:
-        """Intelligently compress conversation context using LLM summarization."""
-        if len(messages) <= keep_recent * 2:
-            return messages  # No compression needed if conversation is still short
-
-        logging.info(
-            f"Compressing context with LLM: {len(messages)} -> target ~{keep_recent * 2} messages"
-        )
-
-        # Always preserve system messages and recent messages
-        system_messages = [
-            msg for msg in messages[:3] if msg.get("role") in ["user", "system"]
-        ]
-        recent_messages = messages[-keep_recent:]
-        middle_messages = messages[len(system_messages) : -keep_recent]
-
-        if not middle_messages:
-            return messages
-
-        try:
-            # Create an LLM client for compression
-            from openai import OpenAI
-
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-            # Group middle messages into chunks for summarization
-            chunk_size = 15  # Process in chunks to avoid token limits
-            compressed_summaries = []
-
-            for i in range(0, len(middle_messages), chunk_size):
-                chunk = middle_messages[i : i + chunk_size]
-
-                # Create conversation text for summarization
-                conversation_text = ""
-                for msg in chunk:
-                    role = msg.get("name", msg.get("role", "unknown"))
-                    content = msg.get("content", "")
-                    conversation_text += f"{role}: {content}\n\n"
-
-                # Ask LLM to compress this chunk
-                compression_prompt = f"""You are compressing a conversation between data analysis agents exploring a book recommendation database. 
-
-Please create a concise summary that preserves:
-1. All specific insights and findings discovered
-2. Key analysis results, correlations, and statistics  
-3. Important database views created
-4. Significant plots generated and their interpretations
-5. Critical decision points and conclusions
-
-Focus on preserving factual discoveries and actionable insights while removing redundant discussion.
-
-CONVERSATION CHUNK TO COMPRESS:
-{conversation_text}
-
-COMPRESSED SUMMARY (preserve all insights and key findings):"""
-
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",  # Use mini for cost efficiency in compression
-                    messages=[{"role": "user", "content": compression_prompt}],
-                    max_tokens=64000,
-                    temperature=0.1,  # Low temperature for consistent compression
-                )
-
-                summary = response.choices[0].message.content
-
-                # Create a compressed message
-                compressed_msg = {
-                    "role": "assistant",
-                    "name": "ContextCompressor",
-                    "content": f"[COMPRESSED SUMMARY of rounds {i + len(system_messages) + 1}-{i + len(system_messages) + len(chunk)}]\n\n{summary}",
-                }
-                compressed_summaries.append(compressed_msg)
-
-            logging.info(
-                f"LLM compression: {len(middle_messages)} messages -> {len(compressed_summaries)} summaries"
-            )
-
-            # Combine preserved and compressed content
-            compressed_context = (
-                system_messages + compressed_summaries + recent_messages
-            )
-            logging.info(
-                f"Context compression completed: {len(messages)} -> {len(compressed_context)} messages"
-            )
-            return compressed_context
-
-        except Exception as e:
-            logging.warning(
-                f"LLM compression failed: {e}. Falling back to keyword-based compression."
-            )
-            return _fallback_compression(messages, keep_recent)
-
-    def _fallback_compression(messages: list, keep_recent: int = 20) -> list:
-        """Fallback keyword-based compression if LLM compression fails."""
-        if len(messages) <= keep_recent * 2:
-            return messages
-
-        # Always keep the initial system message and recent messages
-        system_messages = [
-            msg for msg in messages[:3] if msg.get("role") in ["user", "system"]
-        ]
-        recent_messages = messages[-keep_recent:]
-
-        # Extract key insights and tool execution results from middle messages
-        key_messages = []
-        for msg in messages[len(system_messages) : -keep_recent]:
-            content = msg.get("content", "")
-            # Keep messages with insights, analysis results, or tool outputs
-            if any(
-                keyword in content.lower()
-                for keyword in [
-                    "insight:",
-                    "analysis:",
-                    "correlation:",
-                    "finding:",
-                    "plot_saved:",
-                    "view_created:",
-                    "stdout:",
-                    "pattern:",
-                    "hypothesis:",
-                    "recommendation:",
-                    "conclusion:",
-                ]
-            ):
-                key_messages.append(msg)
-
-        # Combine and return compressed context
-        compressed = (
-            system_messages + key_messages[-8:] + recent_messages
-        )  # Keep max 8 key messages
-        logging.info(
-            f"Fallback compression completed: retained {len(compressed)} messages"
-        )
-        return compressed
-
     try:
-        round_count = 0
         initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
-        # Enhanced conversation with custom termination logic
-        class SmartGroupChatManager(autogen.GroupChatManager):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.round_count = 0
-
-            def run_chat(self, messages, sender, config=None):
-                """Override the main chat runner to add our smart features."""
-                self.round_count += 1
-
-                # Log progress
-                if self.round_count % 10 == 0:
-                    insights_count = len(session_state.insights)
-                    logging.info(
-                        f"Exploration progress: Round {self.round_count}, {insights_count} insights captured"
-                    )
-                    if session_state.insights:
-                        recent_insights = session_state.insights[-3:]
-                        logging.info(
-                            f"Recent insights: {[insight.title for insight in recent_insights]}"
-                        )
-
-                # Apply context compression periodically
-                if self.round_count % 25 == 0:
-                    try:
-                        self.groupchat.messages = compress_conversation_context(
-                            self.groupchat.messages, llm_config=llm_config
-                        )
-                        logging.info(
-                            f"Applied LLM context compression at round {self.round_count}"
-                        )
-                    except Exception as e:
-                        logging.warning(f"Context compression failed: {e}")
-
-                # Check termination only after sufficient rounds
-                if self.round_count > 15:
-                    if not should_continue_exploration(session_state, self.round_count):
-                        logging.info(
-                            "Exploration criteria met, terminating conversation"
-                        )
-                        # Add termination message to conversation
-                        termination_msg = {
-                            "role": "assistant",
-                            "content": "TERMINATE - Exploration criteria met. Sufficient insights captured with good coverage.",
-                            "name": "SystemCoordinator",
-                        }
-                        self.groupchat.messages.append(termination_msg)
-                        return True  # Signal termination
-
-                # Add progress prompts when needed
-                if self.round_count > 5 and self.round_count % 15 == 0:
-                    progress_prompt = get_progress_prompt(
-                        session_state, self.round_count
-                    )
-                    if progress_prompt:
-                        logging.info(
-                            f"Adding progress guidance at round {self.round_count}"
-                        )
-                        guidance_msg = {
-                            "role": "user",
-                            "content": progress_prompt,
-                            "name": "SystemCoordinator",
-                        }
-                        self.groupchat.messages.append(guidance_msg)
-
-                # Call the parent implementation
-                res = super().run_chat(messages, sender, config)
-                # super() returns a tuple (final, reply). If reply is None, substitute a fallback.
-                if isinstance(res, tuple) and len(res) == 2:
-                    final, reply = res
-                    if reply is None:
-                        logging.warning(
-                            "Parent run_chat returned None reply; substituting fallback message to avoid crash."
-                        )
-                        reply = {
-                            "role": "assistant",
-                            "content": "ERROR: Reply generation failed (empty). Please review the previous tool call outputs and ensure a proper assistant response.",
-                        }
-                    return final, reply
-                # In unexpected cases, just return res as-is
-                return res
-
-        # Create the enhanced manager
-        smart_manager = SmartGroupChatManager(
-            groupchat=group_chat, llm_config=llm_config
-        )
-
-        # Start the conversation using AutoGen's standard pattern
-        user_proxy.initiate_chat(smart_manager, message=initial_message)
-
-        insights_count = len(session_state.insights)
-        logging.info(
-            f"Exploration completed after {smart_manager.round_count} rounds with {insights_count} insights"
-        )
-
-        logging.info("--- FINAL INSIGHTS SUMMARY ---")
-        logging.info(session_state.get_final_insight_report())
+        logger.info("Exploration completed after {} rounds with {} insights", manager.round_count, len(session_state.insights))
+        logger.info("--- FINAL INSIGHTS SUMMARY ---")
+        logger.info(session_state.get_final_insight_report())
 
         run_dir = get_run_dir()
         views_file = run_dir / "generated_views.json"
         if views_file.exists():
-            with open(views_file, "r") as f:
+            with open(views_file, "r", encoding="utf-8") as f:
                 views_data = json.load(f)
-            logging.info(f"Total views created: {len(views_data.get('views', []))}")
+            logger.info("Total views created: {}", len(views_data.get("views", [])))
         else:
-            logging.info("Total views created: 0")
-
+            logger.info("Total views created: 0")
     finally:
-        # Reopen the connection after agent execution
-        logging.info("Reopening database connection...")
+        logger.info("Reopening database connection...")
         session_state.reconnect()
 
-    logging.info("--- Insight Discovery Loop Complete ---")
+    logger.info("--- Insight Discovery Loop Complete ---")
+    return session_state.get_final_insight_report()
 
-
-def run_strategy_loop(session_state: SessionState):
-    """Orchestrates the Hypothesis & Strategy Team to refine insights."""
-    logging.info("--- Running Strategy Loop ---")
+def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
+    """Orchestrates the Strategy Team to refine insights and generate features."""
+    logger.info("--- Running Strategy Loop ---")
     insights_report = session_state.get_final_insight_report()
-    if "No insights" in insights_report:
-        logging.warning("Skipping strategy loop as no insights were generated.")
+    if not session_state.insights:
+        logger.warning("No insights found, skipping strategy loop.")
         return None
 
-    config_list = config_list_from_json(
-        os.getenv("OAI_CONFIG_LIST", "config/OAI_CONFIG_LIST.json")
-    )
+    run_dir = get_run_dir()
+    views_file = run_dir / "generated_views.json"
+    view_descriptions = "No views created yet."
+    if views_file.exists():
+        with open(views_file, "r", encoding="utf-8") as f:
+            views_data = json.load(f)
+        if views_data.get("views"):
+            view_descriptions = json.dumps(views_data, indent=2)
 
-    # Validate and substitute the API key
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key.strip() == "":
-        raise ValueError("OPENAI_API_KEY environment variable is empty or not set.")
-
-    logging.info(f"API key loaded with length: {len(api_key)}")
-
-    # Manually substitute the API key to ensure it's loaded
-    for config in config_list:
-        if config.get("api_key") == "${OPENAI_API_KEY}":
-            config["api_key"] = api_key
-            logging.info("Substituted API key in config")
-        elif not config.get("api_key"):
-            raise ValueError(f"No API key found in config: {config}")
-
-    # Validate final config
-    for i, config in enumerate(config_list):
-        if not config.get("api_key") or config.get("api_key").strip() == "":
-            raise ValueError(
-                f"Config {i} has empty API key after substitution: {config}"
-            )
-
-    logging.info(f"Final config list validated with {len(config_list)} configurations")
-
+    config_list = config_list_from_json("OAI_CONFIG_LIST", filter_dict={"model": {"gpt-4-0125-preview", "gpt-4-1106-preview", "gpt-4", "gpt-4-32k"}})
+    if api_key := os.getenv("OPENAI_API_KEY"): [c.update({"api_key": api_key}) for c in config_list]
     llm_config = {"config_list": config_list, "cache_seed": None}
 
-    agents_and_proxy = get_hypothesis_agents(llm_config, insights_report)
-    user_proxy = agents_and_proxy.pop("user_proxy")
-    agents = list(agents_and_proxy.values())
+    agents = get_strategy_team_agents(llm_config)
+    user_proxy = agents.pop("user_proxy")
+    user_proxy.register_function(function_map={"run_sql_query": run_sql_query, "finalize_hypotheses": get_finalize_hypotheses_tool(session_state)})
 
-    user_proxy.register_function(
-        function_map={
-            "run_sql_query": run_sql_query,
-            "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
-        }
-    )
+    group_chat = autogen.GroupChat(agents=[user_proxy] + list(agents.values()), messages=[], max_round=50, allow_repeat_speaker=True)
+    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
-    group_chat = autogen.GroupChat(
-        agents=[user_proxy] + agents,
-        messages=[],
-        max_round=20,
-        allow_repeat_speaker=True,
-    )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
-
-    # Close the session database connection to avoid lock conflicts during agent execution
-    logging.info("Closing database connection for strategy agent execution...")
+    logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
-
     try:
         user_proxy.initiate_chat(
             manager,
-            message=f"""Welcome strategists. Your task is to refine the following insights into a set of concrete, testable hypotheses. You can use `run_sql_query` to re-verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
-
---- INSIGHTS REPORT ---
-{insights_report}
-""",
+            message=f'Welcome strategists. Your task is to:\n1. Refine insights into hypotheses\n2. Convert hypotheses to features\n3. Implement and optimize features\n4. Reflect on results.\nUse `run_sql_query` to verify findings. Call `finalize_hypotheses` when done.\n\n--- INSIGHTS REPORT ---\n{insights_report}\n\n--- AVAILABLE VIEWS ---\n{view_descriptions}',
+            session_state=session_state,
         )
+
+        logger.info("--- Running Feature Realization ---")
+        FeatureRealizationAgent(llm_config=llm_config, session_state=session_state).run()
+        logger.info("--- Feature Realization Complete ---")
+
+        reflection_results = ReflectionAgent(llm_config).run(session_state)
     finally:
-        # Reopen the connection after agent execution
-        logging.info("Reopening database connection...")
         session_state.reconnect()
 
-    logging.info("--- Strategy Loop Complete ---")
-    return session_state.get_final_hypotheses()
+    logger.info("--- Strategy Loop Complete ---")
+    return reflection_results
 
 
-def main():
-    """
-    Main function to run the VULCAN agent orchestration.
-    """
-    # Initialize the run
+def main() -> str:
+    """Main function to run the VULCAN agent orchestration."""
     run_id, run_dir = init_run()
     logger.info(f"Starting VULCAN Run ID: {run_id}")
-
-    # Setup logging
     setup_logging()
-
-    # Initialize session state
     session_state = SessionState(run_dir)
 
-    try:
-        run_discovery_loop(session_state)
-        # final_hypotheses = run_strategy_loop(session_state)
+    discovery_report = "Discovery loop did not generate a report."
+    strategy_report = "Strategy loop was not run or did not generate a report."
 
-        logging.info("Orchestration complete.")
-        # if final_hypotheses is not None:
-        #     logging.info("--- FINAL VETTED HYPOTHESES ---")
-        #     for h in final_hypotheses:
-        #         logging.info(f"- {h.model_dump_json(indent=2)}")
-        # else:
-        #     logging.info("--- No hypotheses were finalized. ---")
+    try:
+        should_continue = True
+        while should_continue:
+            discovery_report = run_discovery_loop(session_state)
+            reflection_results = run_strategy_loop(session_state)
+
+            if reflection_results:
+                strategy_report = json.dumps(reflection_results, indent=2)
+
+            if not session_state.get_final_hypotheses():
+                logger.info("No hypotheses generated. Ending pipeline.")
+                break
+
+            should_continue = reflection_results.get("should_continue", False) if reflection_results else False
+            if not should_continue:
+                logger.info("Pipeline completion criteria met. Ending pipeline.")
 
     except Exception as e:
-        logging.error(f"An error occurred during orchestration: {e}", exc_info=True)
+        logger.error(f"An error occurred during orchestration: {e}", exc_info=True)
+        strategy_report += f"\n\n--- ORCHESTRATION FAILED ---\n{e}"
     finally:
         session_state.close_connection()
-
-        # Clean up any generated views
         cleanup_analysis_views(Path(session_state.run_dir))
-        logging.info("View cleanup process initiated.")
+        logger.info("View cleanup process initiated.")
+        logger.info("Run finished. Session state saved.")
 
-        logging.info("Run finished. Session state saved.")
+    final_report = (
+        f"# VULCAN Run Complete: {run_id}\n\n"
+        f"## Discovery Loop Report\n{discovery_report}\n\n"
+        f"## Strategy Refinement Report\n{strategy_report}\n"
+    )
+    logger.info("VULCAN has completed its run.")
+    return final_report
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"VULCAN run failed: {e}")
-        logger.exception(e)
-        # Optional: Add any cleanup logic here
+        logger.error(f"VULCAN run failed: {e}", exc_info=True)
         sys.exit(1)

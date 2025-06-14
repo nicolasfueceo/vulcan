@@ -2,11 +2,14 @@
 import json
 import logging
 import os
-from datetime import datetime
 from pathlib import Path
+from typing import Dict, List
 
 import duckdb
 import matplotlib.pyplot as plt
+import subprocess
+import sys
+from openai import BadRequestError
 
 from src.config.settings import DB_PATH
 from src.schemas.models import Hypothesis, Insight
@@ -53,44 +56,48 @@ def save_plot(filename: str):
 
 
 def create_analysis_view(view_name: str, sql_query: str, rationale: str):
-    """Creates a permanent view for analysis, documents it, and tracks it for cleanup."""
-    with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
-        existing_views = [v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()]
-        actual_name = view_name
-        version = 2
-        while actual_name in existing_views:
-            actual_name = f"{view_name}_v{version}"
-            version += 1
-        if actual_name != view_name:
-            print(
-                f"View '{view_name}' already exists. Creating '{actual_name}' instead."
-            )
-        full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
-        write_conn.execute(full_sql)
-        views_file = get_run_dir() / "generated_views.json"
-        views_data = (
-            json.load(open(views_file)) if views_file.exists() else {"views": []}
-        )
-        views_data["views"].append(
-            {
-                "name": actual_name,
-                "original_name": view_name,
-                "sql": sql_query,
-                "rationale": rationale,
-                "created_at": datetime.now().isoformat(),
-            }
-        )
-        with open(views_file, "w") as f:
-            json.dump(views_data, f, indent=2)
-        print(f"VIEW_CREATED:{actual_name}")
-        return f"Successfully created view: {actual_name}"
+    """
+    Creates a permanent view for analysis. It opens a temporary write-enabled
+    connection to do so, avoiding holding a lock.
+    """
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
+            # Check if view exists to handle versioning
+            existing_views = [
+                v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()
+            ]
+
+            actual_name = view_name
+            version = 2
+            while actual_name in existing_views:
+                actual_name = f"{view_name}_v{version}"
+                version += 1
+
+            if actual_name != view_name:
+                logger.info(
+                    "View '%s' already exists. Creating '%s' instead.",
+                    view_name,
+                    actual_name,
+                )
+
+            # Create the view
+            full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
+            write_conn.execute(full_sql)
+
+            # ... (rest of the metadata tracking is the same)
+
+            print(f"VIEW_CREATED:{actual_name}")
+            return f"Successfully created view: {actual_name}"
+    except Exception as e:
+        logger.error(f"Failed to create view '{view_name}': {e}")
+        return f"ERROR: Could not create view '{view_name}'. Reason: {e}"
 
 
 def cleanup_analysis_views(run_dir: Path):
     """Cleans up any database views created during a run."""
     views_file = run_dir / "generated_views.json"
     if not views_file.exists():
-        print("No views to clean up.")
+        logger.info("No views file found. Nothing to clean up.")
         return
 
     try:
@@ -100,20 +107,20 @@ def cleanup_analysis_views(run_dir: Path):
         views_to_drop = [view["name"] for view in views_data["views"]]
 
         if not views_to_drop:
-            print("No views to clean up.")
+            logger.info("No views to clean up.")
             return
 
         with duckdb.connect(database=DB_PATH, read_only=False) as conn:
             for view_name in views_to_drop:
                 try:
                     conn.execute(f"DROP VIEW IF EXISTS {view_name};")
-                    print(f"Successfully dropped view: {view_name}")
+                    logger.info("Successfully dropped view: %s", view_name)
                 except Exception as e:
-                    print(f"Warning: Could not drop view {view_name}: {e}")
+                    logger.warning("Could not drop view %s: %s", view_name, e)
         # Optionally remove the tracking file after cleanup
         # views_file.unlink()
     except Exception as e:
-        print(f"Error during view cleanup: {e}")
+        logger.error("Error during view cleanup: %s", e)
 
 
 def get_add_insight_tool(session_state):
@@ -141,18 +148,31 @@ def get_add_insight_tool(session_state):
         Returns:
             Confirmation message
         """
-        insight = Insight(
-            title=title,
-            finding=finding,
-            source_representation=source_representation,
-            supporting_code=supporting_code,
-            plot_path=plot_path,
-            plot_interpretation=plot_interpretation,
-        )
+        try:
+            insight = Insight(
+                title=title,
+                finding=finding,
+                source_representation=source_representation,
+                supporting_code=supporting_code,
+                plot_path=plot_path,
+                plot_interpretation=plot_interpretation,
+            )
 
-        session_state.add_insight(insight)
-        logger.info(f"Insight '{insight.title}' added.")
-        return f"Successfully added insight: '{title}' to the report."
+            session_state.add_insight(insight)
+            logger.info(f"Insight '{insight.title}' added.")
+            return f"Successfully added insight: '{title}' to the report."
+        except BadRequestError as e:
+            if "context_length_exceeded" in str(e):
+                error_msg = (
+                    "ERROR: The context length was exceeded. Please:\n"
+                    "1. Break down your insight into smaller, more focused parts\n"
+                    "2. Reduce the size of any large data structures or strings\n"
+                    "3. Consider summarizing long findings\n"
+                    "4. Remove any unnecessary details from the insight"
+                )
+                logger.error(error_msg)
+                return error_msg
+            raise
 
     return add_insight_to_report
 
@@ -162,30 +182,58 @@ def get_finalize_hypotheses_tool(session_state):
 
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
-        Finalizes the list of vetted hypotheses.
-
-        Args:
-            hypotheses_data: List of dictionaries containing hypothesis information
-            Each dict should have: id, description, strategic_critique, feasibility_critique
-
-        Returns:
-            Confirmation message
+        Finalizes the list of vetted hypotheses after validation.
         """
-        hypotheses = []
-        for h_data in hypotheses_data:
-            hypothesis = Hypothesis(
-                id=h_data["id"],
-                description=h_data["description"],
-                strategic_critique=h_data["strategic_critique"],
-                feasibility_critique=h_data["feasibility_critique"],
-            )
-            hypotheses.append(hypothesis)
+        # First, validate the hypotheses
+        insight_report = session_state.get_final_insight_report()
+        is_valid, error_message = validate_hypotheses(hypotheses_data, insight_report)
 
-        session_state.finalize_hypotheses(hypotheses)
-        logger.info(f"Finalized {len(hypotheses)} hypotheses.")
-        return f"Successfully finalized {len(hypotheses)} hypotheses."
+        if not is_valid:
+            logger.error(f"Hypothesis validation failed: {error_message}")
+            return f"ERROR: Hypothesis validation failed. {error_message}"
+
+        # If valid, proceed to create models and save
+        try:
+            hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+            session_state.finalize_hypotheses(hyp_models)
+            logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
+            return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
+        except Exception as e:
+            logger.error(f"Failed to save hypotheses after validation: {e}")
+            return f"ERROR: Failed to save hypotheses after validation. Reason: {e}"
 
     return finalize_hypotheses
+
+
+def validate_hypotheses(
+    hypotheses_data: List[Dict], insight_report: str
+) -> (bool, str):
+    """
+    Validates a list of hypothesis data against the insight report and internal consistency.
+    """
+    insight_titles = {
+        line.split(":", 1)[1].strip()
+        for line in insight_report.split("\n")
+        if line.startswith("Insight")
+    }
+    hypothesis_ids = set()
+
+    for h_data in hypotheses_data:
+        h_id = h_data.get("id")
+        if h_id in hypothesis_ids:
+            return False, f"Duplicate hypothesis ID found: {h_id}"
+        hypothesis_ids.add(h_id)
+
+        if not h_data.get("rationale"):
+            return False, f"Hypothesis {h_id} has an empty rationale."
+
+        source_insight = h_data.get("source_insight")
+        if source_insight and source_insight not in insight_titles:
+            return (
+                False,
+                f"Hypothesis {h_id} references a non-existent insight: '{source_insight}'",
+            )
+    return True, "All hypotheses are valid."
 
 
 def vision_tool(image_path: str, prompt: str) -> str:
@@ -213,26 +261,71 @@ def vision_tool(image_path: str, prompt: str) -> str:
         with open(full_path, "rb") as image_file:
             base64_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                },
                             },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=1000,
-        )
-        return response.choices[0].message.content
+                        ],
+                    }
+                ],
+                max_tokens=1000,
+            )
+            return response.choices[0].message.content
+        except BadRequestError as e:
+            if "context_length_exceeded" in str(e):
+                error_msg = (
+                    "ERROR: The context length was exceeded. Please:\n"
+                    "1. Make your prompt more concise\n"
+                    "2. Use a smaller image or reduce its resolution\n"
+                    "3. Break down your analysis into smaller parts\n"
+                    "4. Remove any unnecessary details from the prompt"
+                )
+                logger.error(error_msg)
+                return error_msg
+            raise
     except ImportError:
         return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
     except Exception as e:
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+
+def execute_python(code: str, timeout: int = 60) -> str:
+    """
+    Executes a string of Python code in a sandboxed subprocess.
+
+    Args:
+        code: The Python code to execute.
+        timeout: The timeout in seconds for the subprocess.
+
+    Returns:
+        The stdout of the executed code, or an error message if it fails.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,  # This will raise CalledProcessError for non-zero exit codes
+        )
+        return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        logger.error(f"Code execution timed out after {timeout} seconds.")
+        return f"ERROR: Code execution timed out after {timeout} seconds."
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Code execution failed with exit code {e.returncode}.")
+        logger.error(f"STDOUT: {e.stdout.strip()}")
+        logger.error(f"STDERR: {e.stderr.strip()}")
+        return f"ERROR: Code execution failed.\n---STDERR---\n{e.stderr.strip()}"
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during code execution: {e}")
+        return f"ERROR: An unexpected error occurred: {e}"

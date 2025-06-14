@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-12 20:28:44
+Generated on: 2025-06-14 01:16:36
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -8,13 +8,28 @@ This document contains the complete source code structure and contents of the `s
 
 ```
 ├── .gitignore
-├── Dockerfile.dataanalysis
 ├── README.md
+├── coding_utils/
+│   └── safe_delete.py
 ├── config/
 │   └── OAI_CONFIG_LIST.json
 ├── data/
 │   ├── .gitkeep
-│   └── __init__.py
+│   ├── __init__.py
+│   ├── cache_metadata.py
+│   ├── curated_reviews_partitioned/
+│   │   └── part-0.parquet
+│   ├── generate_cv_splits.py
+│   ├── processed/
+│   │   └── cv_splits/
+│   │       ├── cv_folds.json
+│   │       └── cv_summary.json
+│   ├── splits/
+│   │   ├── cold_start_users.json
+│   │   ├── cv_folds.json
+│   │   ├── cv_summary.json
+│   │   └── sample_users.json
+│   └── sql_views/
 ├── data_curation/
 │   ├── README.md
 │   ├── clean_data.py
@@ -28,19 +43,20 @@ This document contains the complete source code structure and contents of the `s
 │       ├── get_curated_schema.py
 │       ├── inspect_raw_dates.py
 │       └── verify_curated_dates.py
-├── docker-compose.yml
+├── debug_user_counts.py
 ├── docs/
-│   ├── context.md
-│   ├── core_mission.md
-│   ├── experiments.md
-│   ├── project_status_report.md
-│   └── test.md
+│   ├── code_mindmap.mermaid
+│   └── context.md
 ├── generate_src_docs.py
 ├── requirements.txt
 ├── scripts/
-│   └── test_prompt.py
+│   ├── __pycache__/
+│   ├── check_lightfm_openmp.py
+│   └── inspect_cv_splits.py
 ├── src/
 │   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── __pycache__/
 │   │   ├── discovery_team/
 │   │   │   ├── __pycache__/
 │   │   │   └── insight_discovery_agents.py
@@ -49,9 +65,9 @@ This document contains the complete source code structure and contents of the `s
 │   │       ├── evaluation_agent.py
 │   │       ├── feature_realization_agent.py
 │   │       ├── hypothesis_agents.py
-│   │       ├── optimization_agent.py
-│   │       ├── reasoning_agent.py
-│   │       └── reflection_agent.py
+│   │       ├── optimization_agent_v2.py
+│   │       ├── reflection_agent.py
+│   │       └── strategy_team_agents.py
 │   ├── config/
 │   │   ├── __pycache__/
 │   │   ├── logging.py
@@ -62,6 +78,19 @@ This document contains the complete source code structure and contents of the `s
 │   │   ├── database.py
 │   │   ├── llm.py
 │   │   └── tools.py
+│   ├── data/
+│   │   ├── __pycache__/
+│   │   ├── cv_data_manager.py
+│   │   └── feature_matrix.py
+│   ├── evaluation/
+│   │   ├── __pycache__/
+│   │   └── scoring.py
+│   ├── orchestration/
+│   │   ├── __pycache__/
+│   │   ├── ideation.py
+│   │   ├── insight.py
+│   │   ├── realization.py
+│   │   └── strategy.py
 │   ├── orchestrator.py
 │   ├── prompts/
 │   │   ├── agents/
@@ -71,6 +100,7 @@ This document contains the complete source code structure and contents of the `s
 │   │   │   │   ├── pattern_seeker.j2
 │   │   │   │   └── quantitative_analyst.j2
 │   │   │   ├── feature_ideator.j2
+│   │   │   ├── feature_realization.j2
 │   │   │   ├── reflection_agent.j2
 │   │   │   └── strategy_team/
 │   │   │       ├── engineer_agent.j2
@@ -80,46 +110,49 @@ This document contains the complete source code structure and contents of the `s
 │   │   │   ├── base_agent.j2
 │   │   │   ├── base_analyst.j2
 │   │   │   ├── base_strategy.j2
-│   │   │   └── core_mission.j2
+│   │   │   ├── core_mission.j2
+│   │   │   ├── group_chat_initiator.j2
+│   │   │   ├── strategy_chat_initiator.j2
+│   │   │   └── strategy_team_chat_initiator.j2
 │   │   └── helpers/
 │   │       ├── db_schema.j2
 │   │       └── tool_usage.j2
+│   ├── report/
 │   ├── schemas/
 │   │   ├── __pycache__/
 │   │   ├── eda_report_schema.json
 │   │   └── models.py
 │   └── utils/
 │       ├── __pycache__/
-│       ├── data_utils.py
 │       ├── decorators.py
 │       ├── feature_registry.py
 │       ├── logging_utils.py
+│       ├── plotting.py
 │       ├── prompt_utils.py
-│       ├── pubsub.py
 │       ├── run_utils.py
 │       ├── sampling.py
 │       ├── session_state.py
 │       ├── testing_utils.py
 │       └── tools.py
 ├── src_documentation.md
-├── src_documentation_with_prompts.md
 └── tests/
     ├── __init__.py
+    ├── __pycache__/
     ├── conftest.py
-    ├── multi_agent_pipeline/
-    │   ├── test_feature_ideation_agent_e2e.py
-    │   ├── test_feature_realization.py
-    │   ├── test_feature_realization_agent_e2e.py
-    │   ├── test_optimization_agent_e2e.py
-    │   ├── test_orchestrator_smoke.py
-    │   ├── test_reflection_agent_e2e.py
-    │   └── test_research_agent_e2e.py
-    ├── schemas/
-    │   └── feature_proposal_schema.json
-    └── test_feature_realization_agent.py
+    ├── debug_db_connection.py
+    ├── test_optimization_agent.py
+    └── test_optimization_end_to_end.py
 ```
 
 ## 📄 File Contents (src directory only)
+
+### `agents/__init__.py`
+
+**File size:** 46 bytes
+
+```python
+# This file makes src/agents a Python package
+```
 
 ### `agents/discovery_team/insight_discovery_agents.py`
 
@@ -170,304 +203,331 @@ def get_insight_discovery_agents(
 
 ### `agents/strategy_team/evaluation_agent.py`
 
-**File size:** 1,943 bytes
+**File size:** 1,996 bytes
 
 ```python
 # src/agents/evaluation_agent.py
+from typing import Optional
 from loguru import logger
 from tensorboardX import SummaryWriter
 
 from src.utils.decorators import agent_run_decorator
-from src.utils.memory import get_mem
-from src.utils.pubsub import acquire_lock, publish, release_lock
+from src.utils.session_state import SessionState
 
 
 class EvaluationAgent:
-    def __init__(self, llm_config: dict = None):
+    def __init__(self, llm_config: Optional[dict] = None):
         self.writer = SummaryWriter("runtime/tensorboard/EvaluationAgent")
         self.run_count = 0
 
     @agent_run_decorator("EvaluationAgent")
-    def run(self, message: dict = {}):
+    def run(self, session_state: SessionState):
         """
         Runs a final evaluation on the best model and logs metrics.
-        Triggered by 'opt_complete'.
+        This is a procedural step called by the orchestrator.
         """
-        lock_name = "lock:EvaluationAgent"
-        if not acquire_lock(lock_name):
-            logger.info("EvaluationAgent is already running. Skipping.")
+        logger.info("Starting final evaluation...")
+
+        opt_results = session_state.get_state("optimization_results", {})
+        best_trial = opt_results.get("best_trial")
+
+        if not best_trial:
+            logger.warning("No optimization results found. Skipping evaluation.")
             return
 
-        try:
-            best_rmse = get_mem("best_rmse")
-            best_params = get_mem("best_params")
+        best_params = best_trial.params
+        best_value = best_trial.value
 
-            if not best_params:
-                logger.warning("No best parameters found. Skipping evaluation.")
-                return
+        # In a real implementation, this would involve retraining and testing on a holdout set.
+        # For now, we'll consider the best validation score as the final metric.
+        logger.info(f"Final evaluation with best params: {best_params}")
+        logger.info(f"Best validation score (e.g., RMSE): {best_value}")
 
-            # In a real implementation, this agent would:
-            # 1. Retrain the model on the full training data using best_params.
-            # 2. Evaluate on a held-out test set.
-            # 3. Calculate various metrics (e.g., NDCG, precision@k).
-            # 4. Log everything to TensorBoard.
+        # Log metrics to TensorBoard
+        self.writer.add_scalar("final_test_metric", best_value, self.run_count)
+        self.writer.add_hparams(best_params, {"hparam/final_test_metric": best_value})
 
-            logger.info(f"Final evaluation with best params: {best_params}")
-            logger.info(f"Best validation RMSE: {best_rmse}")
+        # Store final results in the session state
+        evaluation_results = {
+            "final_metric": best_value,
+            "best_params": best_params,
+            "status": "success",
+        }
+        session_state.set_state("evaluation_results", evaluation_results)
 
-            # For now, just log the best RMSE from validation as the final metric
-            self.writer.add_scalar("final_test_rmse", best_rmse, self.run_count)
-            self.writer.add_hparams(best_params, {"hparam/final_test_rmse": best_rmse})
-
-            self.run_count += 1
-            publish("evaluation_done", {"status": "success"})
-
-        finally:
-            release_lock(lock_name)
-            self.writer.close()
+        logger.info("Final evaluation complete. Results saved to session state.")
+        self.run_count += 1
+        self.writer.close()
 ```
 
 ### `agents/strategy_team/feature_realization_agent.py`
 
-**File size:** 8,745 bytes
+**File size:** 10,748 bytes
 
 ```python
-# src/agents/feature_realization_agent.py
-
-
-import inspect
+# src/agents/strategy_team/feature_realization_agent.py
+import json
 from typing import Dict, List
 
 import autogen
-import numpy as np
-import pandas as pd
 from loguru import logger
-from tensorboardX import SummaryWriter
 
+from src.schemas.models import CandidateFeature, RealizedFeature
 from src.utils.decorators import agent_run_decorator
 from src.utils.feature_registry import feature_registry
-from src.utils.logging_config import setup_logging
-from src.utils.sampling import sample_users_by_activity
+from src.utils.prompt_utils import load_prompt
 from src.utils.session_state import SessionState
-from src.utils.tools_v2 import execute_python
+from src.utils.tools import execute_python
 
 
 class FeatureRealizationAgent:
     def __init__(self, llm_config: Dict, session_state: SessionState):
         """Initialize the feature realization agent."""
-        setup_logging()
+        logger.info("Initializing FeatureRealizationAgent")
         self.llm_config = llm_config
         self.session_state = session_state
-        self.assistant = autogen.AssistantAgent(
+        self.db_path = session_state.get_state("db_path")
+        if not self.db_path:
+            raise ValueError(
+                "db_path not found in SessionState. It must be initialized by the Orchestrator."
+            )
+
+        self.llm_agent = autogen.AssistantAgent(
             name="FeatureRealizationAssistant",
             llm_config=self.llm_config,
-            system_message="""You are a feature realization expert. Your role is to:
-1. Take feature specifications and turn them into working Python code
-2. Ensure the code is efficient, well-documented, and follows best practices
-3. Handle both simple features and complex compositions
-4. Validate the code against the specification
-5. Add appropriate error handling and logging""",
-            human_input_mode="NEVER",
-            max_consecutive_auto_reply=10,
-            code_execution_config={
-                "work_dir": "runtime/code_execution",
-                "use_docker": False,
-            },
+            system_message="""You are an expert Python programmer. Given a feature specification, you write clean, efficient, and correct Python code that follows the provided function signature and relies only on standard libraries like pandas and numpy.""",
         )
-        self.user_proxy = autogen.UserProxyAgent(
-            name="UserProxy_FeatureRealization",
-            human_input_mode="NEVER",
-            max_consecutive_auto_reply=10,
-            code_execution_config={
-                "work_dir": "runtime/code_execution",
-                "use_docker": False,
-            },
-        )
-        self.writer = SummaryWriter("runtime/tensorboard/FeatureRealizationAgent")
 
     @agent_run_decorator("FeatureRealizationAgent")
-    def run(self, candidate_features: List[Dict]):
+    def run(self) -> None:
         """
-        Main method to run the feature realization process.
+        Main method to realize candidate features from the session state.
         """
+        logger.info("Starting feature realization...")
+        candidate_features = self.session_state.get_state("candidate_features", [])
+        if not candidate_features:
+            logger.warning("No candidate features found to realize.")
+            self.session_state.set_state("realized_features", [])
+            return
+
+        realized_features: List[RealizedFeature] = []
+
+        for candidate in candidate_features:
+            logger.info(f"Attempting to realize feature: {candidate.name}")
+            realized_feature = None
+            try:
+                if candidate.type == "code":
+                    realized_feature = self._realize_code_feature(candidate)
+                elif candidate.type == "llm":
+                    realized_feature = self._realize_llm_feature(candidate)
+                elif candidate.type == "composition":
+                    realized_feature = self._realize_composition_feature(candidate)
+                else:
+                    logger.warning(
+                        f"Unknown feature type '{candidate.type}' for candidate {candidate.name}. Skipping."
+                    )
+                    continue
+
+                if realized_feature:
+                    logger.info(f"Validating realized feature: {realized_feature.name}")
+                    is_valid = self._validate_feature(realized_feature)
+                    realized_feature.passed_test = is_valid
+                    if is_valid:
+                        logger.success(
+                            f"Successfully validated and realized feature: {realized_feature.name}"
+                        )
+                        self._register_feature(realized_feature)
+                        realized_features.append(realized_feature)
+                    else:
+                        logger.error(
+                            f"Validation failed for feature: {realized_feature.name}"
+                        )
+                else:
+                    logger.error(f"Realization failed for candidate: {candidate.name}")
+
+            except Exception as e:  # pylint: disable=broad-except # Catching a broad exception is intentional here.
+                logger.error(
+                    f"An unexpected error occurred while realizing feature {candidate.name}: {e}",
+                    exc_info=True,
+                )
+
+        self.session_state.set_state("realized_features", realized_features)
         logger.info(
-            f"Starting feature realization for {len(candidate_features)} features."
+            f"Finished feature realization. Successfully realized and validated {len(realized_features)} features."
         )
 
-        # Realize features using LLM batch processing
-        # realized_features = llm_batch_tool(
-        #     name="feature_realizer",
-        #     instructions="Generate Python code for the following features:",
-        #     prompts=[json.dumps(f) for f in candidate_features],
-        #     llm_config=self.llm_config,
-        # )
+    def _register_feature(self, feature: RealizedFeature):
+        """Registers a validated feature in the feature registry."""
+        logger.info(f"Registering feature '{feature.name}' in the feature registry.")
+        try:
+            # Compile the code string into a function object
+            temp_namespace = {}
+            exec(feature.code_str, globals(), temp_namespace)
+            feature_func = temp_namespace[feature.name]
 
-        # For now, let's just pass the candidate features through
-        realized_features = candidate_features
+            if not callable(feature_func):
+                raise ValueError(f"The compiled code for feature '{feature.name}' is not a callable function.")
 
-        # Validate and execute the features
-        # validated_features = []
-        # for feature in realized_features:
-        #     if self._validate_feature_code(feature):
-        #         # ... (rest of the loop)
-        #         pass
+            feature_data = {
+                "type": feature.type,
+                "func": feature_func,  # Store the compiled function
+                "params": feature.params,
+                "source_candidate": feature.source_candidate,
+            }
+        except Exception as e:
+            logger.error(f"Failed to compile and register feature '{feature.name}': {e}")
+            return  # Do not register a broken feature
+        feature_registry.register(name=feature.name, feature_data=feature_data)
 
-    def _load_prompt(self, prompt_file: str) -> str:
-        with open(prompt_file) as f:
-            return f.read()
-
-    def _generate_code_logic(self, proposal: dict) -> str:
-        # This will now be a simplified version, as the main logic is in the tool
-        return proposal["spec"]
-
-    def _realize_code_feature(
-        self, feature_name: str, spec: str, params: dict
-    ) -> (object, list, str):
-        """
-        Realizes a code-based feature by generating and returning a Python function.
-        """
-        param_string = ", ".join(params.keys())
-        code = f"""
+    def _realize_code_feature(self, candidate: CandidateFeature) -> RealizedFeature:
+        """Realizes a feature based on a code spec by wrapping it in a function."""
+        logger.info(f"Realizing code feature: {candidate.name}")
+        param_string = ", ".join(candidate.params.keys())
+        code_str = f"""
 import pandas as pd
 import numpy as np
 
-def {feature_name}(df_reviews: pd.DataFrame, df_items: pd.DataFrame, {param_string}):
-    return {spec}
+def {candidate.name}(df: pd.DataFrame, {param_string}):
+    # This feature was generated based on the spec:
+    # {candidate.spec}
+    try:
+        return {candidate.spec}
+    except Exception as e:
+        # Add context to the error. The ERROR: prefix is for the validator.
+        print(f"ERROR: Error executing feature '{candidate.name}': {{e}}")
+        return None
 """
-        try:
-            exec_globals = {}
-            exec(code, exec_globals)
-            func = exec_globals[feature_name]
-            return func, list(params.keys()), None
-        except Exception as e:
-            return None, [], str(e)
+        return RealizedFeature(
+            name=candidate.name,
+            code_str=code_str,
+            params=candidate.params,
+            passed_test=False,  # Will be set after validation
+            type=candidate.type,
+            source_candidate=candidate,
+        )
 
-    def _realize_llm_feature(
-        self, name: str, spec: str, batch_size: int, cacheable: bool
-    ) -> (object, list, str):
-        """
-        Realizes an LLM-based feature by creating a Python function that can call the LLM in batches.
-        """
-        is_user_feature = "<USER_REVIEWS>" in spec
+    def _realize_llm_feature(self, candidate: CandidateFeature) -> RealizedFeature:
+        """Realizes a feature using an LLM call to generate the code."""
+        logger.info(f"Realizing LLM feature: {candidate.name}")
+        prompt = load_prompt(
+            "realize_feature_from_spec",
+            feature_name=candidate.name,
+            feature_rationale=candidate.rationale,
+            feature_spec=candidate.spec,
+            feature_params=json.dumps(candidate.params, indent=2),
+        )
 
-        def llm_feature_function(
-            df_reviews: pd.DataFrame, df_books: pd.DataFrame, **kwargs
-        ):
-            if is_user_feature:
-                # Group by user_id and get the last 'batch_size' reviews
-                ctx = df_reviews.groupby("user_id")["review_text"].apply(
-                    lambda L: L.tolist()[-batch_size:]
-                )
-                prompts = ctx.apply(
-                    lambda L: spec.replace("<USER_REVIEWS>", " ".join(L))
-                )
-                target_index = ctx.index
-            else:  # Assumes item feature with <BOOK_DESCRIPTION>
-                # Use book descriptions
-                ctx = df_books.set_index("book_id")["description"].dropna()
-                prompts = ctx.apply(lambda d: spec.replace("<BOOK_DESCRIPTION>", d))
-                target_index = ctx.index
+        response = self.llm_agent.generate_reply(
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-            # Call the LLM in batches
-            # NOTE: llm_batch_tool is not implemented - this is a placeholder
-            # A real implementation would handle batching properly
-            # scores = llm_batch_tool(prompts.tolist())
-            scores = [0.5] * len(prompts)  # Placeholder scores
+        if not isinstance(response, str):
+            logger.error(
+                f"LLM did not return a valid string response. Got: {type(response)}"
+            )
+            code_str = (
+                f"# LLM FAILED: Response was not a string for feature {candidate.name}"
+            )
+        elif "```python" in response:
+            code_str = response.split("```python")[1].split("```")[0].strip()
+        else:
+            code_str = response  # Assume the whole response is code
 
-            return pd.Series(scores, index=target_index, dtype=float)
-
-        return llm_feature_function, ["scale"], None
+        return RealizedFeature(
+            name=candidate.name,
+            code_str=code_str,
+            params=candidate.params,
+            passed_test=False,
+            type=candidate.type,
+            source_candidate=candidate,
+        )
 
     def _realize_composition_feature(
-        self, name: str, spec: str, depends_on: list
-    ) -> (object, list, str):
-        """
-        Realizes a composition feature by creating a wrapper function that calls its dependencies.
-        """
+        self, candidate: CandidateFeature
+    ) -> RealizedFeature:
+        """Realizes a feature by composing existing features. (Simplified)"""
+        logger.info(f"Realizing composition feature: {candidate.name}")
+        # This is a placeholder for a much more complex logic.
+        # A robust implementation would require a dependency graph and careful parameter mapping.
+        logger.warning(
+            f"Composition feature '{candidate.name}' uses simplified realization logic."
+        )
 
-        def composition_feature_function(
-            df_reviews: pd.DataFrame, df_books: pd.DataFrame, **kwargs
-        ):
-            all_realized_fns = feature_registry.get_all()
+        dep_calls = []
+        all_params = {}
+        for dep_name in candidate.depends_on:
+            dep_feature_data = feature_registry.get(dep_name)
+            if not dep_feature_data:
+                raise ValueError(f"Dependency '{dep_name}' not found in registry.")
 
-            values = {}
-            for dep_name in depends_on:
-                if dep_name in all_realized_fns:
-                    dep_fn_data = all_realized_fns[dep_name]
-                    dep_fn = dep_fn_data["func"]
-                    dep_params = {
-                        p: kwargs.get(f"{dep_name}__{p}", 1)
-                        for p in dep_fn_data["params"]
-                    }
-                    values[dep_name] = dep_fn(df_reviews, df_books, **dep_params)
+            dep_params = dep_feature_data.get("params", {})
+            all_params.update({f"{dep_name}__{k}": v for k, v in dep_params.items()})
+            param_arg_str = ", ".join(dep_params.keys())
+            dep_calls.append(
+                f"    values['{dep_name}'] = {dep_name}(df, {param_arg_str})"
+            )
 
-            # This is a simplified and potentially unsafe use of eval.
-            result = eval(spec, {"np": np}, values)
-            return result
+        dep_calls_str = "\n".join(dep_calls)
 
-        # The parameters of a composition feature are the nested parameters of its dependencies.
-        all_realized_fns = feature_registry.get_all()
-        param_names = [
-            f"{dep}__{p}"
-            for dep in depends_on
-            for p in all_realized_fns.get(dep, {}).get("params", [])
-        ]
-
-        return composition_feature_function, param_names, None
-
-    def _validate_feature(self, feature_name: str, func: object, params: list) -> bool:
-        """
-        Validates a realized feature by running it on a sample of data in a
-        sandboxed environment.
-        """
-        logger.info(f"Validating feature {feature_name}...")
-
-        # Get a sample of users for validation
-        user_ids = sample_users_by_activity(10, 1, 100)  # 10 users for speed
-        if not user_ids:
-            logger.warning("Skipping validation due to no sample users found.")
-            return True
-
-        # Create a script to run the validation
-        param_string = ", ".join([f"{p}=1" for p in params])
-        code = f"""
+        code_str = f"""
 import pandas as pd
 import numpy as np
-from src.utils.db_api import fetch_df
 
-# Define the function to test
-{inspect.getsource(func)}
+# This is a simplified composition. A real implementation would need to handle imports.
 
-# Load the data
-user_id_str = "','".join({user_ids})
-df_reviews = fetch_df(f"SELECT * FROM reviews WHERE user_id IN ('{{user_id_str}}')")
-book_ids = df_reviews['book_id'].unique()
-book_id_str = "','".join(book_ids)
-df_items = fetch_df(f"SELECT * FROM books WHERE book_id IN ('{{book_id_str}}')")
+def {candidate.name}(df: pd.DataFrame, {", ".join(all_params.keys())}):
+    values = {{}}
+{dep_calls_str}
 
-# Run the function
-result = {feature_name}(df_reviews, df_items, {param_string})
-print(len(result))
+    # The spec is a formula like 'feat_a * feat_b'
+    result = eval('{candidate.spec}', {{"np": np}}, values)
+    return result
 """
 
+        return RealizedFeature(
+            name=candidate.name,
+            code_str=code_str,
+            params=all_params,
+            passed_test=False,
+            type=candidate.type,
+            source_candidate=candidate,
+        )
+
+    def _validate_feature(self, feature: RealizedFeature) -> bool:
+        """Validates the feature's code by executing it in a sandbox."""
+        logger.info(f"Validating feature: {feature.name}")
         try:
-            execution_result = execute_python(code)
-            # Note: execute_python returns a string, not an object with exit_code
-            # This is a simplified validation - would need to parse the result properly
-            logger.info(f"Feature {feature_name} validation result: {execution_result}")
+            # A robust solution would involve a secure sandbox with data serialization.
+            # For now, we just check for syntax errors and basic callability.
+            param_args = ", ".join(
+                [f"{key}={repr(value)}" for key, value in feature.params.items()]
+            )
+            validation_code = (
+                feature.code_str
+                + "\n# Validation Call\n"
+                + f"print({feature.name}(pd.DataFrame(), {param_args}))"
+            )
+
+            output = execute_python(validation_code)
+
+            if "ERROR:" in output:
+                logger.warning(
+                    f"Validation failed for {feature.name}. Error:\n{output}"
+                )
+                return False
+
+            logger.success(f"Validation successful for {feature.name}")
             return True
-
-        except Exception as e:
-            logger.error(f"Validation failed for {feature_name} with exception: {e}")
+        except Exception as e:  # pylint: disable=broad-except # Catching a broad exception is intentional here.
+            logger.error(
+                f"Exception during validation for {feature.name}: {e}", exc_info=True
+            )
             return False
-
-        logger.info(f"...feature {feature_name} validated successfully.")
-        return True
 ```
 
 ### `agents/strategy_team/hypothesis_agents.py`
 
-**File size:** 1,580 bytes
+**File size:** 1,587 bytes
 
 ```python
 """
@@ -479,36 +539,30 @@ from typing import Dict
 
 import autogen
 
-from src.utils.prompt_utils import load_prompt
-
 
 def get_hypothesis_agents(
-    llm_config: Dict, insights_report: str
+    llm_config: Dict, system_prompt: str
 ) -> Dict[str, autogen.ConversableAgent]:
     """
     Initializes and returns the agents for the hypothesis and strategy loop.
-    Uses Jinja2 templates from src/prompts/agents/strategy_team/
+    All agents will share the same system prompt to ensure a shared context.
+    Individual roles are defined in separate, more concise prompts.
     """
+    # Define agent roles
+    agent_roles = {
+        "HypothesisAgent": "Your role is to propose initial hypotheses based on the insight report.",
+        "StrategistAgent": "Your role is to critique hypotheses for business and scientific value.",
+        "EngineerAgent": "Your role is to critique hypotheses for technical feasibility and finalize the list.",
+    }
 
-    # Load agent prompts from Jinja2 templates
-    hypothesis_prompt = load_prompt(
-        "agents/strategy_team/hypothesis_agent.j2", insights_report=insights_report
-    )
-    strategist_prompt = load_prompt("agents/strategy_team/strategist_agent.j2")
-    engineer_prompt = load_prompt("agents/strategy_team/engineer_agent.j2")
-
-    agent_defs = [
-        ("HypothesisAgent", hypothesis_prompt),
-        ("StrategistAgent", strategist_prompt),
-        ("EngineerAgent", engineer_prompt),
-    ]
-
-    # Create agents with loaded prompts
+    # Create agents with a shared system prompt and specific roles
     agents = {
         name: autogen.AssistantAgent(
-            name=name, system_message=prompt, llm_config=llm_config
+            name=name,
+            system_message=system_prompt + "\n\n**YOUR SPECIFIC ROLE:**\n" + role,
+            llm_config=llm_config,
         )
-        for name, prompt in agent_defs
+        for name, role in agent_roles.items()
     }
 
     user_proxy = autogen.UserProxyAgent(
@@ -523,319 +577,660 @@ def get_hypothesis_agents(
     return agents
 ```
 
-### `agents/strategy_team/optimization_agent.py`
+### `agents/strategy_team/optimization_agent_v2.py`
 
-**File size:** 6,947 bytes
+**File size:** 23,182 bytes
 
 ```python
-# src/agents/optimization_agent.py
-import numpy as np
-import pandas as pd
-from loguru import logger
-from skopt import gp_minimize
-from skopt.space import Categorical, Integer, Real
-from tensorboardX import SummaryWriter
+"""
+Optimization Agent for VULCAN.
 
-from src.utils.decorators import agent_run_decorator
-from src.utils.feature_registry import feature_registry
-from src.utils.pubsub import acquire_lock, publish, release_lock
-from src.utils.session_state import SessionState
-from src.utils.tools import execute_python
-
-
-class OptimizationAgent:
-    """
-    An agent responsible for optimizing feature parameters and model hyperparameters.
-    """
-
-    def __init__(self, session_state: SessionState):
-        logger.info("OptimizationAgent initialized.")
-        self.session_state = session_state
-        self.writer = SummaryWriter("runtime/tensorboard")
-        self.trial_count = 0
-        self.run_count = 0
-
-    def _define_search_space(self) -> list:
-        """Defines the search space for the optimization."""
-        logger.info("Defining search space...")
-        search_space = []
-
-        # Add realized feature parameters to the search space
-        all_realized_fns = feature_registry.get_all()
-        for feature_name, data in all_realized_fns.items():
-            for param_name in data.get("params", []):
-                # For simplicity, we assume all code params are real-valued
-                # and LLM params have a 'scale' name
-                if "scale" in param_name:
-                    search_space.append(
-                        Real(0.1, 2.0, name=f"{feature_name}__{param_name}")
-                    )
-                else:
-                    search_space.append(
-                        Real(0.1, 10.0, name=f"{feature_name}__{param_name}")
-                    )
-
-        # Add FM hyperparameters to the search space
-        search_space.extend(
-            [
-                Integer(8, 128, name="fm_n_factors"),
-                Real(1e-5, 1.0, "log-uniform", name="fm_reg"),
-                Categorical([True, False], name="fm_use_bias"),
-            ]
-        )
-
-        logger.info(f"...search space defined with {len(search_space)} dimensions.")
-        return search_space
-
-    def _objective_function(self, params: list) -> float:
-        """The objective function to minimize (e.g., validation RMSE)."""
-        logger.info(f"Running trial {self.trial_count} with parameters: {params}")
-
-        # 1. Parse parameters
-        param_dict = {dim.name: value for dim, value in zip(self.search_space, params)}
-
-        # 2. Generate features using execute_python instead of sql_tool
-        code = """
-# Get data for optimization
-all_reviews = session_state.conn.execute("SELECT user_id, book_id, rating, timestamp FROM curated_reviews").df()
-all_books = session_state.conn.execute("SELECT book_id, title, description FROM curated_books").df()
-print(f"Loaded {len(all_reviews)} reviews and {len(all_books)} books")
+This module provides an implementation of the optimization agent that:
+1. Uses k-fold cross-validation for robust evaluation
+2. Leverages Optuna for efficient Bayesian optimization
+3. Implements early stopping and pruning
+4. Integrates with VULCAN's feature registry and session state
 """
 
-        try:
-            result = execute_python(code)
-            logger.info(f"Data loading result: {result}")
-        except Exception as e:
-            logger.error(f"Failed to load data for optimization: {e}")
-            return float("inf")  # Return worst possible score
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TypeVar, Union
 
-        all_realized_fns = feature_registry.get_all()
-        user_features_dfs = []
-        item_features_dfs = []
-
-        for name, data in all_realized_fns.items():
-            func = data["func"]
-            func_params = {
-                p: param_dict.get(f"{name}__{p}", 1.0) for p in data.get("params", [])
-            }
-            # This is a simplification: we assume the function returns a Series
-            # and we can determine if it's a user or item feature by its index name
-            try:
-                # For now, create dummy features since the actual feature functions may not work
-                if "user" in name.lower():
-                    dummy_feature = pd.Series([0.5] * 100, name=name)
-                    dummy_feature.index.name = "user_id"
-                    user_features_dfs.append(dummy_feature)
-                else:
-                    dummy_feature = pd.Series([0.5] * 100, name=name)
-                    dummy_feature.index.name = "book_id"
-                    item_features_dfs.append(dummy_feature)
-            except Exception as e:
-                logger.warning(f"Failed to generate feature {name}: {e}")
-
-        user_features = (
-            pd.concat(user_features_dfs, axis=1).fillna(0)
-            if user_features_dfs
-            else None
-        )
-        item_features = (
-            pd.concat(item_features_dfs, axis=1).fillna(0)
-            if item_features_dfs
-            else None
-        )
-
-        # 3. For now, return a dummy RMSE since the full optimization pipeline is complex
-        dummy_rmse = np.random.uniform(1.0, 5.0)  # Random RMSE between 1 and 5
-
-        # 4. Log results
-        self.writer.add_scalar("Validation_RMSE", dummy_rmse, self.trial_count)
-        for name, value in param_dict.items():
-            if isinstance(value, str) or isinstance(value, bool):
-                self.writer.add_text(f"param/{name}", str(value), self.trial_count)
-            else:
-                self.writer.add_scalar(f"param/{name}", value, self.trial_count)
-
-        self.trial_count += 1
-        return dummy_rmse
-
-    @agent_run_decorator("OptimizationAgent")
-    def run(self, message: dict = {}):
-        """
-        Runs the Bayesian optimization pipeline. Triggered by a pub/sub event.
-        """
-        lock_name = "lock:OptimizationAgent"
-        if not acquire_lock(lock_name):
-            logger.info("OptimizationAgent is already running. Skipping.")
-            return
-
-        try:
-            self.search_space = self._define_search_space()
-            if not self.search_space:
-                logger.warning("Search space is empty. Skipping optimization.")
-                return
-
-            result = gp_minimize(
-                self._objective_function,
-                self.search_space,
-                n_calls=20,
-                random_state=42,
-            )
-
-            best_params_list = result.x
-            best_params = {
-                dim.name: value
-                for dim, value in zip(self.search_space, best_params_list)
-            }
-            best_rmse = result.fun
-
-            self.session_state.set_best_params(best_params)
-            self.session_state.set_best_rmse(best_rmse)
-
-            self.writer.close()
-            logger.info(
-                f"OptimizationAgent: Best RMSE: {best_rmse}, Best Params: {best_params}"
-            )
-
-            # Publish an event to signal completion
-            publish(
-                "optimization_done",
-                {
-                    "status": "success",
-                    "best_rmse": best_rmse,
-                    "best_params": best_params,
-                },
-            )
-        finally:
-            self.run_count += 1
-            release_lock(lock_name)
-```
-
-### `agents/strategy_team/reasoning_agent.py`
-
-**File size:** 3,793 bytes
-
-```python
-# src/agents/reasoning_agent.py
-import json
-from typing import List
-
-import autogen
+import numpy as np
+import optuna
+import pandas as pd
+from lightfm import LightFM
+from lightfm.evaluation import auc_score
 from loguru import logger
-from tensorboardX import SummaryWriter
+from optuna.pruners import MedianPruner
+from optuna.samplers import TPESampler
+from optuna.trial import Trial
+from pydantic import BaseModel, Field
+from scipy.sparse import coo_matrix, csr_matrix
 
-from src.utils.decorators import agent_run_decorator
-from src.utils.memory import get_mem, set_mem
-from src.utils.pubsub import acquire_lock, publish, release_lock
-from src.utils.schemas import PrioritizedHypothesis
+from src.data.cv_data_manager import CVDataManager
+from src.utils.run_utils import get_run_dir, get_run_tensorboard_dir
+from src.utils.session_state import SessionState
+
+# Type aliases for better readability
+FeatureParams = Dict[str, Any]
+TrialResults = List[Dict[str, Any]]
+PathLike = Union[str, Path]
+T = TypeVar("T")  # For generic type hints
 
 
-class ReasoningAgent:
-    """
-    An agent responsible for prioritizing hypotheses based on feasibility and impact.
-    """
+class OptimizationResult(BaseModel):
+    """Container for optimization results."""
 
-    def __init__(self, llm_config: dict):
-        logger.info("ReasoningAgent initialized.")
-        self.assistant = autogen.AssistantAgent(
-            name="ReasoningAgent",
-            system_message="You are an expert data strategist. Your goal is to prioritize hypotheses based on their feasibility and potential impact. You must call the `save_prioritized_hypotheses` function with your results.",
-            llm_config=llm_config,
-        )
-        self.user_proxy = autogen.UserProxyAgent(
-            name="UserProxy_ReasoningAgent",
-            human_input_mode="NEVER",
-            code_execution_config=False,
-        )
-        self.writer = SummaryWriter("runtime/tensorboard/ReasoningAgent")
-        self.run_count = get_mem("reasoning_run_count") or 0
+    best_params: Dict[str, Any] = Field(
+        ..., description="Best parameters found during optimization"
+    )
+    best_score: float = Field(
+        ..., description="Best score achieved during optimization", ge=0.0, le=1.0
+    )
+    trial_results: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Detailed results from all trials"
+    )
+    feature_importances: Dict[str, float] = Field(
+        default_factory=dict, description="Importance scores for each feature parameter"
+    )
 
-    @agent_run_decorator("ReasoningAgent")
-    def run(self, message: dict = {}):
+    class Config:
+        json_encoders = {
+            np.ndarray: lambda v: v.tolist(),
+            np.float32: float,
+            np.float64: float,
+        }
+
+
+class VULCANOptimizer:
+    """Optimization agent for VULCAN feature engineering."""
+
+    def __init__(
+        self,
+        data_dir: Union[str, Path] = "data",
+        n_jobs: Optional[int] = None,
+        random_state: int = 42,
+        session: Optional[SessionState] = None,
+    ) -> None:
+        """Initialize the optimizer.
+
+        Args:
+            data_dir: Directory containing the data files
+            n_jobs: Number of parallel jobs to run (-1 for all CPUs, None for 1)
+            random_state: Random seed for reproducibility
+            session: Optional session state for tracking experiments
         """
-        Runs the hypothesis prioritization pipeline. Triggered by a pub/sub event.
-        """
-        lock_name = "lock:ReasoningAgent"
-        if not acquire_lock(lock_name):
-            logger.info("ReasoningAgent is already running. Skipping.")
-            return
+        self.data_dir = Path(data_dir)
+        self.random_state = random_state
+        self.n_jobs = n_jobs if n_jobs is not None else 1
+        self.session = session or SessionState()
+        self.current_trial: Optional[optuna.Trial] = None  # Track the current trial
 
+        # Set up data manager
+        self.data_manager = CVDataManager(
+            db_path="data/processed/reviews.duckdb",
+            splits_dir="data/processed/cv_splits",
+        )
+
+        # Set up logging
+        self.run_dir = get_run_dir()
+        self.log_dir = self.run_dir / "optimization_logs"
+        self.log_dir.mkdir(exist_ok=True, parents=True)
+
+        # Set up TensorBoard writer if available
+        self.writer = None
         try:
-            hypotheses = get_mem("hypotheses")
-            if not hypotheses:
-                logger.warning(
-                    "No hypotheses found in memory. Skipping prioritization."
-                )
-                return
+            from torch.utils.tensorboard import SummaryWriter  # type: ignore
 
-            def save_prioritized_hypotheses(
-                prioritized_hypotheses: List[PrioritizedHypothesis],
-            ):
-                """Saves the prioritized hypotheses to memory and publishes an event."""
-                set_mem(
-                    "prioritized_hypotheses",
-                    [h.model_dump() for h in prioritized_hypotheses],
-                )
-                logger.info(
-                    f"Saved {len(prioritized_hypotheses)} prioritized hypotheses to memory."
-                )
-
-                # Publish an event to trigger the next agent
-                publish(
-                    "priorities_ready",
-                    {
-                        "status": "success",
-                        "prioritized_hypotheses": [
-                            h.model_dump() for h in prioritized_hypotheses
-                        ],
-                    },
-                )
-                self.writer.add_scalar(
-                    "hypotheses_prioritized",
-                    len(prioritized_hypotheses),
-                    self.run_count,
-                )
-                return "TERMINATE"
-
-            self.user_proxy.register_function(
-                function_map={
-                    "save_prioritized_hypotheses": save_prioritized_hypotheses
-                }
+            self.writer = SummaryWriter(
+                log_dir=str(get_run_tensorboard_dir() / "optimization")
+            )
+        except ImportError as e:
+            logger.warning(
+                "TensorBoard not available, logging will be limited: %s", str(e)
             )
 
-            prompt = f"""
-            Given the following hypotheses, please assess each one for its
-            feasibility (1-5) and potential impact (1-5). A higher score is better.
-            Call the `save_prioritized_hypotheses` function with your results.
+    def _objective(
+        self,
+        trial: optuna.Trial,
+        features: List[Dict[str, Any]],
+        use_fast_mode: bool,
+    ) -> float:
+        """Objective function for optimization."""
+        logger.info(f"--- Starting Trial {trial.number} ---")
+        self.current_trial = trial
+        trial_number = trial.number
+        logger.info(f"Starting trial {trial_number}...")
 
-            Hypotheses:
-            {json.dumps(hypotheses, indent=2)}
-            """
+        try:
+            # Ensure CV folds are loaded and get summary
+            self.data_manager.load_cv_folds()
+            summary = self.data_manager.get_fold_summary()
+            n_folds = summary.get("n_folds", 0)
+            if n_folds == 0:
+                raise ValueError("No CV folds found. Please generate them first.")
 
-            self.user_proxy.initiate_chat(self.assistant, message=prompt)
-            self.run_count += 1
-            set_mem("reasoning_run_count", self.run_count)
-            self.writer.close()
+            # Sample parameters for this trial
+            params = self._sample_parameters(trial, features)
+
+            # Determine sampling for fast mode
+            sample_frac = 0.1 if use_fast_mode else None
+            logger.info(f"Running trial with {n_folds} folds. Fast mode: {use_fast_mode} (sample_frac={sample_frac})")
+
+            fold_scores = []
+            for fold_idx in range(n_folds):
+                # Get data for the current fold
+                fold_data = self.data_manager.get_fold_data(
+                    fold_idx=fold_idx,
+                    split_type="train_val",
+                    sample_frac=sample_frac,
+                )
+                # Since split_type is 'train_val', we expect a tuple of two dataframes
+                if not (isinstance(fold_data, tuple) and len(fold_data) == 2):
+                    raise TypeError(f"Expected (train_df, val_df), but got {type(fold_data)}")
+                train_df, val_df = fold_data
+
+                # Evaluate on the current fold
+                fold_metrics = self._evaluate_fold(
+                    fold_idx=fold_idx,
+                    train_df=train_df,
+                    val_df=val_df,
+                    features=features,
+                    params=params,
+                )
+                score = float(fold_metrics['val_score'])
+                fold_scores.append(score)
+
+                # Report intermediate score after each fold for pruning
+                trial.report(float(np.mean(fold_scores)), fold_idx)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            mean_score = np.mean(fold_scores) if fold_scores else 0.0
+            logger.info(f"Trial {trial.number} -> Average Score: {mean_score:.4f}")
+            return float(mean_score)
+
+        except optuna.TrialPruned:
+            logger.debug(f"Trial {trial_number} was pruned.")
+            raise
+        except Exception as e:
+            logger.warning(f"Trial {trial.number} failed: {e}", exc_info=True)
+            # Prune trial if it fails
+            raise optuna.exceptions.TrialPruned()
         finally:
-            release_lock(lock_name)
+            logger.info(f"--- Finished Trial {trial.number} ---")
+
+    def _sample_parameters(
+        self, 
+        trial: Trial, 
+        features: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Sample parameters for a trial.
+
+        Args:
+            trial: Optuna trial object
+            features: List of feature configurations
+
+        Returns:
+            Dictionary of sampled parameters
+
+        Raises:
+            ValueError: If a feature configuration is invalid
+            KeyError: If required configuration keys are missing
+        """
+        params: Dict[str, Any] = {}
+
+        for feature in features:
+            try:
+                # Store feature name in a variable that will be used
+                feature_name = feature["name"]
+
+                # Process each parameter in the feature configuration
+                for param_name, param_config in feature.get("parameters", {}).items():
+                    full_param_name = f"{feature_name}__{param_name}"
+                    param_type = param_config.get("type", "float")
+
+                    if param_type == "int":
+                        params[full_param_name] = trial.suggest_int(
+                            full_param_name,
+                            low=param_config["low"],
+                            high=param_config["high"],
+                            step=param_config.get("step", 1)
+                        )
+                    elif param_type == "float":
+                        params[full_param_name] = trial.suggest_float(
+                            full_param_name,
+                            low=param_config.get("low", 0.0),
+                            high=param_config.get("high", 1.0),
+                            log=param_config.get("log", False)
+                        )
+                    elif param_type == "categorical":
+                        params[full_param_name] = trial.suggest_categorical(
+                            full_param_name,
+                            choices=param_config["choices"]
+                        )
+                    else:
+                        logger.warning("Unknown parameter type '%s' for %s", param_type, full_param_name)
+
+            except KeyError as e:
+                logger.error("Missing required configuration for feature %s: %s", feature.get("name", "unknown"), str(e))
+                raise
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error("Error sampling parameters for feature %s: %s", feature.get("name", "unknown"), str(e))
+                raise ValueError(f"Invalid parameter configuration: {str(e)}") from e
+
+        return params
+
+    def _generate_user_features(
+        self,
+        df: pd.DataFrame,
+        features: List[Dict[str, Any]],
+        params: Dict[str, Any],
+        user_map: Dict[Any, int]
+    ) -> Optional[csr_matrix]:
+        """Generate user features matrix for LightFM.
+        
+        Args:
+            df: DataFrame containing user data
+            features: List of feature configurations
+            params: Dictionary of parameters for feature generation
+            user_map: Dictionary mapping user IDs to indices
+            
+        Returns:
+            Sparse matrix of user features (n_users x n_features) or None if no features
+        """
+        if not features:
+            return None
+        
+        # Generate features using the existing method
+        feature_df = self._generate_feature_matrix(df, features, params)
+        
+        # Convert to sparse matrix format expected by LightFM
+        from scipy.sparse import csr_matrix
+        
+        # Create mapping from user_id to feature vector
+        user_features = {}
+        for user_id, group in df.groupby('user_id'):
+            user_idx = user_map[user_id]
+            user_features[user_idx] = feature_df.loc[group.index[0]].values  # Take first row per user
+        
+        # Convert to sparse matrix
+        n_users = len(user_map)
+        n_features = len(features)
+        
+        if not user_features:
+            return None
+        
+        # Create COO matrix and convert to CSR for LightFM
+        rows, cols, data = [], [], []
+        for user_idx, feat_vec in user_features.items():
+            for feat_idx, val in enumerate(feat_vec):
+                rows.append(user_idx)
+                cols.append(feat_idx)
+                data.append(float(val))
+        
+        return csr_matrix((data, (rows, cols)), shape=(n_users, n_features))
+
+    def _evaluate_fold(
+        self,
+        fold_idx: int,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        features: List[Dict[str, Any]],
+        params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Train and evaluate a model on a single fold.
+
+        Args:
+            fold_idx: Index of the current fold
+            train_df: Training data
+            val_df: Validation data
+            features: List of feature configurations
+            params: Dictionary of parameters for the model and features
+
+        Returns:
+            Dictionary containing evaluation metrics and parameters
+        """
+        # Create user and item mappings
+        user_ids = {user_id: i for i, user_id in enumerate(train_df['user_id'].unique())}
+        item_ids = {item_id: i for i, item_id in enumerate(train_df['item_id'].unique())}
+        
+        # Create interaction matrices in COO format
+        from scipy.sparse import coo_matrix
+        
+        def create_interaction_matrix(df, user_map, item_map):
+            # Map user and item IDs to indices
+            user_indices = df['user_id'].map(user_map).values
+            item_indices = df['item_id'].map(item_map).values
+            # Create COO matrix (users x items)
+            return coo_matrix(
+                (np.ones(len(df)), (user_indices, item_indices)),
+                shape=(len(user_map), len(item_map))
+            )
+        
+        # Create interaction matrices
+        X_train = create_interaction_matrix(train_df, user_ids, item_ids)
+        X_val = create_interaction_matrix(
+            val_df[val_df['item_id'].isin(item_ids)],  # Only include items seen in training
+            user_ids,
+            item_ids
+        )
+
+        # Train model with parameters from the trial
+        model_params = {
+            "loss": "warp",
+            "random_state": self.random_state,
+            **{k: v for k, v in params.items() if k.startswith("model__")},
+        }
+        model = LightFM(**model_params)
+
+        # Fit the model
+        fit_params = {
+            "epochs": params.get("fit__epochs", 30),
+            "num_threads": self.n_jobs,
+            "verbose": params.get("fit__verbose", False),
+        }
+        
+        # Generate user features if available
+        user_features = None
+        if features:
+            user_features = self._generate_user_features(
+                train_df, features, params, user_ids
+            )
+        
+        try:
+            model.fit(
+                interactions=X_train,
+                user_features=user_features,
+                **fit_params
+            )
+        except Exception as e:
+            logger.error(f"Error fitting model: {str(e)}")
+            logger.error(f"X_train shape: {X_train.shape if hasattr(X_train, 'shape') else 'N/A'}")
+            logger.error(f"X_train type: {type(X_train)}")
+            if user_features is not None:
+                logger.error(f"user_features shape: {user_features.shape}")
+            raise
+
+        # Evaluate
+        val_score = self._evaluate_model(
+            model, 
+            X_val,
+            user_features=user_features  # Pass user features for evaluation
+        )
+
+        # Log metrics if writer is available and we have a valid trial number
+        trial_number = (
+            getattr(self.current_trial, "number", None)
+            if hasattr(self, "current_trial")
+            else None
+        )
+        if self.writer is not None and trial_number is not None:
+            self.writer.add_scalar(f"val/auc_fold_{fold_idx}", val_score, trial_number)
+
+        return {
+            "val_score": val_score,
+            "params": params,
+            "model": model,
+            "features": [f["name"] for f in features],
+        }
+
+    @staticmethod
+    def _generate_feature_matrix(
+        df: pd.DataFrame, features: List[Dict[str, Any]], params: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """Generate feature matrix from input data and parameters.
+
+        Args:
+            df: Input DataFrame containing the data
+            features: List of feature configurations
+            params: Dictionary of parameters for feature generation
+
+        Returns:
+            DataFrame with generated features
+
+        Raises:
+            RuntimeError: If feature generation fails
+        """
+        # Initialize empty feature matrix
+        feature_matrix = pd.DataFrame(index=df.index)
+
+        # Generate each feature
+        for feature in features:
+            feature_name = feature.get("name", "unnamed_feature")
+            try:
+                # Extract feature parameters from the params dict
+                feature_params = {
+                    k.split('__', 1)[1]: v
+                    for k, v in params.items()
+                    if k.startswith(f"{feature_name}__")
+                }
+
+                # Generate feature using the feature registry
+                from src.utils.feature_registry import feature_registry
+                
+                feature_data = feature_registry.get(feature_name)
+                if feature_data and 'func' in feature_data:
+                    feature_func = feature_data['func']
+                    if not callable(feature_func):
+                        raise TypeError(f"Feature '{feature_name}' in registry is not a callable function.")
+                    
+                    feature_values = feature_func(df, **feature_params)
+                    feature_matrix[feature_name] = feature_values
+                else:
+                    logger.warning(f"Feature '{feature_name}' not found or invalid in registry.")
+
+            except (ValueError, KeyError) as e:
+                logger.warning(
+                    "Failed to generate feature %s: %s", feature_name, str(e)
+                )
+            except RuntimeError as e:
+                logger.error(
+                    "Runtime error generating feature %s: %s", feature_name, str(e)
+                )
+
+        # If no features were generated, add a dummy feature
+        if feature_matrix.empty:
+            feature_matrix["dummy_feature"] = 1.0
+
+        return feature_matrix
+
+    @staticmethod
+    def _evaluate_model(
+        model: LightFM, 
+        X_val: Union[np.ndarray, coo_matrix],
+        user_features: Optional[csr_matrix] = None
+    ) -> float:
+        """Evaluate model and return validation score.
+
+        Args:
+            model: Trained LightFM model
+            X_val: Validation data as sparse COO matrix or numpy array
+            user_features: Optional user features as CSR matrix
+
+        Returns:
+            AUC score (higher is better)
+
+        Raises:
+            ValueError: If model evaluation fails
+        """
+        try:
+            # Calculate AUC score (higher is better)
+            auc = auc_score(
+                model, 
+                X_val, 
+                user_features=user_features,
+                num_threads=1  # Avoid OpenMP issues
+            ).mean()
+            return float(auc)
+        except (ValueError, RuntimeError) as e:
+            logger.error("Error in model evaluation: %s", str(e))
+            return 0.0
+
+    def optimize(
+        self,
+        features: List[Dict[str, Any]],
+        n_trials: int = 100,
+        timeout: Optional[int] = None,
+        use_fast_mode: bool = False,
+    ) -> OptimizationResult:
+        """Run the optimization process.
+
+        Args:
+            features: List of feature configurations to optimize
+            n_trials: Maximum number of trials to run
+            timeout: Maximum time in seconds to run optimization
+            use_fast_mode: Whether to use fast mode (subsample data)
+
+        Returns:
+            OptimizationResult containing the best parameters and results
+        """
+        # Set up study
+        logger.info(f"🚀 Starting optimization with {n_trials} trials...")
+        study = optuna.create_study(
+            direction="maximize",
+            sampler=TPESampler(seed=self.random_state),
+            pruner=MedianPruner(n_startup_trials=5, n_warmup_steps=10),
+        )
+
+        # Run optimization
+        study.optimize(
+            lambda trial: self._objective(
+                trial, features, use_fast_mode=use_fast_mode
+            ),
+            n_trials=n_trials,
+            timeout=timeout,
+            n_jobs=self.n_jobs,
+            show_progress_bar=True,
+        )
+
+        # Extract results
+        best_params = study.best_params
+        best_score = study.best_value
+
+        # Get all trial results
+        trial_results = [
+            {
+                "params": trial.params,
+                "value": trial.value,
+                "state": str(trial.state),
+            }
+            for trial in study.trials
+        ]
+
+        # Calculate feature importances (simplified)
+        feature_importances = self._calculate_feature_importances(study, features)
+
+        logger.info(f"✅ Optimization finished. Best score: {best_score:.4f}")
+        logger.info(f"🏆 Best params: {best_params}")
+
+        result = OptimizationResult(
+            best_params=best_params,
+            best_score=best_score,
+            trial_results=trial_results,
+            feature_importances=feature_importances,
+        )
+        logger.debug(f"Full optimization result: {result}")
+        return result
+
+    @staticmethod
+    def _calculate_feature_importances(
+        study: optuna.Study,
+        features: List[Dict[str, Any]],
+    ) -> Dict[str, float]:
+        """Calculate feature importances from optimization results.
+
+        Args:
+            study: Optuna study containing trial results
+            features: List of feature configurations (unused, kept for future use)
+
+        Returns:
+            Dictionary mapping feature names to their importance scores
+
+        Note:
+            This is a simplified implementation. In production, consider using
+            more sophisticated methods like SHAP values or permutation importance.
+        """
+        # Calculate importance based on parameter sensitivity across trials
+        importances: Dict[str, float] = {}
+
+        # Group parameters by feature
+        feature_params: Dict[str, List[str]] = {}
+        for param_name in study.best_params:
+            feature_name = param_name.split("__")[0]
+            if feature_name not in feature_params:
+                feature_params[feature_name] = []
+            feature_params[feature_name].append(param_name)
+
+        # Calculate importance as the average absolute value of the best parameters
+        for feature_name, param_names in feature_params.items():
+            param_importance = 0.0
+            for param_name in param_names:
+                param_value = study.best_params[param_name]
+                if isinstance(param_value, (int, float)):
+                    param_importance += abs(param_value)
+                else:
+                    # For non-numeric parameters, use a default importance
+                    param_importance += 1.0
+
+            # Average importance across parameters for this feature
+            importances[feature_name] = param_importance / max(1, len(param_names))
+
+        return importances
+
+
+def run_optimization(
+    features: List[Dict[str, Any]],
+    data_dir: Union[str, Path] = "data",
+    n_trials: int = 100,
+    timeout: Optional[int] = None,
+    use_fast_mode: bool = False,
+    n_jobs: Optional[int] = None,
+    random_state: int = 42,
+) -> OptimizationResult:
+    """Run the optimization pipeline.
+
+    Args:
+        features: List of feature configurations to optimize
+        data_dir: Directory containing the data files
+        n_trials: Maximum number of trials to run
+        timeout: Maximum time in seconds to run optimization
+        use_fast_mode: Whether to use fast mode (subsample data)
+        n_jobs: Number of parallel jobs to run (-1 for all CPUs, None for 1)
+        random_state: Random seed for reproducibility
+
+    Returns:
+        OptimizationResult containing the best parameters and results
+    """
+    optimizer = VULCANOptimizer(
+        data_dir=data_dir,
+        n_jobs=n_jobs,
+        random_state=random_state,
+    )
+
+    return optimizer.optimize(
+        features=features,
+        n_trials=n_trials,
+        timeout=timeout,
+        use_fast_mode=use_fast_mode,
+    )
 ```
 
 ### `agents/strategy_team/reflection_agent.py`
 
-**File size:** 4,056 bytes
+**File size:** 4,162 bytes
 
 ```python
 # src/agents/reflection_agent.py
-from typing import List
+import json
+from typing import Dict
 
 import autogen
 from loguru import logger
 from tensorboardX import SummaryWriter
 
-from src.schemas.models import Hypothesis
 from src.utils.decorators import agent_run_decorator
 from src.utils.prompt_utils import load_prompt
-from src.utils.pubsub import acquire_lock, publish, release_lock
-from src.utils.session_state import SessionState
 
 
 class ReflectionAgent:
@@ -844,162 +1239,208 @@ class ReflectionAgent:
     suggesting next steps.
     """
 
-    def __init__(self, llm_config: dict, session_state: SessionState):
-        logger.info("ReflectionAgent initialized.")
-        self.session_state = session_state
+    def __init__(self, llm_config: Dict):
+        """Initialize the reflection agent."""
+        self.llm_config = llm_config
         self.assistant = autogen.AssistantAgent(
             name="ReflectionAgent",
-            system_message="",  # Will be set dynamically before each run.
+            system_message="""You are an expert data scientist and strategist. Your role is to:
+1. Analyze the results of the current pipeline iteration
+2. Evaluate the quality and completeness of insights and features
+3. Identify gaps or areas that need more exploration
+4. Decide if another iteration of the pipeline would be valuable
+5. Provide clear reasoning for your decision""",
             llm_config=llm_config,
         )
         self.user_proxy = autogen.UserProxyAgent(
-            name="UserProxy_ReflectionAgent",
+            name="UserProxy_Reflection",
             human_input_mode="NEVER",
-            code_execution_config=False,
+            max_consecutive_auto_reply=10,
+            code_execution_config={"use_docker": False},
         )
         self.writer = SummaryWriter("runtime/tensorboard/ReflectionAgent")
 
     @agent_run_decorator("ReflectionAgent")
-    def run(self, message: dict = {}):
+    def run(self, session_state) -> Dict:
         """
-        Runs the reflection pipeline. Triggered by a pub/sub event.
+        Run the reflection process and decide if more exploration is needed.
+
+        Args:
+            session_state: The current session state containing insights and hypotheses
+
+        Returns:
+            Dict containing:
+            - should_continue: bool indicating if more exploration is needed
+            - reasoning: str explaining the decision
+            - next_steps: list of suggested areas to explore
         """
-        lock_name = "lock:ReflectionAgent"
-        if not acquire_lock(lock_name):
-            logger.info("ReflectionAgent is already running. Skipping.")
-            return
+        logger.info("Starting reflection process...")
+
+        # Gather current state
+        insights = session_state.get_final_insight_report()
+        hypotheses = session_state.get_final_hypotheses()
+        views = session_state.get_available_views()
+
+        # Load reflection prompt
+        reflection_prompt = load_prompt(
+            "agents/reflection_agent.j2",
+            insights=insights,
+            hypotheses=json.dumps(hypotheses, indent=2),
+            views=json.dumps(views, indent=2),
+        )
+
+        # Run reflection chat
+        self.user_proxy.initiate_chat(
+            self.assistant,
+            message=reflection_prompt,
+        )
+
+        # Get the last message from the reflection agent
+        last_message_obj = self.user_proxy.last_message()
+        last_message_content = last_message_obj.get("content") if last_message_obj else None
+
+        if not last_message_content:
+            logger.error("Could not retrieve a response from the reflection agent.")
+            return {
+                "should_continue": False,
+                "reasoning": "Failed to get a response from the reflection agent.",
+                "next_steps": "Investigate the reflection agent's chat history for errors.",
+            }
 
         try:
-            bo_history = self.session_state.get_bo_history()
-            best_params = self.session_state.get_best_params()
+            # Parse the response from the reflection agent
+            response = json.loads(last_message_content)
+            should_continue = response.get("should_continue", False)
+            reasoning = response.get("reasoning", "")
+            next_steps = response.get("next_steps", "")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Error parsing reflection agent response: {e}")
+            logger.error(f"Raw response: {last_message_content}")
+            # Provide a default response
+            should_continue = False
+            reasoning = "Error parsing response from reflection agent."
+            next_steps = "Investigate the error in the reflection agent."
 
-            if not bo_history and not best_params:
-                logger.warning(
-                    "No optimization history or best parameters found. Skipping reflection."
-                )
-                publish(
-                    "pipeline_done",
-                    {
-                        "status": "success",
-                        "reason": "No optimization results to reflect on.",
-                    },
-                )
-                return
+        logger.info(f"Reflection decision: {should_continue}")
+        logger.info(f"Reasoning: {reasoning}")
+        logger.info(f"Next steps: {next_steps}")
+        return {
+            "should_continue": should_continue,
+            "reasoning": reasoning,
+            "next_steps": next_steps,
+        }
+```
 
-            def save_reflections(reflections: List[str], next_steps: List[Hypothesis]):
-                """Saves the generated reflections and next steps to session state and publishes an event."""
-                reflection_data = {
-                    "reflections": reflections,
-                    "next_steps": [h.model_dump() for h in next_steps],
-                }
-                self.session_state.add_reflection(reflection_data)
+### `agents/strategy_team/strategy_team_agents.py`
 
-                if next_steps:
-                    self.session_state.finalize_hypotheses(next_steps)
+**File size:** 1,700 bytes
 
-                logger.info("Saved reflections and next steps to session state.")
+```python
+"""
+Strategy Team agents for hypothesis generation, feature ideation, and optimization.
+This team is responsible for turning insights into concrete features and optimizing them.
+"""
 
-                if next_steps:
-                    publish(
-                        "start_eda",
-                        {"reason": "Reflection suggested new hypotheses."},
-                    )
-                else:
-                    publish(
-                        "pipeline_done",
-                        {"reason": "Pipeline converged."},
-                    )
+from typing import Dict
 
-                run_count = self.session_state.increment_reflection_run_count()
-                self.writer.add_scalar(
-                    "new_hypotheses_from_reflection", len(next_steps), run_count
-                )
+import autogen
 
-                return "TERMINATE"
+from src.utils.prompt_utils import load_prompt
 
-            self.user_proxy.register_function(
-                function_map={"save_reflections": save_reflections}
-            )
 
-            prompt = load_prompt(
-                "agents/reflection_agent.j2",
-                bo_history=bo_history,
-                best_params=best_params,
-            )
+def get_strategy_team_agents(
+    llm_config: Dict,
+) -> Dict[str, autogen.ConversableAgent]:
+    """
+    Initializes and returns the agents for the strategy team group chat.
+    Uses Jinja2 templates from src/prompts/agents/strategy_team/
+    """
 
-            self.assistant.update_system_message(prompt)
-            self.user_proxy.initiate_chat(
-                self.assistant,
-                message="Reflect on the provided results and suggest next steps. You must call the `save_reflections` function with your results.",
-            )
-            self.writer.close()
-        finally:
-            release_lock(lock_name)
+    # Load agent prompts from Jinja2 templates
+    agent_prompts = {
+        "HypothesisAgent": load_prompt("agents/strategy_team/hypothesis_agent.j2"),
+        "StrategistAgent": load_prompt("agents/strategy_team/strategist_agent.j2"),
+        "EngineerAgent": load_prompt("agents/strategy_team/engineer_agent.j2"),
+        "FeatureIdeator": load_prompt("agents/feature_ideator.j2"),
+        "FeatureRealizer": load_prompt("agents/feature_realization.j2"),
+        "OptimizationAgent": load_prompt("agents/optimization_agent.j2"),
+    }
+
+    # Create agents with loaded prompts
+    agents = {
+        name: autogen.AssistantAgent(
+            name=name,
+            system_message=prompt,
+            llm_config=llm_config,
+        )
+        for name, prompt in agent_prompts.items()
+    }
+
+    # Add user proxy for code execution
+    user_proxy = autogen.UserProxyAgent(
+        name="UserProxy_Strategy",
+        human_input_mode="NEVER",
+        max_consecutive_auto_reply=10,
+        is_termination_msg=lambda x: "FINAL_HYPOTHESES" in x.get("content", ""),
+        code_execution_config={"use_docker": False},
+    )
+
+    agents["user_proxy"] = user_proxy
+    return agents
 ```
 
 ### `config/logging.py`
 
-**File size:** 1,715 bytes
+**File size:** 1,288 bytes
 
 ```python
 import logging
 import sys
 
-from src.utils.run_utils import format_log_message, get_run_logs_dir
+from loguru import logger
+
+from src.utils.logging_utils import InterceptHandler
+from src.utils.run_utils import get_run_log_file
 
 
-class RunContextFormatter(logging.Formatter):
-    """Custom formatter that includes run context in log messages."""
+def setup_logging(log_level: str = "INFO") -> None:
+    """Set up Loguru to be the main logging system."""
+    # Remove default handler to avoid duplicate logs
+    logger.remove()
 
-    def format(self, record: logging.LogRecord) -> str:
-        """Format the log record with run context."""
-        record.msg = format_log_message(str(record.msg))
-        return super().format(record)
-
-
-def setup_logging(log_level: int = logging.INFO) -> None:
-    """Set up logging configuration with run-specific paths."""
-    # Create run-specific log directory
-    log_dir = get_run_logs_dir()
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-
-    # Clear existing handlers
-    root_logger.handlers = []
-
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    console_formatter = RunContextFormatter(
-        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    # Add a console sink
+    logger.add(
+        sys.stdout,
+        level=log_level,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        colorize=True,
     )
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
 
-    # File handler
-    log_file = log_dir / "pipeline.log"
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(log_level)
-    file_formatter = RunContextFormatter(
-        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    # Add a file sink for the main pipeline log
+    log_file = get_run_log_file()
+    logger.add(
+        log_file,
+        level="DEBUG",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        rotation="10 MB",
+        retention="10 days",
+        enqueue=True,  # Make logging non-blocking
+        backtrace=True,
+        diagnose=True,
     )
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
+
+    # Intercept standard logging messages
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger with the specified name."""
-    return logging.getLogger(name)
+def get_logger(name: str):
+    """Get a logger with the specified name (compatible with loguru)."""
+    return logger.bind(name=name)
 ```
 
 ### `config/settings.py`
 
-**File size:** 1,132 bytes
+**File size:** 1,384 bytes
 
 ```python
 """
@@ -1007,16 +1448,18 @@ Configuration settings for the VULCAN project.
 Contains database paths, LLM configurations, and other global constants.
 """
 
-import os
 from pathlib import Path
 
 # Project paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-RUNS_DIR = PROJECT_ROOT / "runs"
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+SRC_DIR = ROOT_DIR / "src"
+PROMPTS_DIR = SRC_DIR / "prompts"
+LOGS_DIR = ROOT_DIR / "logs"
+DATA_DIR = ROOT_DIR / "data"
+RUN_DIR = ROOT_DIR / "runtime" / "runs"
 
 # Database configuration
-DB_PATH = os.getenv("DB_PATH", str(PROJECT_ROOT / "data" / "goodreads_curated.duckdb"))
+DB_PATH = str(DATA_DIR / "goodreads_curated.duckdb")
 
 # LLM Configuration - Default configuration that can be used across agents
 # This will be overridden by the orchestrator with actual API keys and config lists
@@ -1044,14 +1487,22 @@ OPENAI_MAX_TOKENS = 1000
 # Database connection settings
 DB_READ_ONLY = False  # Allow writes for temporary views
 DB_TIMEOUT = 30
+
+# Insight Discovery settings
+INSIGHT_AGENTS_CONFIG_PATH = ROOT_DIR / "config" / "OAI_CONFIG_LIST.json"
+INSIGHT_MAX_TURNS = 20
+INSIGHT_MAX_CONSECUTIVE_AUTO_REPLY = 5
+
+# Add other settings as needed
 ```
 
 ### `config/tensorboard.py`
 
-**File size:** 1,364 bytes
+**File size:** 1,390 bytes
 
 ```python
 import subprocess
+from loguru import logger
 from typing import Optional
 
 from torch.utils.tensorboard import SummaryWriter
@@ -1070,7 +1521,7 @@ def start_tensorboard() -> None:
             stderr=subprocess.DEVNULL,
         )
     except Exception as e:
-        print(f"Warning: Could not start TensorBoard: {e}")
+        logger.warning(f"Could not start TensorBoard: {e}")
 
 
 def get_tensorboard_writer() -> SummaryWriter:
@@ -1101,14 +1552,19 @@ def log_hyperparams(writer: SummaryWriter, hparams: dict) -> None:
 
 ### `core/database.py`
 
-**File size:** 7,204 bytes
+**File size:** 10,655 bytes
 
 ```python
 import logging
+import os
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import duckdb
 import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.config.settings import DB_PATH
 
@@ -1283,20 +1739,119 @@ def get_db_schema_string() -> str:
         return (
             f"ERROR: Could not retrieve database schema from {db_path}. Error: {str(e)}"
         )
+
+
+def get_db_connection() -> duckdb.DuckDBPyConnection:
+    """Returns a read-write connection to the main DuckDB database."""
+    return duckdb.connect(database=str(DB_PATH), read_only=False)
+
+
+class DatabaseConnection:
+    def __init__(
+        self, connection_string: Optional[str] = None, engine: Optional[Engine] = None
+    ):
+        """Initialize database connection
+
+        Args:
+            connection_string: SQLAlchemy connection string
+            engine: Existing SQLAlchemy engine (for testing)
+        """
+        if engine:
+            self.engine = engine
+        else:
+            connection_string = connection_string or os.getenv(
+                "DATABASE_URL",
+                "sqlite:///data/vulcan.db",  # Default to SQLite
+            )
+            self.engine = create_engine(connection_string)
+
+        # Test connection
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("Database connection successful")
+        except SQLAlchemyError as e:
+            logger.error(f"Database connection failed: {str(e)}")
+            raise
+
+    def execute_query(self, query: str) -> Dict[str, Any]:
+        """Execute SQL query and return results
+
+        Args:
+            query: SQL query string
+
+        Returns:
+            Dictionary with query results
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query))
+                if result.returns_rows:
+                    df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    return {"data": df.to_dict(orient="records")}
+                return {"affected_rows": result.rowcount}
+        except SQLAlchemyError as e:
+            logger.error(f"Query execution failed: {str(e)}")
+            raise
+
+    def create_view(self, view_name: str, query: str, version: Optional[int] = None):
+        """Create or replace a view
+
+        Args:
+            view_name: Name of the view
+            query: SQL query defining the view
+            version: Optional version number to append to view name
+        """
+        if version:
+            view_name = f"{view_name}_v{version}"
+
+        create_view_sql = f"CREATE OR REPLACE VIEW {view_name} AS {query}"
+
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text(create_view_sql))
+                conn.commit()
+            logger.info(f"View {view_name} created successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to create view {view_name}: {str(e)}")
+            raise
+
+    def drop_view(self, view_name: str):
+        """Drop a view if it exists
+
+        Args:
+            view_name: Name of the view to drop
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text(f"DROP VIEW IF EXISTS {view_name}"))
+                conn.commit()
+            logger.info(f"View {view_name} dropped successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to drop view {view_name}: {str(e)}")
+            raise
+
+    def close(self):
+        """Close database connection"""
+        self.engine.dispose()
+        logger.info("Database connection closed")
 ```
 
 ### `core/llm.py`
 
-**File size:** 427 bytes
+**File size:** 496 bytes
 
 ```python
-def call_llm_batch(prompts: list) -> list:
+from typing import List
+from loguru import logger
+
+def call_llm_batch(prompts: List[str]) -> List[float]:
     """
     A placeholder for a utility that calls an LLM with a batch of prompts.
     """
     # In a real implementation, this would use a library like `litellm`
     # to handle batching and API calls.
-    print(f"Calling LLM with a batch of {len(prompts)} prompts.")
+    logger.info(f"Calling LLM with a batch of {len(prompts)} prompts.")
 
     # For now, return random scores for testing.
     import random
@@ -1306,66 +1861,1444 @@ def call_llm_batch(prompts: list) -> list:
 
 ### `core/tools.py`
 
-**File size:** 2,013 bytes
+**File size:** 2,049 bytes
+
+```python
+from dataclasses import dataclass
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    func: Callable
+    required_args: List[str]
+    optional_args: Optional[List[str]] = None
+
+
+class ToolRegistry:
+    def __init__(self):
+        self._tools: Dict[str, Tool] = {}
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        required_args: List[str],
+        optional_args: Optional[List[str]] = None,
+    ) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            self._tools[name] = Tool(
+                name=name,
+                description=description,
+                func=wrapper,
+                required_args=required_args,
+                optional_args=optional_args or [],
+            )
+            return wrapper
+
+        return decorator
+
+    def get_tool(self, name: str) -> Optional[Tool]:
+        return self._tools.get(name)
+
+    def list_tools(self) -> List[str]:
+        return list(self._tools.keys())
+
+    def get_tool_description(self, name: str) -> Optional[str]:
+        tool = self.get_tool(name)
+        return tool.description if tool else None
+
+    def execute_tool(self, name: str, **kwargs) -> Any:
+        tool = self.get_tool(name)
+        if not tool:
+            raise ValueError(f"Tool {name} not found")
+
+        # Validate required arguments
+        missing_args = [arg for arg in tool.required_args if arg not in kwargs]
+        if missing_args:
+            raise ValueError(f"Missing required arguments for {name}: {missing_args}")
+
+        # Remove any arguments that aren't required or optional
+        valid_args = set(tool.required_args + (tool.optional_args or []))
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_args}
+
+        return tool.func(**filtered_kwargs)
+
+
+# Create global registry instance
+registry = ToolRegistry()
+```
+
+### `data/cv_data_manager.py`
+
+**File size:** 22,595 bytes
 
 ```python
 """
-This module provides a collection of custom tools for the VULCAN agents to use
-within their Python execution environment. These functions are designed to be
-injected into the context available to the `execute_python` tool.
+Cross-validation data manager for VULCAN.
+
+Handles loading and managing cross-validation splits efficiently.
 """
 
+import concurrent.futures
+import json
+import os
+import queue
+import threading
+from pathlib import Path
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple, Union
+
 import duckdb
+import numpy as np
+import pandas as pd
 from loguru import logger
+from tqdm.auto import tqdm
 
-from src.config.settings import DB_PATH
+# Type aliases
+UserID = Union[str, int]
+UserIDList = List[UserID]
+DataFrameDict = Dict[str, pd.DataFrame]
 
 
-def get_table_sample(table_name: str, n_samples: int = 5) -> str:
+class ConnectionPool:
+    """Thread-safe connection pool for managing DuckDB connections."""
+
+    def __init__(self, db_path: str, max_connections: int = 10, **connection_kwargs):
+        """Initialize the connection pool.
+
+        Args:
+            db_path: Path to the DuckDB database file
+            max_connections: Maximum number of connections in the pool
+            **connection_kwargs: Additional connection parameters
+        """
+        self.db_path = db_path
+        self.max_connections = max_connections
+        self.connection_kwargs = connection_kwargs
+        self._pool: queue.Queue[duckdb.DuckDBPyConnection] = queue.Queue(
+            maxsize=max_connections
+        )
+        self._in_use: Set[duckdb.DuckDBPyConnection] = set()
+        self._lock = threading.Lock()
+
+        # Initialize connections
+        for _ in range(max_connections):
+            conn = self._create_connection()
+            self._pool.put(conn)
+
+    def _create_connection(self) -> duckdb.DuckDBPyConnection:
+        """Create a new database connection with optimized settings."""
+        try:
+            conn = duckdb.connect(self.db_path, **self.connection_kwargs)
+
+            # Apply performance optimizations
+            config = {
+                "threads": 1,
+                "enable_progress_bar": False,
+                "enable_object_cache": True,
+                "preserve_insertion_order": False,
+                "default_null_order": "nulls_first",
+                "enable_external_access": False,
+            }
+
+            for param, value in config.items():
+                try:
+                    conn.execute(f"SET {param} = {repr(value)}")
+                except Exception as e:
+                    logger.warning(f"Could not set {param}={value}: {e}")
+
+            return conn
+        except Exception as e:
+            logger.error(f"Failed to create database connection: {e}")
+            raise
+
+    def get_connection(self, timeout: float = 10.0) -> duckdb.DuckDBPyConnection:
+        """Get a connection from the pool with a timeout.
+
+        Args:
+            timeout: Maximum time to wait for a connection (seconds)
+
+        Returns:
+            An active database connection
+
+        Raises:
+            queue.Empty: If no connection is available within the timeout
+        """
+        try:
+            conn = self._pool.get(timeout=timeout)
+            with self._lock:
+                self._in_use.add(conn)
+            return conn
+        except queue.Empty:
+            raise RuntimeError(
+                f"No database connections available after {timeout} seconds. "
+                f"Consider increasing max_connections (current: {self.max_connections})."
+            )
+
+    def return_connection(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Return a connection to the pool.
+
+        Args:
+            conn: The connection to return
+        """
+        if conn is None:
+            return
+
+        with self._lock:
+            if conn in self._in_use:
+                self._in_use.remove(conn)
+                try:
+                    # Rollback any open transaction before returning to the pool
+                    try:
+                        conn.rollback()
+                    except duckdb.Error as e:
+                        # It's okay if there's no transaction to roll back.
+                        if 'no transaction is active' not in str(e):
+                            logger.warning(f"Error during rollback: {e}")
+                    self._pool.put_nowait(conn)
+                except Exception as e:
+                    logger.warning(f"Error returning connection to pool: {e}")
+                    try:
+                        conn.close()
+                    except duckdb.Error as close_err:
+                        logger.warning(f"Error closing connection: {close_err}")
+                    # Replace the bad connection with a new one
+                    try:
+                        new_conn = self._create_connection()
+                        self._pool.put_nowait(new_conn)
+                    except duckdb.Error as e:
+                        logger.error(f"Failed to create replacement connection: {e}")
+
+    def close_all(self) -> None:
+        """Close all connections in the pool."""
+        # Close all available connections
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+                conn.close()
+            except queue.Empty:
+                break
+
+        # Also close any connections that were in use
+        for conn in list(self._in_use):
+            try:
+                conn.close()
+            except duckdb.Error as e:
+                logger.warning(f"Error closing database connection: {e}")
+
+        self._in_use.clear()
+
+
+class CVDataManager:
+    """Manages cross-validation data splits for the VULCAN pipeline."""
+
+    # Class-level connection pool
+    _connection_pool: Optional[ConnectionPool] = None
+    _pool_lock = threading.Lock()
+    _instance_count: int = 0
+
+    def __init__(
+        self,
+        db_path: Union[str, Path],
+        splits_dir: Union[str, Path],
+        random_state: int = 42,
+        cache_size_mb: int = 1024,
+        max_connections: int = 10,
+        read_only: bool = False,
+    ):
+        """Initialize the CV data manager with caching and connection pooling.
+
+        Args:
+            db_path: Path to the DuckDB database file
+            splits_dir: Directory containing the cross-validation splits
+            random_state: Random seed for reproducibility
+            cache_size_mb: Size of DuckDB's memory cache in MB
+            max_connections: Maximum number of database connections in the pool
+            read_only: Whether the database should be opened in read-only mode
+        """
+        self.db_path = Path(db_path)
+        self.splits_dir = Path(splits_dir)
+        self.random_state = random_state
+        self._cached_folds: Optional[List[Dict]] = None
+        self._cv_folds = None
+        self._cache_size_mb = cache_size_mb
+        self.read_only = read_only
+
+        # Cache for loaded data
+        self._data_cache: Dict[str, Any] = {}
+
+        # Initialize the connection pool if it doesn't exist
+        with CVDataManager._pool_lock:
+            CVDataManager._instance_count += 1
+            if CVDataManager._connection_pool is None:
+                self._initialize_connection_pool(max_connections=max_connections)
+
+    def _initialize_connection_pool(self, max_connections: int) -> None:
+        """Initialize the connection pool with the specified number of connections."""
+        if not self.db_path.exists():
+            raise FileNotFoundError(
+                f"Database file not found at {self.db_path}. "
+                "Please ensure the data is downloaded and processed."
+            )
+
+        try:
+            # Determine access mode
+            self.read_only = not os.access(self.db_path.parent, os.W_OK)
+            connection_kwargs = {
+                "read_only": self.read_only,
+                "config": {"memory_limit": f"{self._cache_size_mb}MB"},
+            }
+
+            db_path_str = str(self.db_path)
+
+            logger.info(
+                f"Initializing connection pool for db='{db_path_str}' with "
+                f"{max_connections} connections (read_only={self.read_only})"
+            )
+
+            CVDataManager._connection_pool = ConnectionPool(
+                db_path=db_path_str,
+                max_connections=max_connections,
+                **connection_kwargs,
+            )
+
+            # Create indexes if the database is writeable
+            if not self.read_only:
+                conn = self._get_connection()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """CREATE INDEX IF NOT EXISTS idx_interactions_user_id 
+                               ON interactions(user_id)"""
+                        )
+                        cur.execute(
+                            """CREATE INDEX IF NOT EXISTS idx_interactions_item_id 
+                               ON interactions(item_id)"""
+                        )
+                    logger.info("Successfully created indexes on user_id and item_id.")
+                except Exception as e:
+                    logger.warning(f"Could not create indexes: {e}")
+                finally:
+                    self._return_connection(conn)
+
+        except Exception as e:
+            logger.error(f"Failed to initialize connection pool: {e}")
+            raise
+
+    def _get_connection(self) -> duckdb.DuckDBPyConnection:
+        """Get a database connection from the pool."""
+        if CVDataManager._connection_pool is None:
+            raise RuntimeError("Connection pool not initialized")
+        return CVDataManager._connection_pool.get_connection()
+
+    def _return_connection(self, conn: Optional[duckdb.DuckDBPyConnection]) -> None:
+        """Return a connection to the pool."""
+        if conn is not None and CVDataManager._connection_pool is not None:
+            CVDataManager._connection_pool.return_connection(conn)
+
+    @property
+    def db_connection(self) -> duckdb.DuckDBPyConnection:
+        """Get a connection from the connection pool.
+
+        Note: The caller is responsible for returning the connection to the pool
+        using _return_connection() when done.
+
+        Returns:
+            An active DuckDB connection from the pool
+
+        Raises:
+            RuntimeError: If the connection pool is not initialized
+        """
+        return self._get_connection()
+
+    def _clear_previous_fold_data(self) -> None:
+        """Clear any cached fold data from memory."""
+        self._data_cache.clear()
+
+        # Run garbage collection to free up memory
+        import gc
+
+        gc.collect()
+
+    def close(self) -> None:
+        """Decrement the instance counter and clean up resources."""
+        with CVDataManager._pool_lock:
+            if CVDataManager._instance_count > 0:
+                CVDataManager._instance_count -= 1
+
+                # Close the connection pool if this is the last instance
+                if (
+                    CVDataManager._instance_count <= 0
+                    and CVDataManager._connection_pool is not None
+                ):
+                    try:
+                        # Clear any cached data
+                        self._clear_previous_fold_data()
+
+                        # Close all connections in the pool
+                        CVDataManager._connection_pool.close_all()
+                        CVDataManager._connection_pool = None
+                        logger.info(
+                            "Closed all database connections and cleared cached data"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Error during cleanup: {e}")
+
+    def __del__(self) -> None:
+        """Ensure proper cleanup when the object is destroyed.""" 
+        try:
+            self.close()
+        except Exception:
+            # Suppress errors during garbage collection
+            pass
+
+    @classmethod
+    def close_global_connection_pool(cls) -> None:
+        """Close the global connection pool if it exists."""
+        with cls._pool_lock:
+            if cls._connection_pool:
+                logger.info("Closing global connection pool.")
+                cls._connection_pool.close_all()
+                cls._connection_pool = None
+                logger.debug("Global connection pool closed.")
+
+
+
+    def load_cv_folds(self) -> List[Dict[str, List[str]]]:
+        """Load the cross-validation folds.
+
+        Returns:
+            List of dictionaries with 'train', 'validation', and 'test' keys
+        """
+        if self._cv_folds is not None:
+            return self._cv_folds
+
+        folds_file = self.splits_dir / "cv_folds.json"
+        if not folds_file.exists():
+            logger.error(f"CV folds file not found at {folds_file}")
+            raise FileNotFoundError(f"CV folds file not found at {folds_file}")
+
+        try:
+            with open(folds_file, "r", encoding="utf-8") as f:
+                self._cv_folds = json.load(f)
+            return self._cv_folds
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing CV folds file: {e}")
+            raise
+
+    def get_fold_data(
+        self,
+        fold_idx: int,
+        columns: Optional[List[str]] = None,
+        sample_frac: Optional[float] = None,
+        random_state: int = 42,
+        batch_size: int = 500,
+        show_progress: bool = True,
+        max_workers: int = 4,
+        split_type: str = "train_val",
+    ) -> Union[
+        Tuple[pd.DataFrame, pd.DataFrame],
+        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+    ]:
+        # Clear any previous data first
+        self._clear_previous_fold_data()
+
+        # Get the fold data
+        folds = self.load_cv_folds()
+        if fold_idx >= len(folds):
+            raise ValueError(f"Fold index {fold_idx} out of range (0-{len(folds) - 1})")
+
+        fold = folds[fold_idx]
+
+        # Get user lists for each split
+        train_users = fold["train"]
+        val_users = fold["validation"]
+        test_users = fold.get("test", [])
+
+        # Apply sampling if requested
+        def sample_users(users: List[str], frac: float) -> List[str]:
+            if frac is None or frac >= 1.0 or not users:
+                return users
+            rng = np.random.default_rng(random_state)
+            sample_size = max(1, int(len(users) * frac))
+            return rng.choice(users, size=sample_size, replace=False).tolist()
+
+        if sample_frac is not None and sample_frac < 1.0:
+            train_users = sample_users(train_users, sample_frac)
+            val_users = sample_users(val_users, sample_frac)
+            test_users = sample_users(test_users, sample_frac)
+
+        # Get column list for query
+        column_list = ", ".join(columns) if columns else "*"
+
+        def process_chunk(
+            chunk: List[str], chunk_idx: int, purpose: str
+        ) -> Optional[pd.DataFrame]:
+            """Process a single chunk of user data."""
+            if not chunk:
+                return None
+
+            temp_table = f"temp_users_{abs(hash(str(chunk[:5]))) % 10000}_{chunk_idx}"
+            conn = None
+
+            try:
+                # Get a connection from the pool
+                conn = self._get_connection()
+
+                with conn.cursor() as cur:
+                    # Create and populate temp table
+                    cur.execute(
+                        f"""
+                        CREATE TEMP TABLE {temp_table} AS 
+                        SELECT UNNEST(?) AS user_id
+                    """,
+                        [chunk],
+                    )
+
+                    # Execute main query
+                    query = f"""
+                        SELECT {column_list}
+                        FROM interactions r
+                        JOIN {temp_table} t ON r.user_id = t.user_id
+                    """
+
+                    df = cur.execute(query).fetchdf()
+
+                    # Add purpose column for filtering later
+                    if not df.empty:
+                        df["_purpose"] = purpose
+
+                    return df
+
+            except Exception as e:
+                logger.error(f"Error processing {purpose} chunk {chunk_idx}: {e}")
+                return None
+
+            finally:
+                # Clean up temp table and return connection to pool
+                if conn is not None:
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(f"DROP TABLE IF EXISTS {temp_table}")
+                    except Exception as e:
+                        logger.warning(f"Error dropping temp table {temp_table}: {e}")
+                    self._return_connection(conn)
+
+        def process_user_list(users: List[str], purpose: str) -> pd.DataFrame:
+            """Process a list of users in batches."""
+            if not users:
+                return pd.DataFrame()
+
+            # Split into batches
+            batches = [
+                users[i : i + batch_size] for i in range(0, len(users), batch_size)
+            ]
+
+            # Process batches in parallel
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers
+            ) as executor:
+                futures = [
+                    executor.submit(process_chunk, batch, i, purpose)
+                    for i, batch in enumerate(batches)
+                ]
+
+                # Collect results
+                results = []
+                for future in (
+                    tqdm(
+                        concurrent.futures.as_completed(futures),
+                        total=len(futures),
+                        desc=f"Loading {purpose} data",
+                        disable=not show_progress,
+                    )
+                    if show_progress
+                    else concurrent.futures.as_completed(futures)
+                ):
+                    try:
+                        result = future.result()
+                        if result is not None and not result.empty:
+                            results.append(result)
+                    except Exception as e:
+                        logger.error(f"Error in batch processing: {e}")
+
+            return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+
+        # Process each split
+        train_df = (
+            process_user_list(train_users, "train") if train_users else pd.DataFrame()
+        )
+        val_df = (
+            process_user_list(val_users, "validation") if val_users else pd.DataFrame()
+        )
+        test_df = (
+            process_user_list(test_users, "test") if test_users else pd.DataFrame()
+        )
+
+        # Return based on split_type
+        if split_type == "train_val":
+            return train_df, val_df
+        elif split_type == "train_test":
+            return train_df, test_df
+        elif split_type == "val_test":
+            return val_df, test_df
+        elif split_type == "all":
+            return train_df, val_df, test_df
+        elif split_type == "full_train":
+            train_val_df = pd.concat([train_df, val_df], ignore_index=True)
+            return train_val_df, test_df
+        else:
+            raise ValueError(f"Invalid split_type: {split_type}")
+
+    def iter_folds(
+        self,
+        columns: Optional[List[str]] = None,
+        sample_frac: Optional[float] = None,
+        random_state: int = 42,
+        split_type: str = "train_val",
+    ) -> Generator[
+        Union[
+            Tuple[pd.DataFrame, pd.DataFrame],
+            Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+        ],
+        None,
+        None,
+    ]:
+        """Iterate over all CV folds, loading data for each.
+
+        Args:
+            columns: List of columns to load (None for all).
+            sample_frac: Fraction of users to sample.
+            random_state: Seed for reproducibility.
+            split_type: Type of data split to return.
+
+        Yields:
+            Data for each fold according to the specified split_type.
+        """
+        n_folds = self.get_fold_summary().get("n_folds", 0)
+        if n_folds == 0:
+            logger.warning("No CV folds found. Returning empty iterator.")
+            return
+
+        for i in range(n_folds):
+            yield self.get_fold_data(
+                fold_idx=i,
+                columns=columns,
+                sample_frac=sample_frac,
+                random_state=random_state,
+                split_type=split_type,
+            )
+
+    def get_all_folds_data(
+        self,
+        columns: Optional[List[str]] = None,
+        sample_frac: Optional[float] = None,
+        random_state: int = 42,
+        split_type: str = "train_val",
+    ) -> List[
+        Union[
+            Tuple[pd.DataFrame, pd.DataFrame],
+            Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+        ]
+    ]:
+        """Get data for all CV folds.
+
+        Args:
+            columns: List of columns to load (None for all)
+            sample_frac: If provided, sample this fraction of users
+            random_state: Random seed for reproducibility
+            split_type: The type of data split to retrieve.
+
+        Returns:
+            A list containing the data for all folds.
+        """
+        return list(
+            self.iter_folds(
+                columns=columns,
+                sample_frac=sample_frac,
+                random_state=random_state,
+                split_type=split_type,
+            )
+        )
+
+    def get_fold_summary(self) -> Dict[str, Any]:
+        """Get a summary of the CV folds.
+
+        Returns:
+            Dictionary with fold statistics including:
+            - n_folds: Number of folds
+            - n_users: Total number of unique users
+            - n_items: Total number of unique items
+            - n_interactions: Total number of interactions
+            - folds: List of fold statistics
+        """
+        summary_file = self.splits_dir / "cv_summary.json"
+
+
+
+        if not summary_file.exists():
+            return {
+                "status": "error",
+                "message": "CV summary file not found. Please generate CV splits first.",
+                "n_folds": 0,
+                "n_users": 0,
+                "n_items": 0,
+                "n_interactions": 0,
+                "folds": [],
+            }
+
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                summary = json.load(f)
+
+            # Ensure required fields exist
+            if "folds" not in summary:
+                summary["folds"] = []
+            if "n_folds" not in summary:
+                summary["n_folds"] = len(summary["folds"])
+
+            return summary
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing CV summary file: {e}")
+            return {
+                "status": "error",
+                "message": f"Invalid CV summary file: {e}",
+                "n_folds": 0,
+                "folds": [],
+            }
+```
+
+### `data/feature_matrix.py`
+
+**File size:** 3,215 bytes
+
+```python
+import hashlib
+import json
+import logging
+from typing import Any, Callable, Dict, List
+
+import numpy as np
+import pandas as pd
+
+from src.schemas.models import RealizedFeature
+from src.utils.run_utils import get_run_dir
+
+logger = logging.getLogger(__name__)
+
+
+def _get_feature_cache_key(feature: RealizedFeature, params: Dict[str, Any]) -> str:
+    """Creates a unique cache key for a feature and its parameter values."""
+    param_string = json.dumps(params, sort_keys=True)
+    return hashlib.md5(f"{feature.name}:{param_string}".encode()).hexdigest()
+
+
+def _execute_feature_code(
+    feature: RealizedFeature, df: pd.DataFrame, params: Dict[str, Any]
+) -> pd.Series:
+    """Executes the code for a single feature and returns the resulting Series."""
+    exec_globals = {"pd": pd, "np": np}
+    exec(feature.code_str, exec_globals)
+    feature_func: Callable = exec_globals[feature.name]
+
+    # Filter for only the params this function expects
+    func_params = {k: v for k, v in params.items() if k in feature.params}
+
+    return feature_func(df, **func_params)
+
+
+def generate_feature_matrix(
+    realized_features: List[RealizedFeature],
+    df: pd.DataFrame,
+    trial_params: Dict[str, Any],
+) -> pd.DataFrame:
     """
-    Retrieves a random sample of rows from a specified table in the database.
+    Generates the full feature matrix X by executing or loading from cache.
 
     Args:
-        table_name (str): The name of the table to sample from.
-        n_samples (int): The number of rows to retrieve. Defaults to 5.
+        realized_features: List of realized feature objects.
+        df: The input DataFrame (e.g., train or validation split).
+        trial_params: The parameter values for the current optimization trial.
 
     Returns:
-        str: A string representation of the sampled data in a markdown-friendly format,
-             or an error message if the table cannot be accessed.
+        A pandas DataFrame representing the user-feature matrix X.
     """
-    if not isinstance(table_name, str) or not table_name.isidentifier():
-        return f"ERROR: Invalid table name '{table_name}'. Table names must be valid Python identifiers."
+    cache_dir = get_run_dir() / "feature_cache"
+    cache_dir.mkdir(exist_ok=True)
 
-    if not isinstance(n_samples, int) or n_samples <= 0:
-        return f"ERROR: Invalid number of samples '{n_samples}'. Must be a positive integer."
+    all_feature_series = []
 
-    try:
-        with duckdb.connect(database=DB_PATH, read_only=True) as conn:
-            # Use DuckDB's built-in TABLESAMPLE for efficient random sampling
-            query = f'SELECT * FROM "{table_name}" USING SAMPLE {n_samples} ROWS;'
-            sample_df = conn.execute(query).fetchdf()
+    for feature in realized_features:
+        if not feature.passed_test:
+            logger.warning(f"Skipping feature '{feature.name}' as it failed tests.")
+            continue
 
-            if sample_df.empty:
-                return f"No data returned for table '{table_name}'. It may be empty."
+        feature_trial_params = {
+            p_name: trial_params.get(f"{feature.name}__{p_name}")
+            for p_name in feature.params
+        }
 
-            return (
-                f"Sample of '{table_name}' ({n_samples} rows):\n"
-                f"{sample_df.to_markdown(index=False)}"
-            )
-    except duckdb.CatalogException:
-        return f"ERROR: Table '{table_name}' not found in the database."
-    except Exception as e:
-        logger.error(f"Failed to sample table '{table_name}': {e}")
-        return (
-            f"ERROR: An unexpected error occurred while sampling table '{table_name}'."
+        cache_key = _get_feature_cache_key(feature, feature_trial_params)
+        cache_file = cache_dir / f"{cache_key}.parquet"
+
+        if cache_file.exists():
+            logger.debug(f"Loading feature '{feature.name}' from cache.")
+            feature_series = pd.read_parquet(cache_file).squeeze("columns")
+        else:
+            logger.debug(f"Computing feature '{feature.name}'.")
+            try:
+                feature_series = _execute_feature_code(
+                    feature, df.copy(), feature_trial_params
+                )
+                feature_series.to_parquet(cache_file)
+            except Exception as e:
+                logger.error(f"Failed to execute feature '{feature.name}': {e}")
+                continue  # Skip this feature if it fails
+
+        all_feature_series.append(feature_series)
+
+    if not all_feature_series:
+        logger.warning("No features were successfully generated.")
+        return pd.DataFrame(index=df.index)
+
+    # Combine all feature series into a single DataFrame
+    X = pd.concat(all_feature_series, axis=1).fillna(0)
+
+    logger.info(f"Generated feature matrix X with shape: {X.shape}")
+    return X
+```
+
+### `evaluation/scoring.py`
+
+**File size:** 3,391 bytes
+
+```python
+import logging
+from typing import Dict, Tuple
+
+import numpy as np
+import pandas as pd
+from lightfm import LightFM
+from lightfm.data import Dataset
+from lightfm.evaluation import auc_score, precision_at_k, recall_at_k
+
+logger = logging.getLogger(__name__)
+
+
+def _train_and_evaluate_lightfm(
+    dataset: Dataset,
+    train_df: pd.DataFrame,
+    test_interactions,
+    user_features=None,
+    k=10,
+    batch_size=100000,
+) -> Dict[str, float]:
+    """
+    Helper to train a LightFM model in batches and score it.
+    """
+    model = LightFM(loss="warp", random_state=42)
+
+    # Train in batches using fit_partial
+    for i in range(0, train_df.shape[0], batch_size):
+        chunk = train_df.iloc[i : i + batch_size]
+        # Build interactions for the current chunk only
+        (chunk_interactions, _) = dataset.build_interactions(
+            [(row["user_id"], row["book_id"]) for _, row in chunk.iterrows()]
         )
+        model.fit_partial(
+            chunk_interactions,
+            user_features=user_features,
+            epochs=1,  # One pass over each chunk
+            num_threads=4,
+        )
+
+    # Evaluation logic remains the same
+    auc = auc_score(
+        model,
+        test_interactions,
+        user_features=user_features,
+        num_threads=4,
+    ).mean()
+
+    prec_at_k = precision_at_k(
+        model,
+        test_interactions,
+        k=k,
+        user_features=user_features,
+        num_threads=4,
+    ).mean()
+
+    recall_at_k_scores = recall_at_k(
+        model,
+        test_interactions,
+        k=k,
+        user_features=user_features,
+        num_threads=4,
+    )
+    recall_at_k_mean = recall_at_k_scores.mean()
+    hit_rate_at_k = np.mean(recall_at_k_scores > 0)
+
+    return {
+        "auc": auc,
+        f"precision_at_{k}": prec_at_k,
+        f"recall_at_{k}": recall_at_k_mean,
+        f"hit_rate_at_{k}": hit_rate_at_k,
+    }
+
+
+def score_trial(
+    X_val: pd.DataFrame,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    weights: Dict[str, float] = None,
+) -> Tuple[Dict[str, float], float]:
+    """
+    Evaluates a feature matrix (X) by training a LightFM model in batches.
+    """
+    if weights is None:
+        weights = {"auc": 0.6, "precision": 0.2, "recall": 0.2}
+
+    # 1. Build dataset mapping and test interactions
+    dataset = Dataset()
+    all_users = pd.concat([train_df["user_id"], val_df["user_id"]]).unique()
+    all_items = pd.concat([train_df["book_id"], val_df["book_id"]]).unique()
+    dataset.fit(users=all_users, items=all_items)
+
+    (test_interactions, _) = dataset.build_interactions(
+        [(row["user_id"], row["book_id"]) for _, row in val_df.iterrows()]
+    )
+
+    # 2. Build user features sparse matrix
+    user_features = dataset.build_user_features(
+        (user_id, {col: X_val.loc[user_id, col] for col in X_val.columns})
+        for user_id in X_val.index
+    )
+
+    # 3. Train (in batches) and evaluate the model
+    scores = _train_and_evaluate_lightfm(
+        dataset, train_df, test_interactions, user_features=user_features
+    )
+
+    # 4. Calculate final objective
+    final_objective = -(
+        weights["auc"] * scores.get("auc", 0)
+        + weights["precision"] * scores.get("precision_at_10", 0)
+        + weights["recall"] * scores.get("recall_at_10", 0)
+    )
+
+    logger.info(f"Trial scores: {scores} -> Final objective: {final_objective:.4f}")
+    return scores, final_objective
+```
+
+### `orchestration/ideation.py`
+
+**File size:** 4,226 bytes
+
+```python
+import json
+import logging
+from typing import Any, Dict, List
+
+import autogen
+
+from src.schemas.models import CandidateFeature
+from src.utils.prompt_utils import load_prompt
+from src.utils.run_utils import get_run_dir
+from src.utils.session_state import SessionState
+from src.utils.tools import get_table_sample
+
+logger = logging.getLogger(__name__)
+
+
+def validate_and_filter_features(
+    features: List[Dict[str, Any]],
+) -> List[CandidateFeature]:
+    """
+    Validates a list of candidate feature dictionaries and filters them.
+    - Ensures name uniqueness
+    - Validates spec syntax for 'code' types
+    - (Future) Checks dependencies
+    - (Future) Scores and ranks features
+    """
+    validated_features = []
+    seen_names = set()
+
+    for feat_data in features:
+        # 1. Deduplicate by name
+        name = feat_data.get("name")
+        if not name or name in seen_names:
+            logger.warning(f"Skipping feature with duplicate or missing name: {name}")
+            continue
+        seen_names.add(name)
+
+        # 2. Validate using Pydantic model and custom validation
+        try:
+            feature = CandidateFeature(**feat_data)
+            feature.validate_spec()
+            validated_features.append(feature)
+        except Exception as e:
+            logger.error(f"Validation failed for candidate feature '{name}': {e}")
+
+    # 3. (Future) Add scoring and filtering logic here
+
+    return validated_features
+
+
+def run_feature_ideation(session_state: SessionState, llm_config: Dict):
+    """Orchestrates the Feature Ideation phase."""
+    logger.info("--- Running Feature Ideation Step ---")
+
+    hypotheses = session_state.get_final_hypotheses()
+    if not hypotheses:
+        logger.warning("No vetted hypotheses found. Skipping feature ideation.")
+        return
+
+    # 1. Prepare context for the prompt
+    hypotheses_context = "\n".join(
+        [f"- {h.id}: {h.summary} (Rationale: {h.rationale})" for h in hypotheses]
+    )
+
+    # Load view descriptions
+    views_file = get_run_dir() / "generated_views.json"
+    view_descriptions = "No views created in the previous step."
+    if views_file.exists():
+        with open(views_file, "r") as f:
+            views_data = json.load(f).get("views", [])
+            view_descriptions = "\n".join(
+                [f"- {v['name']}: {v['rationale']}" for v in views_data]
+            )
+
+    # Get table samples
+    tables_to_sample = ["curated_books", "curated_reviews", "user_stats_daily"]
+    table_samples = "\n".join([get_table_sample(table) for table in tables_to_sample])
+
+    system_prompt = load_prompt(
+        "agents/feature_ideator.j2",
+        hypotheses_context=hypotheses_context,
+        view_descriptions=view_descriptions,
+        table_samples=table_samples,
+    )
+
+    # 2. Initialize and run the agent
+    def save_candidate_features(features: List[Dict[str, Any]]) -> str:
+        """Callback tool for the agent to save its generated features."""
+        logger.info(
+            f"FeatureIdeationAgent proposed {len(features)} candidate features."
+        )
+
+        validated = validate_and_filter_features(features)
+
+        session_state.set_candidate_features([f.model_dump() for f in validated])
+        logger.info(
+            f"Saved {len(validated)} valid candidate features to session state."
+        )
+
+        # Print summary
+        for feature in validated:
+            logger.info(f"  - Feature: {feature.name}, Rationale: {feature.rationale}")
+
+        return "SUCCESS"
+
+    # We assume a simple agent setup for now
+    ideation_agent = autogen.AssistantAgent(
+        name="FeatureIdeationAgent", system_message=system_prompt, llm_config=llm_config
+    )
+    user_proxy = autogen.UserProxyAgent(
+        name="UserProxy_Ideation",
+        human_input_mode="NEVER",
+        max_consecutive_auto_reply=1,
+    )
+
+    user_proxy.register_function(
+        function_map={"save_candidate_features": save_candidate_features}
+    )
+
+    user_proxy.initiate_chat(
+        ideation_agent,
+        message="Please generate candidate features based on the provided hypotheses and context. Call the `save_candidate_features` tool with your final list.",
+    )
+
+    logger.info("--- Feature Ideation Step Complete ---")
+```
+
+### `orchestration/insight.py`
+
+**File size:** 3,169 bytes
+
+```python
+"""
+Orchestration module for the insight discovery team.
+"""
+
+from typing import Dict
+
+import autogen
+from loguru import logger
+
+from src.agents.discovery_team.insight_discovery_agents import (
+    get_insight_discovery_agents,
+)
+from src.utils.prompt_utils import load_prompt
+from src.utils.run_utils import get_run_dir
+
+
+def run_insight_discovery_chat(llm_config: Dict) -> Dict:
+    """
+    Runs the insight discovery team group chat to find patterns in the data.
+
+    Args:
+        llm_config: LLM configuration for the agents
+
+    Returns:
+        Dictionary containing the insights and view descriptions
+    """
+    logger.info("Starting insight discovery team chat...")
+
+    # Initialize agents
+    agents = get_insight_discovery_agents(llm_config)
+    user_proxy = agents.pop("user_proxy")
+
+    # Load chat initiator prompt
+    initiator_prompt = load_prompt(
+        "globals/discovery_team_chat_initiator.j2",
+        view_descriptions="No views created yet.",
+    )
+
+    # Create group chat
+    group_chat = autogen.GroupChat(
+        agents=[user_proxy] + list(agents.values()),
+        messages=[],
+        max_round=50,
+        allow_repeat_speaker=True,
+    )
+    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+
+    # Start the chat
+    user_proxy.initiate_chat(
+        manager,
+        message=initiator_prompt,
+    )
+
+    # Extract results from the chat
+    results = {
+        "insights": _extract_insights(group_chat.messages),
+        "view_descriptions": _extract_view_descriptions(group_chat.messages),
+    }
+
+    # Save results
+    run_dir = get_run_dir()
+    results_path = run_dir / "insight_results.json"
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    logger.info(f"Insight discovery chat completed. Results saved to {results_path}")
+    return results
+
+
+def _extract_insights(messages: list) -> list:
+    """Extract insights from the chat messages."""
+    insights = []
+    for msg in messages:
+        if "add_insight_to_report" in msg.get("content", ""):
+            try:
+                content = msg["content"]
+                start_idx = content.find("{")
+                end_idx = content.rfind("}") + 1
+                if start_idx != -1 and end_idx != -1:
+                    insight = json.loads(content[start_idx:end_idx])
+                    insights.append(insight)
+            except Exception as e:
+                logger.error(f"Error parsing insight: {e}")
+    return insights
+
+
+def _extract_view_descriptions(messages: list) -> dict:
+    """Extract SQL view descriptions from the chat messages."""
+    views = {}
+    for msg in messages:
+        if "create_analysis_view" in msg.get("content", ""):
+            try:
+                content = msg["content"]
+                start_idx = content.find("{")
+                end_idx = content.rfind("}") + 1
+                if start_idx != -1 and end_idx != -1:
+                    view = json.loads(content[start_idx:end_idx])
+                    views[view["name"]] = view["description"]
+            except Exception as e:
+                logger.error(f"Error parsing view description: {e}")
+    return views
+```
+
+### `orchestration/realization.py`
+
+**File size:** 4,199 bytes
+
+```python
+import logging
+from typing import Any, Callable, Dict, List
+
+import pandas as pd
+
+try:
+    from src.agents.strategy_team.feature_realization_agent import (
+        FeatureRealizationAgent,
+    )
+except ImportError:
+    from agents.strategy_team.feature_realization_agent import (
+        FeatureRealizationAgent,
+    )
+
+from src.core.database import fetch_df
+from src.schemas.models import CandidateFeature, RealizedFeature
+from src.utils.prompt_utils import load_prompt
+from src.utils.session_state import SessionState
+
+logger = logging.getLogger(__name__)
+
+
+def _get_test_data_sample(dependencies: List[str]) -> pd.DataFrame:
+    """
+    Fetches a small, relevant data sample for testing a feature.
+    For simplicity, we'll fetch from curated_reviews, as it's the most common base.
+    A more advanced implementation would join tables based on dependencies.
+    """
+    return fetch_df("SELECT * FROM curated_reviews LIMIT 100;")
+
+
+def _run_sandboxed_test(
+    feature_name: str, code_str: str, params: Dict[str, Any]
+) -> (bool, str):
+    """
+    Executes the generated feature code on a sample DataFrame to test for errors.
+    Returns (passed, error_message).
+    """
+    try:
+        # Create a callable function from the code string
+        exec_globals = {}
+        exec(code_str, exec_globals)
+        feature_func: Callable = exec_globals[feature_name]
+
+        # Get a data sample and run the test
+        df_sample = _get_test_data_sample([])  # Simple sample for now
+
+        # Call with default parameters
+        result = feature_func(df_sample, **params)
+
+        if not isinstance(result, pd.Series):
+            return False, "Function did not return a pandas Series."
+
+        return True, ""
+
+    except Exception as e:
+        logger.error(f"Sandboxed test failed for feature '{feature_name}': {e}")
+        return False, str(e)
+
+
+def run_feature_realization(session_state: SessionState, llm_config: Dict):
+    """Orchestrates the Feature Realization phase."""
+    logger.info("--- Running Feature Realization Step ---")
+
+    candidate_features = session_state.get_candidate_features()
+    if not candidate_features:
+        logger.warning("No candidate features found. Skipping realization.")
+        return
+
+    realized_features: List[RealizedFeature] = []
+
+    # For now, we'll use a simple agent setup. A more complex one might be a chat.
+    agent = FeatureRealizationAgent(llm_config=llm_config)
+
+    for cand_data in candidate_features:
+        candidate = CandidateFeature(**cand_data)
+        logger.info(f"Attempting to realize feature: {candidate.name}")
+
+        prompt = load_prompt("agents/feature_realization.j2", **candidate.model_dump())
+
+        # In a real scenario, you'd call the agent here
+        # response = agent.generate_reply(prompt)
+        # For this test, we'll use a placeholder response
+        code_str = f"def {candidate.name}(df, **kwargs):\n    # Placeholder for {candidate.name}\n    return pd.Series([0] * len(df), name='{candidate.name}')"
+
+        passed, error_msg = _run_sandboxed_test(
+            candidate.name, code_str, candidate.params
+        )
+
+        realized = RealizedFeature(
+            name=candidate.name,
+            code_str=code_str,
+            params=candidate.params,
+            passed_test=passed,
+            type=candidate.type,
+            source_candidate=candidate,
+        )
+
+        try:
+            realized.validate_code()
+            if passed:
+                realized_features.append(realized)
+                logger.info(
+                    f"Successfully realized and validated feature: {candidate.name}"
+                )
+            else:
+                logger.warning(
+                    f"Feature '{candidate.name}' realized but failed sandbox test: {error_msg}"
+                )
+
+        except ValueError as e:
+            logger.error(
+                f"Failed to validate generated code for '{candidate.name}': {e}"
+            )
+
+    session_state.set_state(
+        "realized_features", [f.model_dump() for f in realized_features]
+    )
+    logger.info(f"Saved {len(realized_features)} successfully realized features.")
+    logger.info("--- Feature Realization Step Complete ---")
+```
+
+### `orchestration/strategy.py`
+
+**File size:** 4,137 bytes
+
+```python
+"""
+Orchestration module for the strategy team group chat.
+"""
+
+import json
+from typing import Dict, List
+
+import autogen
+from loguru import logger
+
+from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
+from src.utils.prompt_utils import load_prompt
+from src.utils.run_utils import get_run_dir
+
+
+def run_strategy_team_chat(
+    llm_config: Dict,
+    insight_report: Dict,
+    view_descriptions: Dict[str, str],
+) -> Dict:
+    """
+    Runs the strategy team group chat to generate and optimize features.
+
+    Args:
+        llm_config: LLM configuration for the agents
+        insight_report: Dictionary containing insights from the discovery team
+        view_descriptions: Dictionary mapping view names to their descriptions
+
+    Returns:
+        Dictionary containing the final hypotheses, features, and optimization results
+    """
+    logger.info("Starting strategy team group chat...")
+
+    # Initialize agents
+    agents = get_strategy_team_agents(llm_config)
+    user_proxy = agents.pop("user_proxy")
+
+    # Load chat initiator prompt
+    initiator_prompt = load_prompt(
+        "globals/strategy_team_chat_initiator.j2",
+        insight_report=json.dumps(insight_report, indent=2),
+        view_descriptions=json.dumps(view_descriptions, indent=2),
+    )
+
+    # Create group chat
+    groupchat = autogen.GroupChat(
+        agents=list(agents.values()),
+        messages=[],
+        max_round=50,
+        speaker_selection_method="round_robin",
+    )
+    manager = autogen.GroupChatManager(groupchat=groupchat)
+
+    # Start the chat
+    user_proxy.initiate_chat(
+        manager,
+        message=initiator_prompt,
+    )
+
+    # Extract results from the chat
+    results = {
+        "hypotheses": _extract_hypotheses(groupchat.messages),
+        "features": _extract_features(groupchat.messages),
+        "optimization_results": _extract_optimization_results(groupchat.messages),
+    }
+
+    # Save results
+    run_dir = get_run_dir()
+    results_path = run_dir / "strategy_results.json"
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    logger.info(f"Strategy team chat completed. Results saved to {results_path}")
+    return results
+
+
+def _extract_hypotheses(messages: List[Dict]) -> List[Dict]:
+    """Extract hypotheses from the chat messages."""
+    hypotheses = []
+    for msg in messages:
+        if "FINAL_HYPOTHESES" in msg.get("content", ""):
+            # Parse the hypotheses from the message
+            try:
+                content = msg["content"]
+                start_idx = content.find("[")
+                end_idx = content.rfind("]") + 1
+                if start_idx != -1 and end_idx != -1:
+                    hypotheses = json.loads(content[start_idx:end_idx])
+            except Exception as e:
+                logger.error(f"Error parsing hypotheses: {e}")
+    return hypotheses
+
+
+def _extract_features(messages: List[Dict]) -> List[Dict]:
+    """Extract feature specifications from the chat messages."""
+    features = []
+    for msg in messages:
+        if "save_candidate_features" in msg.get("content", ""):
+            try:
+                content = msg["content"]
+                start_idx = content.find("[")
+                end_idx = content.rfind("]") + 1
+                if start_idx != -1 and end_idx != -1:
+                    features = json.loads(content[start_idx:end_idx])
+            except Exception as e:
+                logger.error(f"Error parsing features: {e}")
+    return features
+
+
+def _extract_optimization_results(messages: List[Dict]) -> Dict:
+    """Extract optimization results from the chat messages."""
+    results = {}
+    for msg in messages:
+        if "save_optimization_results" in msg.get("content", ""):
+            try:
+                content = msg["content"]
+                start_idx = content.find("{")
+                end_idx = content.rfind("}") + 1
+                if start_idx != -1 and end_idx != -1:
+                    results = json.loads(content[start_idx:end_idx])
+            except Exception as e:
+                logger.error(f"Error parsing optimization results: {e}")
+    return results
 ```
 
 ### `orchestrator.py`
 
-**File size:** 25,771 bytes
+**File size:** 26,634 bytes
 
 ```python
+import json
 import logging
 import os
 import sys
@@ -1389,78 +3322,23 @@ from loguru import logger
 from src.agents.discovery_team.insight_discovery_agents import (
     get_insight_discovery_agents,
 )
-from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
+from src.agents.strategy_team.reflection_agent import ReflectionAgent
+from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.logging import setup_logging
-from src.utils.run_utils import config_list_from_json, init_run
+from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
 from src.utils.session_state import SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
-    execute_python,
+    create_analysis_view,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
+    get_table_sample,
+    run_sql_query,
     vision_tool,
 )
 
 # Load environment variables
-
-
-def _safe_execute_python(code: str) -> str:
-    """Wrapper for execute_python that guarantees a string return and catches exceptions."""
-    try:
-        result = execute_python(code)
-        logging.debug(
-            f"_safe_execute_python result length: {len(result) if result else 'NONE'}"
-        )
-        if result is None or result == "":
-            return "ERROR: execute_python returned no output."
-        return result
-    except Exception as e:
-        import traceback
-
-        logging.error(f"_safe_execute_python caught exception: {e}")
-        return f"ERROR: execute_python failed: {e}\n{traceback.format_exc()}"
-
-
-def _safe_vision_tool(image_path: str, prompt: str) -> str:
-    """Wrapper for vision_tool that guarantees a string return and catches exceptions."""
-    try:
-        result = vision_tool(image_path=image_path, prompt=prompt)
-        if result is None or result == "":
-            return "ERROR: vision_tool returned no output."
-        return result
-    except Exception as e:
-        import traceback
-
-        return f"ERROR: vision_tool failed: {e}\n{traceback.format_exc()}"
-
-
-def _make_safe_add_insight(add_insight_func):
-    def _safe_add_insight_to_report(
-        title: str,
-        finding: str,
-        source_representation: str,
-        supporting_code: str = "",
-        plot_path: str = "",
-        plot_interpretation: str = "",
-    ) -> str:
-        try:
-            result = add_insight_func(
-                title=title,
-                finding=finding,
-                source_representation=source_representation,
-                supporting_code=supporting_code,
-                plot_path=plot_path,
-                plot_interpretation=plot_interpretation,
-            )
-            if result is None or result == "":
-                return "ERROR: add_insight_to_report returned no output."
-            return result
-        except Exception as e:
-            import traceback
-
-            return f"ERROR: add_insight_to_report failed: {e}\n{traceback.format_exc()}"
-
-    return _safe_add_insight_to_report
 
 
 def run_discovery_loop(session_state: SessionState):
@@ -1497,42 +3375,56 @@ def run_discovery_loop(session_state: SessionState):
 
     llm_config = {"config_list": config_list, "cache_seed": None}
 
-    # Create proper UserProxy for tool execution
+    # This agent will execute code blocks and call functions
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=30,  # Per-agent limit, not total conversation limit
+        max_consecutive_auto_reply=10,
         is_termination_msg=lambda x: "TERMINATE" in x.get("content", ""),
-        code_execution_config=False,
+        code_execution_config={
+            "work_dir": str(get_run_dir()),
+            "use_docker": False,
+        },  # Enable code execution
     )
 
     assistant_agents = get_insight_discovery_agents(llm_config)
 
-    # Register tools using autogen.register_function for each assistant
-    add_insight_func = get_add_insight_tool(session_state)
-    safe_add_insight_func = _make_safe_add_insight(add_insight_func)
-
+    # Register the granular tools for the agents
     for agent in assistant_agents.values():
         autogen.register_function(
-            _safe_execute_python,
+            run_sql_query,
             caller=agent,
             executor=user_proxy,
-            name="execute_python",
-            description="Executes Python code in a sandboxed environment with database connection",
+            name="run_sql_query",
+            description="Executes a read-only SQL query and returns the result as markdown.",
         )
         autogen.register_function(
-            _safe_vision_tool,
+            get_table_sample,
+            caller=agent,
+            executor=user_proxy,
+            name="get_table_sample",
+            description="Retrieves a random sample of rows from a specified table.",
+        )
+        autogen.register_function(
+            create_analysis_view,
+            caller=agent,
+            executor=user_proxy,
+            name="create_analysis_view",
+            description="Creates a SQL view with documentation for complex analysis.",
+        )
+        autogen.register_function(
+            vision_tool,
             caller=agent,
             executor=user_proxy,
             name="vision_tool",
-            description="Analyzes image files using vision AI",
+            description="Analyzes image files using vision AI.",
         )
         autogen.register_function(
-            safe_add_insight_func,
+            get_add_insight_tool(session_state),
             caller=agent,
             executor=user_proxy,
             name="add_insight_to_report",
-            description="Saves structured insights to the session report",
+            description="Saves structured insights to the session report.",
         )
 
     # Enhanced GroupChat with intelligent context management
@@ -1553,7 +3445,7 @@ def run_discovery_loop(session_state: SessionState):
     ) -> bool:
         """Determines if exploration should continue based on insights and coverage."""
         insights = len(session_state.insights)
-        min_insights = 8  # Minimum insights needed for comprehensive analysis
+        min_insights = 32  # Minimum insights needed for comprehensive analysis
 
         # Always continue if we don't have enough insights
         if insights < min_insights:
@@ -1661,7 +3553,7 @@ def run_discovery_loop(session_state: SessionState):
 
         try:
             # Create an LLM client for compression
-            from openai import OpenAI
+            from openai import BadRequestError, OpenAI
 
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -1696,22 +3588,37 @@ CONVERSATION CHUNK TO COMPRESS:
 
 COMPRESSED SUMMARY (preserve all insights and key findings):"""
 
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",  # Use mini for cost efficiency in compression
-                    messages=[{"role": "user", "content": compression_prompt}],
-                    max_tokens=64000,
-                    temperature=0.1,  # Low temperature for consistent compression
-                )
+                try:
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",  # Use mini for cost efficiency in compression
+                        messages=[{"role": "user", "content": compression_prompt}],
+                        max_tokens=64000,
+                        temperature=0.1,  # Low temperature for consistent compression
+                    )
 
-                summary = response.choices[0].message.content
+                    summary = response.choices[0].message.content
 
-                # Create a compressed message
-                compressed_msg = {
-                    "role": "assistant",
-                    "name": "ContextCompressor",
-                    "content": f"[COMPRESSED SUMMARY of rounds {i + len(system_messages) + 1}-{i + len(system_messages) + len(chunk)}]\n\n{summary}",
-                }
-                compressed_summaries.append(compressed_msg)
+                    # Create a compressed message
+                    compressed_msg = {
+                        "role": "assistant",
+                        "name": "ContextCompressor",
+                        "content": f"[COMPRESSED SUMMARY of rounds {i + len(system_messages) + 1}-{i + len(system_messages) + len(chunk)}]\n\n{summary}",
+                    }
+                    compressed_summaries.append(compressed_msg)
+                except BadRequestError as e:
+                    if "context_length_exceeded" in str(e):
+                        logging.warning(
+                            f"Context length exceeded in compression chunk {i // chunk_size + 1}. Reducing chunk size and retrying..."
+                        )
+                        # Reduce chunk size and retry with smaller chunks
+                        smaller_chunk_size = max(5, chunk_size // 2)
+                        logging.info(
+                            f"Reducing chunk size from {chunk_size} to {smaller_chunk_size}"
+                        )
+                        chunk_size = smaller_chunk_size
+                        i -= chunk_size  # Retry the current chunk with smaller size
+                        continue
+                    raise
 
             logging.info(
                 f"LLM compression: {len(middle_messages)} messages -> {len(compressed_summaries)} summaries"
@@ -1874,91 +3781,123 @@ COMPRESSED SUMMARY (preserve all insights and key findings):"""
             f"Exploration completed after {smart_manager.round_count} rounds with {insights_count} insights"
         )
 
+        logging.info("--- FINAL INSIGHTS SUMMARY ---")
+        logging.info(session_state.get_final_insight_report())
+
+        run_dir = get_run_dir()
+        views_file = run_dir / "generated_views.json"
+        if views_file.exists():
+            with open(views_file, "r") as f:
+                views_data = json.load(f)
+            logging.info(f"Total views created: {len(views_data.get('views', []))}")
+        else:
+            logging.info("Total views created: 0")
+
     finally:
         # Reopen the connection after agent execution
         logging.info("Reopening database connection...")
         session_state.reconnect()
 
     logging.info("--- Insight Discovery Loop Complete ---")
+    return session_state.get_final_insight_report()
 
 
 def run_strategy_loop(session_state: SessionState):
-    """Orchestrates the Hypothesis & Strategy Team to refine insights."""
+    """Orchestrates the Strategy Team to refine insights and generate features."""
     logging.info("--- Running Strategy Loop ---")
+
+    # Get insights from discovery loop
     insights_report = session_state.get_final_insight_report()
     if "No insights" in insights_report:
         logging.warning("Skipping strategy loop as no insights were generated.")
         return None
 
+    # Load view descriptions
+    views_file = get_run_dir() / "generated_views.json"
+    view_descriptions = "No views created in the previous step."
+    if views_file.exists():
+        with open(views_file, "r") as f:
+            views_data = json.load(f).get("views", [])
+            view_descriptions = "\n".join(
+                [f"- {v['name']}: {v['rationale']}" for v in views_data]
+            )
+
+    # Configure LLM
     config_list = config_list_from_json(
         os.getenv("OAI_CONFIG_LIST", "config/OAI_CONFIG_LIST.json")
     )
-
-    # Validate and substitute the API key
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key.strip() == "":
-        raise ValueError("OPENAI_API_KEY environment variable is empty or not set.")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is not set.")
 
-    logging.info(f"API key loaded with length: {len(api_key)}")
-
-    # Manually substitute the API key to ensure it's loaded
     for config in config_list:
         if config.get("api_key") == "${OPENAI_API_KEY}":
             config["api_key"] = api_key
-            logging.info("Substituted API key in config")
-        elif not config.get("api_key"):
-            raise ValueError(f"No API key found in config: {config}")
-
-    # Validate final config
-    for i, config in enumerate(config_list):
-        if not config.get("api_key") or config.get("api_key").strip() == "":
-            raise ValueError(
-                f"Config {i} has empty API key after substitution: {config}"
-            )
-
-    logging.info(f"Final config list validated with {len(config_list)} configurations")
 
     llm_config = {"config_list": config_list, "cache_seed": None}
 
-    agents_and_proxy = get_hypothesis_agents(llm_config, insights_report)
-    user_proxy = agents_and_proxy.pop("user_proxy")
-    agents = list(agents_and_proxy.values())
+    # Initialize strategy team agents
+    agents = get_strategy_team_agents(llm_config)
+    user_proxy = agents.pop("user_proxy")
 
+    # Register tools
     user_proxy.register_function(
         function_map={
-            "execute_python": execute_python,
+            "run_sql_query": run_sql_query,
             "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
         }
     )
 
+    # Create group chat
     group_chat = autogen.GroupChat(
-        agents=[user_proxy] + agents,
+        agents=[user_proxy] + list(agents.values()),
         messages=[],
-        max_round=20,
+        max_round=50,
         allow_repeat_speaker=True,
     )
     manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
-    # Close the session database connection to avoid lock conflicts during agent execution
+    # Close DB connection during agent execution
     logging.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
 
     try:
+        # Start the strategy team chat
         user_proxy.initiate_chat(
             manager,
-            message=f"""Welcome strategists. Your task is to refine the following insights into a set of concrete, testable hypotheses. You can use `execute_python` to re-verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
+            message=f"""Welcome strategists. Your task is to:
+1. Refine the insights into concrete, testable hypotheses
+2. Convert approved hypotheses into features
+3. Implement and optimize these features
+4. Reflect on the results and suggest next steps
+
+You can use `run_sql_query` to verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
 
 --- INSIGHTS REPORT ---
 {insights_report}
+
+--- AVAILABLE VIEWS ---
+{view_descriptions}
 """,
         )
+
+        # After the strategy team has proposed candidate features, realize them.
+        logger.info("--- Running Feature Realization ---")
+        feature_realization_agent = FeatureRealizationAgent(
+            llm_config=llm_config, session_state=session_state
+        )
+        feature_realization_agent.run()
+        logger.info("--- Feature Realization Complete ---")
+
+        # After strategy team completes, run reflection
+        reflection_agent = ReflectionAgent(llm_config)
+        reflection_results = reflection_agent.run(session_state)
+
     finally:
-        # Reopen the connection after agent execution
-        logging.info("Reopening database connection...")
         session_state.reconnect()
 
     logging.info("--- Strategy Loop Complete ---")
-    return session_state.get_final_hypotheses()
+    return reflection_results
 
 
 def main():
@@ -1976,16 +3915,30 @@ def main():
     session_state = SessionState(run_dir)
 
     try:
-        run_discovery_loop(session_state)
-        # final_hypotheses = run_strategy_loop(session_state)
+        should_continue = True
+        while should_continue:
+            # Run discovery loop
+            run_discovery_loop(session_state)
 
-        logging.info("Orchestration complete.")
-        # if final_hypotheses is not None:
-        #     logging.info("--- FINAL VETTED HYPOTHESES ---")
-        #     for h in final_hypotheses:
-        #         logging.info(f"- {h.model_dump_json(indent=2)}")
-        # else:
-        #     logging.info("--- No hypotheses were finalized. ---")
+            # Run strategy loop
+            reflection_results = run_strategy_loop(session_state)
+
+            # Check for hypotheses to see if we should break early
+            hypotheses = session_state.get_final_hypotheses()
+            if not hypotheses:
+                logger.info("No hypotheses generated. Ending pipeline.")
+                break
+
+            # Check if we should continue based on reflection
+            should_continue = (
+                reflection_results.get("should_continue", False)
+                if reflection_results
+                else False
+            )
+            if should_continue:
+                logger.info("Reflection suggests to continue. Starting next loop.")
+            else:
+                logger.info("Pipeline completion criteria met. Ending pipeline.")
 
     except Exception as e:
         logging.error(f"An error occurred during orchestration: {e}", exc_info=True)
@@ -1993,8 +3946,8 @@ def main():
         session_state.close_connection()
 
         # Clean up any generated views
-        cleanup_result = cleanup_analysis_views(Path(session_state.run_dir))
-        logging.info(f"View cleanup: {cleanup_result}")
+        cleanup_analysis_views(Path(session_state.run_dir))
+        logging.info("View cleanup process initiated.")
 
         logging.info("Run finished. Session state saved.")
 
@@ -2066,13 +4019,14 @@ if __name__ == "__main__":
 
 ### `schemas/models.py`
 
-**File size:** 2,887 bytes
+**File size:** 6,138 bytes
 
 ```python
 # src/utils/schemas.py
-from typing import List, Optional
+import ast
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class Insight(BaseModel):
@@ -2097,19 +4051,40 @@ class Insight(BaseModel):
 
 class Hypothesis(BaseModel):
     id: str = Field(
-        ..., description="A unique identifier for the hypothesis, e.g., 'H-01'."
-    )
-    description: str = Field(
-        ..., description="The full text of the hypothesis, clearly stated."
-    )
-    strategic_critique: str = Field(
         ...,
-        description="A detailed critique from the Strategist on how this hypothesis aligns with the Core Objective.",
+        description="A unique, sequential identifier for the hypothesis, e.g., 'H-01'.",
     )
-    feasibility_critique: str = Field(
+    summary: str = Field(
+        ..., description="A concise, one-sentence statement of the hypothesis."
+    )
+    rationale: str = Field(
         ...,
-        description="A detailed critique from the Engineer on the technical feasibility and computational cost.",
+        description="A clear explanation of why this hypothesis is useful and worth testing.",
     )
+    source_insight: Optional[str] = Field(
+        None,
+        description="The title of the insight from the report that inspired this hypothesis.",
+    )
+    estimated_gain: float = Field(
+        ...,
+        ge=0,
+        le=10,
+        description="A subjective estimate of the potential value (0-10) if the hypothesis is true.",
+    )
+    difficulty: Literal["low", "medium", "high"] = Field(
+        ...,
+        description="The estimated difficulty to implement and test this hypothesis.",
+    )
+    tags: List[str] = Field(
+        ...,
+        description="A list of relevant tags, e.g., ['per-user', 'temporal', 'text-based'].",
+    )
+
+    @validator("rationale")
+    def rationale_must_be_non_empty(cls, v):  # noqa: N805
+        if not v or not v.strip():
+            raise ValueError("Rationale cannot be empty.")
+        return v
 
 
 class PrioritizedHypothesis(BaseModel):
@@ -2124,53 +4099,104 @@ class PrioritizedHypothesis(BaseModel):
 
 
 class CandidateFeature(BaseModel):
-    name: str = Field(
-        ..., description="A descriptive, camel-case name for the feature."
-    )
-    type: str = Field(
-        ..., description="The type of feature: 'code', 'llm', or 'composition'."
+    name: str = Field(..., description="A unique, descriptive name for the feature.")
+    type: Literal["code", "llm", "composition"] = Field(
+        ..., description="The type of feature to be realized."
     )
     spec: str = Field(
         ...,
-        description="The feature specification (e.g., DSL for code, prompt for llm).",
+        description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
     )
-    depends_on: Optional[List[str]] = Field(
-        [], description="A list of other features this feature depends on."
+    depends_on: List[str] = Field(
+        default_factory=list,
+        description="A list of other feature names this feature depends on (for compositions).",
+    )
+    params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="A dictionary of tunable parameters for the feature.",
     )
     rationale: str = Field(
-        ..., description="A brief explanation of why this feature is useful."
+        ..., description="A detailed explanation of why this feature is useful."
     )
-    effort: int = Field(
-        ...,
-        ge=1,
-        le=5,
-        description="The estimated effort to implement this feature (1-5).",
-    )
-    impact: int = Field(
-        ...,
-        ge=1,
-        le=5,
-        description="The estimated impact of this feature on the model (1-5).",
-    )
-```
 
-### `utils/data_utils.py`
-
-**File size:** 414 bytes
-
-```python
-import pandas as pd
+    def validate_spec(self):
+        """
+        Validates the 'spec' field based on the feature type.
+        Raises ValueError for invalid specs.
+        """
+        if self.type == "code":
+            try:
+                ast.parse(self.spec)
+            except SyntaxError as e:
+                raise ValueError(
+                    f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
+                )
+        # Add more validation for 'llm' or 'composition' types if needed
+        return True
 
 
-def time_based_split(
-    df: pd.DataFrame, train_size: float = 0.8
-) -> (pd.DataFrame, pd.DataFrame):
-    """Splits a DataFrame into training and validation sets based on a timestamp."""
-    df = df.sort_values("timestamp").reset_index(drop=True)
-    split_index = int(len(df) * train_size)
-    train_df = df.iloc[:split_index]
-    val_df = df.iloc[split_index:]
-    return train_df, val_df
+class VettedFeature(CandidateFeature):
+    pass
+
+
+class RealizedFeature(BaseModel):
+    """
+    Represents a feature that has been converted into executable code.
+    """
+
+    name: str
+    code_str: str
+    params: Dict[str, Any]
+    passed_test: bool
+    type: Literal["code", "llm", "composition"]
+    source_candidate: CandidateFeature
+
+    def validate_code(self) -> None:
+        """
+        Validates the generated code string for correctness.
+        - Parses the code to ensure it's valid Python.
+        - Checks that the function name matches the feature name.
+        - Verifies that all specified params are in the function signature.
+        """
+        try:
+            tree = ast.parse(self.code_str)
+        except SyntaxError as e:
+            raise ValueError(
+                f"Invalid Python syntax in generated code for '{self.name}': {e}"
+            )
+
+        # Find the function definition in the AST
+        func_defs = [
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        ]
+        if not func_defs or len(func_defs) > 1:
+            raise ValueError(
+                f"Generated code for '{self.name}' must contain exactly one function definition."
+            )
+
+        func_def = func_defs[0]
+
+        # Check function name
+        if func_def.name != self.name:
+            raise ValueError(
+                f"Function name '{func_def.name}' does not match feature name '{self.name}'."
+            )
+
+        # Check for expected parameters in the function signature
+        arg_names = {arg.arg for arg in func_def.args.args}
+        expected_params = set(self.params.keys())
+
+        # The function should accept 'df' plus all tunable params
+        if "df" not in arg_names:
+            raise ValueError(
+                f"Generated function for '{self.name}' must accept a 'df' argument."
+            )
+
+        missing_params = expected_params - (arg_names - {"df"})
+        if missing_params:
+            raise ValueError(
+                f"Missing parameters in function signature for '{self.name}': {missing_params}"
+            )
 ```
 
 ### `utils/decorators.py`
@@ -2215,9 +4241,12 @@ def agent_run_decorator(agent_name: str):
 
 ### `utils/feature_registry.py`
 
-**File size:** 900 bytes
+**File size:** 940 bytes
 
 ```python
+from loguru import logger
+
+
 class FeatureRegistry:
     def __init__(self):
         self._registry = {}
@@ -2225,7 +4254,7 @@ class FeatureRegistry:
     def register(self, name: str, feature_data: dict):
         """Registers a feature function and its metadata."""
         if name in self._registry:
-            print(f"Warning: Feature {name} is already registered. Overwriting.")
+                        logger.warning(f"Feature {name} is already registered. Overwriting.")
         self._registry[name] = feature_data
 
     def get(self, name: str) -> dict:
@@ -2251,33 +4280,16 @@ def get_feature(name: str):
 
 ### `utils/logging_utils.py`
 
-**File size:** 3,871 bytes
+**File size:** 2,056 bytes
 
 ```python
 # src/utils/logging_utils.py
 import logging
-import sys
-from pathlib import Path
 from typing import Any, Dict
 
 from loguru import logger
 
-# Create logs directory if it doesn't exist
-LOGS_DIR = Path("logs")
-LOGS_DIR.mkdir(exist_ok=True)
 
-# Agent colors mapping
-AGENT_COLORS = {
-    "DataAnalysisAgent": "cyan",
-    "HypothesisAgent": "green",
-    "ReasoningAgent": "yellow",
-    "FeatureIdeationAgent": "magenta",
-    "FeatureRealizationAgent": "blue",
-    "OptimizationAgent": "red",
-    "EvaluationAgent": "white",
-    "ReflectionAgent": "bright_blue",
-    "ResearchAgent": "bright_green",
-}
 
 
 class InterceptHandler(logging.Handler):
@@ -2303,30 +4315,7 @@ class InterceptHandler(logging.Handler):
         )
 
 
-def setup_agent_logger(agent_name: str) -> None:
-    """Set up logging for a specific agent with its own color and file."""
-    # Remove default handler
-    logger.remove()
 
-    # Add console handler with agent-specific color
-    logger.add(
-        sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-        f"<{AGENT_COLORS.get(agent_name, 'white')}>{agent_name}</{AGENT_COLORS.get(agent_name, 'white')}> | "
-        "<level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        level="INFO",
-        colorize=True,
-    )
-
-    # Add file handler for this agent
-    logger.add(
-        LOGS_DIR / f"{agent_name.lower()}.log",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
-        level="DEBUG",
-        rotation="1 day",
-        retention="7 days",
-    )
 
 
 def log_agent_context(agent_name: str, context: Dict[str, Any]) -> None:
@@ -2364,19 +4353,71 @@ def log_tool_result(agent_name: str, tool_name: str, result: Any) -> None:
     logger.info(f"🔧 TOOL RESULT from {tool_name}: {result}")
 
 
-# Example usage in an agent:
-"""
-from src.utils.logging_utils import setup_agent_logger, log_agent_context, log_agent_response
 
-class MyAgent:
-    def __init__(self):
-        setup_agent_logger(self.__class__.__name__)
-    
-    def run(self, context):
-        log_agent_context(self.__class__.__name__, context)
-        # ... agent logic ...
-        log_agent_response(self.__class__.__name__, response)
-"""
+```
+
+### `utils/plotting.py`
+
+**File size:** 1,816 bytes
+
+```python
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+class PlotManager:
+    def __init__(self, base_dir: str = "outputs/plots"):
+        self.base_dir = Path(base_dir)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._setup_style()
+
+    def _setup_style(self):
+        """Set up default plotting style"""
+        plt.style.use("seaborn")
+        sns.set_palette("husl")
+
+    def _generate_filename(self, base_name: str, plot_type: str) -> str:
+        """Generate a unique filename with timestamp"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{base_name}_{plot_type}_{timestamp}.png"
+
+    def save_plot(
+        self,
+        plot_type: str,
+        base_name: str,
+        fig: Optional[plt.Figure] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        dpi: int = 300,
+    ) -> str:
+        """Save the current plot with metadata"""
+        if fig is None:
+            fig = plt.gcf()
+
+        filename = self._generate_filename(base_name, plot_type)
+        filepath = self.base_dir / filename
+
+        # Add metadata as text in the figure if provided
+        if metadata:
+            metadata_str = "\n".join([f"{k}: {v}" for k, v in metadata.items()])
+            fig.text(0.02, 0.02, metadata_str, fontsize=8, alpha=0.7)
+
+        fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+
+        return str(filepath)
+
+    def create_subplot_grid(self, n_plots: int) -> tuple:
+        """Calculate optimal subplot grid dimensions"""
+        n_rows = int(n_plots**0.5)
+        n_cols = (n_plots + n_rows - 1) // n_rows
+        return plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+
+
+plot_manager = PlotManager()
 ```
 
 ### `utils/prompt_utils.py`
@@ -2472,62 +4513,9 @@ def load_prompt(template_name: str, **kwargs) -> str:
 _refresh_database_schema()
 ```
 
-### `utils/pubsub.py`
-
-**File size:** 1,386 bytes
-
-```python
-# src/utils/pubsub.py
-import json
-import threading
-
-import redis
-from loguru import logger
-
-# Connect to Redis
-redis_client = redis.Redis(host="localhost", port=6379, db=0)
-
-
-def publish(channel: str, message: dict):
-    """Publishes a message to a Redis channel."""
-    logger.info(f"Publishing to channel '{channel}': {message}")
-    redis_client.publish(channel, json.dumps(message))
-
-
-def subscribe(channel: str, callback):
-    """Subscribes to a Redis channel and runs a callback for each message."""
-
-    def worker():
-        pubsub = redis_client.pubsub()
-        pubsub.subscribe(channel)
-        logger.info(f"Subscribed to channel '{channel}'.")
-        for message in pubsub.listen():
-            if message["type"] == "message":
-                data = json.loads(message["data"])
-                logger.info(f"Received message on channel '{channel}': {data}")
-                callback(data)
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    return thread
-
-
-def acquire_lock(lock_name: str, timeout: int = 60) -> bool:
-    """
-    Acquires a lock in Redis. Returns True if the lock was acquired,
-    False otherwise. The lock will expire after the timeout.
-    """
-    return redis_client.set(lock_name, "locked", ex=timeout, nx=True)
-
-
-def release_lock(lock_name: str):
-    """Releases a lock in Redis."""
-    redis_client.delete(lock_name)
-```
-
 ### `utils/run_utils.py`
 
-**File size:** 3,903 bytes
+**File size:** 5,761 bytes
 
 ```python
 #!/usr/bin/env python3
@@ -2535,12 +4523,14 @@ def release_lock(lock_name: str):
 Utilities for managing run IDs and run-specific paths.
 """
 
+import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import autogen
+from src.data.cv_data_manager import CVDataManager
 
 # Base directories
 RUNTIME_DIR = Path("runtime")
@@ -2549,6 +4539,8 @@ RUNS_DIR = RUNTIME_DIR / "runs"
 # Global variable to store current run ID
 _run_id: Optional[str] = None
 _run_dir: Optional[Path] = None
+
+logger = logging.getLogger(__name__)
 
 
 def init_run() -> Tuple[str, Path]:
@@ -2650,12 +4642,65 @@ def format_log_message(message: str) -> str:
 
 
 def config_list_from_json(file_path: str) -> List[Dict]:
+    """Load OpenAI config list from a JSON file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load config list from {file_path}: {e}")
+        return []
+
+
+def restart_pipeline(config: Dict[str, Any] = None) -> None:
     """
-    Loads an AutoGen configuration list from a JSON file, resolving environment variables.
+    Restarts the pipeline with an optional configuration update.
+    This function should be called by the ReflectionAgent when deciding to continue.
+
+    Args:
+        config: Optional dictionary of configuration parameters for the next run
     """
-    return autogen.config_list_from_json(
-        env_or_file=file_path,
-    )
+    global _run_id, _run_dir
+
+    # Save current run ID
+    old_run_id = _run_id
+
+    # Initialize a new run
+    new_run_id, new_run_dir = init_run()
+
+    # If config is provided, save it
+    if config:
+        config_path = new_run_dir / "config" / "next_cycle_config.json"
+        config_path.parent.mkdir(exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+
+    logger.info(f"Pipeline restarted. Old run: {old_run_id}, New run: {new_run_id}")
+    return new_run_id, new_run_dir
+
+
+def terminate_pipeline() -> None:
+    """
+    Terminates the pipeline gracefully.
+    This function should be called by the ReflectionAgent when deciding to stop.
+    """
+    # Close any open database connections
+    CVDataManager.close_global_connection_pool()
+
+    global _run_id, _run_dir
+
+    if _run_id:
+        logger.info(f"Pipeline terminated. Final run: {_run_id}")
+
+        # Create a termination marker file
+        termination_file = _run_dir / "pipeline_terminated.txt"
+        with open(termination_file, "w", encoding="utf-8") as f:
+            f.write(f"Pipeline terminated at {datetime.now().isoformat()}\n")
+
+        # Reset global variables
+        _run_id = None
+        _run_dir = None
+    else:
+        logger.warning("Attempted to terminate pipeline but no run was active.")
 ```
 
 ### `utils/sampling.py`
@@ -2707,7 +4752,7 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 12,814 bytes
+**File size:** 13,819 bytes
 
 ```python
 import json
@@ -2715,6 +4760,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import duckdb
+from loguru import logger
+
 
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
@@ -2747,15 +4794,9 @@ class SessionState:
         # Load existing state if available
         self._load_from_disk()
 
+        # Database connection attributes
         self.db_path = "data/goodreads_curated.duckdb"
-        try:
-            # Connect in read-write mode to allow for TEMP view creation
-            self.conn = duckdb.connect(database=self.db_path, read_only=False)
-            print(f"Successfully connected to {self.db_path} in read-write mode.")
-        except Exception as e:
-            print(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
-            self.conn = None
-            raise e
+        self.conn: Optional[duckdb.DuckDBPyConnection] = None
 
     def _load_from_disk(self):
         """Loads existing session state from disk if available."""
@@ -2791,25 +4832,25 @@ class SessionState:
                 )
                 self.reflection_run_count = data.get("reflection_run_count", 0)
 
-                print(
+                logger.info(
                     f"Loaded existing session state with {len(self.insights)} insights and {len(self.hypotheses)} hypotheses."
                 )
             except Exception as e:
-                print(
+                logger.error(
                     f"Warning: Failed to load existing session state: {e}. Starting with fresh state."
                 )
         else:
-            print("No existing session state found. Starting with fresh state.")
+            logger.info("No existing session state found. Starting with fresh state.")
 
     def add_insight(self, insight: Insight):
         self.insights.append(insight)
         self.save_to_disk()
-        print(f"Added and saved new insight: '{insight.title}'")
+        logger.info(f"Added and saved new insight: '{insight.title}'")
 
     def finalize_hypotheses(self, hypotheses: List[Hypothesis]):
         self.hypotheses.extend(hypotheses)
         self.save_to_disk()
-        print(f"Finalized and saved {len(hypotheses)} hypotheses.")
+        logger.info(f"Finalized and saved {len(hypotheses)} hypotheses.")
 
     # Prioritized hypotheses management
     def set_prioritized_hypotheses(self, hypotheses: List[Dict]):
@@ -2948,18 +4989,24 @@ class SessionState:
         """Returns the final list of vetted hypotheses."""
         return self.hypotheses if self.hypotheses else None
 
-    def vision_tool(self, image_path: str, prompt: str) -> str:
+    def vision_tool(
+        self,
+        image_path: str,
+        prompt: str,
+    ) -> str:
         """
         Analyzes an image file using OpenAI's GPT-4o vision model.
         This tool automatically resolves the path relative to the run's output directory.
         """
-        import base64
-        import os
-
-        from openai import OpenAI
-
         try:
-            full_path = self.get_run_output_dir() / image_path
+            import base64
+            import os
+
+            from openai import OpenAI
+
+            # Construct the full path to the image
+            full_path = self.run_dir / image_path
+
             if not full_path.exists():
                 logger.error(f"Vision tool failed: File not found at {full_path}")
                 return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
@@ -2996,6 +5043,13 @@ class SessionState:
             logger.error(f"Vision tool failed with an unexpected error: {e}")
             return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
 
+    def get_state_file_path(self) -> Optional[str]:
+        """Returns the path to the session state file if it exists."""
+        state_file = self.run_dir / "session_state.json"
+        if state_file.exists():
+            return str(state_file)
+        return None
+
     def save_to_disk(self):
         """Saves the current session state to disk."""
         output = {
@@ -3019,24 +5073,41 @@ class SessionState:
             json.dump(output, f, indent=4)
 
     def close_connection(self):
-        """Closes the database connection."""
+        """Closes the database connection and resets the connection attribute."""
         if self.conn:
-            self.conn.close()
-            print("Database connection closed.")
+            try:
+                self.conn.close()
+                logger.info("Database connection closed.")
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
+        self.conn = None
 
     def reconnect(self):
-        """Reopens the database connection."""
+        """Reopens the database connection in read-write mode."""
+        self.close_connection()  # Ensure any existing connection is closed first
         try:
             self.conn = duckdb.connect(database=self.db_path, read_only=False)
-            print(f"Successfully reconnected to {self.db_path} in read-write mode.")
+            logger.info(f"Successfully reconnected to {self.db_path} in read-write mode.")
         except Exception as e:
-            print(f"FATAL: Failed to reconnect to database at {self.db_path}: {e}")
+            logger.error(f"FATAL: Failed to reconnect to database at {self.db_path}: {e}")
             self.conn = None
             raise e
 
     @property
-    def db_connection(self):
-        """Returns the current database connection."""
+    def db_connection(self) -> duckdb.DuckDBPyConnection:
+        """
+        Provides a lazy-loaded, read-only database connection.
+        The connection is created on first access.
+        """
+        if self.conn is None:
+            try:
+                logger.info(f"Connecting to {self.db_path} in read-only mode...")
+                self.conn = duckdb.connect(database=self.db_path, read_only=True)
+                logger.info(f"Successfully connected to {self.db_path} in read-only mode.")
+            except Exception as e:
+                logger.error(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
+                self.conn = None
+                raise e
         return self.conn
 ```
 
@@ -3098,233 +5169,109 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 13,677 bytes
+**File size:** 12,415 bytes
 
 ```python
 # -*- coding: utf-8 -*-
 import json
-import subprocess
+import logging
+import os
 from pathlib import Path
+from typing import Dict, List
 
 import duckdb
+import matplotlib.pyplot as plt
+import subprocess
+import sys
+from openai import BadRequestError
 
 from src.config.settings import DB_PATH
+from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
 
-# The preamble provides the helper functions and the database connection
-# that will be available to the agent's code.
-_PYTHON_TOOL_PREAMBLE = f"""
-import pandas as pd
-import duckdb
-import networkx as nx
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-from pathlib import Path
-import os
-import json
-from datetime import datetime
+logger = logging.getLogger(__name__)
 
-# Use absolute path to the database with read-write access (orchestrator connection is closed)
-DB_PATH = "{DB_PATH}"
 
-# Set better plotting defaults
-plt.style.use('default')
-sns.set_palette("husl")
+def run_sql_query(query: str) -> str:
+    """
+    Executes a read-only SQL query against the database and returns the result as a markdown string.
+    This tool should be used for all SELECT queries.
+    """
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            df = conn.execute(query).fetchdf()
+            if df.empty:
+                return "Query executed successfully, but returned no results."
+            return df.to_markdown(index=False)
+    except Exception as e:
+        logger.error(f"SQL query failed: {query} | Error: {e}")
+        return f"ERROR: SQL query failed: {e}"
+
 
 def get_table_sample(table_name: str, n_samples: int = 5) -> str:
-    '''Retrieves a random sample of rows from a specified table in the database.'''
-    try:
-        with duckdb.connect(database=DB_PATH, read_only=True) as sample_conn:
-            query = f'SELECT * FROM "{{table_name}}" USING SAMPLE {{n_samples}} ROWS;'
-            sample_df = sample_conn.execute(query).fetchdf()
-            
-            if sample_df.empty:
-                return f"No data returned for table '{{table_name}}'. It may be empty."
-            
-            return f"Sample of '{{table_name}}' ({{n_samples}} rows):\\n{{sample_df.to_markdown(index=False)}}"
-    except Exception as e:
-        return f"ERROR: Failed to sample table '{{table_name}}': {{e}}"
+    """Retrieves a random sample of rows from a specified table in the database."""
+    return run_sql_query(f'SELECT * FROM "{table_name}" USING SAMPLE {n_samples} ROWS;')
+
 
 def save_plot(filename: str):
-    """Save the current matplotlib figure to the *run-local* ``plots`` directory.
-
-    - Always resolves to ``runtime/runs/<RUN_ID>/plots/<filename>.png``.
-    - Any directory components in *filename* are stripped to avoid accidental path traversal.
-    - Automatically appends ``.png`` if missing.
-    """
-
-    # Ensure we are always inside the run directory (``execute_python`` sets cwd appropriately).
-    plots_dir = Path("./plots")
+    """Saves the current matplotlib figure to the run-local 'plots' directory."""
+    plots_dir = get_run_dir() / "plots"
     plots_dir.mkdir(exist_ok=True)
-
-    # Disallow sub-directories in filename for safety; keep only the basename.
     basename = Path(filename).name
-
-    # Append .png if not provided
     if not basename.lower().endswith(".png"):
         basename += ".png"
-
     path = plots_dir / basename
-    
-    # Apply better plot formatting
     plt.tight_layout()
-    
-    # Auto-set reasonable axis limits if not already set
-    ax = plt.gca()
-    if hasattr(ax, 'get_xlim'):
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        # Only adjust if using default limits
-        if xlim == (0.0, 1.0) or any(abs(x) > 1e6 for x in xlim):
-            # Get data bounds and add small margin
-            try:
-                lines = ax.get_lines()
-                if lines:
-                    xdata = np.concatenate([line.get_xdata() for line in lines])
-                    if len(xdata) > 0:
-                        x_margin = (np.max(xdata) - np.min(xdata)) * 0.05
-                        ax.set_xlim(np.min(xdata) - x_margin, np.max(xdata) + x_margin)
-            except:
-                pass
-    
     plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close() # Close the plot to free memory
+    plt.close()
     abs_path = path.resolve()
-    print(f"PLOT_SAVED:{abs_path}")  # Special token for downstream parsing
+    print(f"PLOT_SAVED:{abs_path}")
     return str(abs_path)
 
-def create_analysis_view(view_name: str, sql_query: str):
-    '''Creates a permanent view for analysis and tracks it for cleanup.'''
-    # Use a non-read-only connection just for view creation
-    with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
-        # Create the view
-        full_sql = f"CREATE OR REPLACE VIEW {{view_name}} AS {{sql_query}}"
-        write_conn.execute(full_sql)
-        
-        # Track the view for cleanup
-        views_file = Path("./generated_views.json")
-        if views_file.exists():
-            with open(views_file, 'r') as f:
-                views_data = json.load(f)
-        else:
-            views_data = {"views": []}
-        
-        views_data["views"].append({
-            "name": view_name,
-            "sql": full_sql,
-            "created_at": datetime.now().isoformat(),
-        })
-        
-        with open(views_file, 'w') as f:
-            json.dump(views_data, f, indent=2)
-            
-        print(f"VIEW_CREATED:{{view_name}}")
-        return f"Successfully created view: {{view_name}}"
 
-def analyze_and_plot(data_df, title="Data Analysis", x_col=None, y_col=None, plot_type="auto"):
-    '''Helper function to both analyze data numerically AND create bounded visualizations.'''
-    print(f"\\n=== NUMERICAL ANALYSIS: {{title}} ===")
-    print(f"Dataset shape: {{data_df.shape}}")
-    print(f"\\nSummary statistics:")
-    print(data_df.describe())
-    
-    if len(data_df.columns) > 1:
-        print(f"\\nCorrelation matrix:")
-        numeric_cols = data_df.select_dtypes(include=[np.number])
-        if len(numeric_cols.columns) > 1:
-            print(numeric_cols.corr())
-    
-    # Create visualization with bounded axes
-    plt.figure(figsize=(10, 6))
-    
-    if plot_type == "scatter" and x_col and y_col:
-        plt.scatter(data_df[x_col], data_df[y_col], alpha=0.6)
-        plt.xlabel(x_col)
-        plt.ylabel(y_col)
-        # Set bounded limits
-        x_min, x_max = data_df[x_col].min(), data_df[y_col].max()
-        y_min, y_max = data_df[y_col].min(), data_df[y_col].max()
-        x_margin = (x_max - x_min) * 0.05
-        y_margin = (y_max - y_min) * 0.05
-        plt.xlim(x_min - x_margin, x_max + x_margin)
-        plt.ylim(y_min - y_margin, y_max + y_margin)
-    elif plot_type == "hist" or (plot_type == "auto" and len(data_df.columns) == 1):
-        col = data_df.columns[0] if not x_col else x_col
-        data_df[col].hist(bins=30, alpha=0.7)
-        plt.xlabel(col)
-        plt.ylabel("Frequency")
-        # Set bounded x limits
-        x_min, x_max = data_df[col].min(), data_df[col].max()
-        x_margin = (x_max - x_min) * 0.05
-        plt.xlim(x_min - x_margin, x_max + x_margin)
-    
-    plt.title(title)
-    plt.grid(True, alpha=0.3)
-    
-    return title.lower().replace(" ", "_").replace(":", "")
-
-# The user's code will run inside this 'with' block with read-write access
-with duckdb.connect(database=str(DB_PATH), read_only=False) as conn:
-"""
-
-
-def execute_python(code: str) -> str:
+def create_analysis_view(view_name: str, sql_query: str, rationale: str):
     """
-    Executes a string of Python code in a sandboxed environment with a pre-configured
-    database connection (`conn`) and helper functions (`save_plot`).
-
-    Args:
-        code: The string of Python code to execute.
-
-    Returns:
-        A string containing the captured STDOUT and STDERR from the execution.
+    Creates a permanent view for analysis. It opens a temporary write-enabled
+    connection to do so, avoiding holding a lock.
     """
-
-    # Always use the standard preamble for now (simplified approach)
-    indented_code = "    " + code.replace("\n", "\n    ")
-    full_script = f"{_PYTHON_TOOL_PREAMBLE}\n{indented_code}"
-
-    # Use the run-specific directory for sandboxing
-    run_dir = get_run_dir()
-    script_path = run_dir / "temp_agent_script.py"
-
-    with open(script_path, "w") as f:
-        f.write(full_script)
-
     try:
-        # Execute the script in a new process for isolation
-        result = subprocess.run(
-            ["python", str(script_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # This will raise CalledProcessError if the script fails (exit code != 0)
-            timeout=120,  # Add a timeout to prevent runaway processes
-            cwd=str(run_dir),  # Set the working directory to the run directory
-        )
-        output = f"STDOUT:\n{result.stdout}"
-        if result.stderr:
-            output += f"\nSTDERR:\n{result.stderr}"
-        if not result.stdout and not result.stderr:
-            output += "\nNo output produced by code."
-        return output
+        with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
+            # Check if view exists to handle versioning
+            existing_views = [
+                v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()
+            ]
 
-    except subprocess.CalledProcessError as e:
-        # This block catches script failures (e.g., Python exceptions)
-        return f"EXECUTION FAILED:\nSTDOUT:\n{e.stdout}\nSTDERR:\n{e.stderr}"
-    except subprocess.TimeoutExpired:
-        return "EXECUTION FAILED: Code execution timed out after 120 seconds."
-    finally:
-        # Clean up the temporary script
-        if script_path.exists():
-            script_path.unlink()
+            actual_name = view_name
+            version = 2
+            while actual_name in existing_views:
+                actual_name = f"{view_name}_v{version}"
+                version += 1
+
+            if actual_name != view_name:
+                logger.info(
+                    "View '%s' already exists. Creating '%s' instead.",
+                    view_name,
+                    actual_name,
+                )
+
+            # Create the view
+            full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
+            write_conn.execute(full_sql)
+
+            # ... (rest of the metadata tracking is the same)
+
+            print(f"VIEW_CREATED:{actual_name}")
+            return f"Successfully created view: {actual_name}"
+    except Exception as e:
+        logger.error(f"Failed to create view '{view_name}': {e}")
+        return f"ERROR: Could not create view '{view_name}'. Reason: {e}"
 
 
 def cleanup_analysis_views(run_dir: Path):
     """Cleans up any database views created during a run."""
     views_file = run_dir / "generated_views.json"
     if not views_file.exists():
-        print("No views to clean up.")
+        logger.info("No views file found. Nothing to clean up.")
         return
 
     try:
@@ -3334,24 +5281,24 @@ def cleanup_analysis_views(run_dir: Path):
         views_to_drop = [view["name"] for view in views_data["views"]]
 
         if not views_to_drop:
-            print("No views to clean up.")
+            logger.info("No views to clean up.")
             return
 
         with duckdb.connect(database=DB_PATH, read_only=False) as conn:
             for view_name in views_to_drop:
                 try:
                     conn.execute(f"DROP VIEW IF EXISTS {view_name};")
-                    print(f"Successfully dropped view: {view_name}")
+                    logger.info("Successfully dropped view: %s", view_name)
                 except Exception as e:
-                    print(f"Warning: Could not drop view {view_name}: {e}")
+                    logger.warning("Could not drop view %s: %s", view_name, e)
         # Optionally remove the tracking file after cleanup
         # views_file.unlink()
     except Exception as e:
-        print(f"Error during view cleanup: {e}")
+        logger.error("Error during view cleanup: %s", e)
 
 
 def get_add_insight_tool(session_state):
-    """Returns a function that can be used as an AutoGen tool to add insights to the session state."""
+    """Returns a function that can be used as an AutoGen tool to add insights."""
 
     def add_insight_to_report(
         title: str,
@@ -3375,19 +5322,31 @@ def get_add_insight_tool(session_state):
         Returns:
             Confirmation message
         """
-        from src.schemas.models import Insight
+        try:
+            insight = Insight(
+                title=title,
+                finding=finding,
+                source_representation=source_representation,
+                supporting_code=supporting_code,
+                plot_path=plot_path,
+                plot_interpretation=plot_interpretation,
+            )
 
-        insight = Insight(
-            title=title,
-            finding=finding,
-            source_representation=source_representation,
-            supporting_code=supporting_code,
-            plot_path=plot_path,
-            plot_interpretation=plot_interpretation,
-        )
-
-        session_state.add_insight(insight)
-        return f"Successfully added insight: '{title}' to the report."
+            session_state.add_insight(insight)
+            logger.info(f"Insight '{insight.title}' added.")
+            return f"Successfully added insight: '{title}' to the report."
+        except BadRequestError as e:
+            if "context_length_exceeded" in str(e):
+                error_msg = (
+                    "ERROR: The context length was exceeded. Please:\n"
+                    "1. Break down your insight into smaller, more focused parts\n"
+                    "2. Reduce the size of any large data structures or strings\n"
+                    "3. Consider summarizing long findings\n"
+                    "4. Remove any unnecessary details from the insight"
+                )
+                logger.error(error_msg)
+                return error_msg
+            raise
 
     return add_insight_to_report
 
@@ -3397,40 +5356,63 @@ def get_finalize_hypotheses_tool(session_state):
 
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
-        Finalizes the list of vetted hypotheses.
-
-        Args:
-            hypotheses_data: List of dictionaries containing hypothesis information
-            Each dict should have: id, description, strategic_critique, feasibility_critique
-
-        Returns:
-            Confirmation message
+        Finalizes the list of vetted hypotheses after validation.
         """
-        from src.schemas.models import Hypothesis
+        # First, validate the hypotheses
+        insight_report = session_state.get_final_insight_report()
+        is_valid, error_message = validate_hypotheses(hypotheses_data, insight_report)
 
-        hypotheses = []
-        for h_data in hypotheses_data:
-            hypothesis = Hypothesis(
-                id=h_data["id"],
-                description=h_data["description"],
-                strategic_critique=h_data["strategic_critique"],
-                feasibility_critique=h_data["feasibility_critique"],
-            )
-            hypotheses.append(hypothesis)
+        if not is_valid:
+            logger.error(f"Hypothesis validation failed: {error_message}")
+            return f"ERROR: Hypothesis validation failed. {error_message}"
 
-        session_state.finalize_hypotheses(hypotheses)
-        return f"Successfully finalized {len(hypotheses)} hypotheses."
+        # If valid, proceed to create models and save
+        try:
+            hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+            session_state.finalize_hypotheses(hyp_models)
+            logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
+            return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
+        except Exception as e:
+            logger.error(f"Failed to save hypotheses after validation: {e}")
+            return f"ERROR: Failed to save hypotheses after validation. Reason: {e}"
 
     return finalize_hypotheses
 
 
+def validate_hypotheses(
+    hypotheses_data: List[Dict], insight_report: str
+) -> (bool, str):
+    """
+    Validates a list of hypothesis data against the insight report and internal consistency.
+    """
+    insight_titles = {
+        line.split(":", 1)[1].strip()
+        for line in insight_report.split("\n")
+        if line.startswith("Insight")
+    }
+    hypothesis_ids = set()
+
+    for h_data in hypotheses_data:
+        h_id = h_data.get("id")
+        if h_id in hypothesis_ids:
+            return False, f"Duplicate hypothesis ID found: {h_id}"
+        hypothesis_ids.add(h_id)
+
+        if not h_data.get("rationale"):
+            return False, f"Hypothesis {h_id} has an empty rationale."
+
+        source_insight = h_data.get("source_insight")
+        if source_insight and source_insight not in insight_titles:
+            return (
+                False,
+                f"Hypothesis {h_id} references a non-existent insight: '{source_insight}'",
+            )
+    return True, "All hypotheses are valid."
+
+
 def vision_tool(image_path: str, prompt: str) -> str:
-    """
-    Analyzes an image file using OpenAI's GPT-4o vision model.
-    This is a standalone wrapper around the SessionState vision_tool method.
-    """
+    """Analyzes an image file using OpenAI's GPT-4o vision model."""
     import base64
-    import os
     from pathlib import Path
 
     from openai import OpenAI
@@ -3440,8 +5422,6 @@ def vision_tool(image_path: str, prompt: str) -> str:
         full_path = Path(image_path)
         if not full_path.exists():
             # Try relative to run directory if available
-            from src.utils.run_utils import get_run_dir
-
             run_dir = get_run_dir()
             full_path = run_dir / image_path
 
@@ -3455,36 +5435,81 @@ def vision_tool(image_path: str, prompt: str) -> str:
         with open(full_path, "rb") as image_file:
             base64_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                },
                             },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=1000,
-        )
-        return response.choices[0].message.content
+                        ],
+                    }
+                ],
+                max_tokens=1000,
+            )
+            return response.choices[0].message.content
+        except BadRequestError as e:
+            if "context_length_exceeded" in str(e):
+                error_msg = (
+                    "ERROR: The context length was exceeded. Please:\n"
+                    "1. Make your prompt more concise\n"
+                    "2. Use a smaller image or reduce its resolution\n"
+                    "3. Break down your analysis into smaller parts\n"
+                    "4. Remove any unnecessary details from the prompt"
+                )
+                logger.error(error_msg)
+                return error_msg
+            raise
     except ImportError:
         return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
     except Exception as e:
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+
+def execute_python(code: str, timeout: int = 60) -> str:
+    """
+    Executes a string of Python code in a sandboxed subprocess.
+
+    Args:
+        code: The Python code to execute.
+        timeout: The timeout in seconds for the subprocess.
+
+    Returns:
+        The stdout of the executed code, or an error message if it fails.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,  # This will raise CalledProcessError for non-zero exit codes
+        )
+        return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        logger.error(f"Code execution timed out after {timeout} seconds.")
+        return f"ERROR: Code execution timed out after {timeout} seconds."
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Code execution failed with exit code {e.returncode}.")
+        logger.error(f"STDOUT: {e.stdout.strip()}")
+        logger.error(f"STDERR: {e.stderr.strip()}")
+        return f"ERROR: Code execution failed.\n---STDERR---\n{e.stderr.strip()}"
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during code execution: {e}")
+        return f"ERROR: An unexpected error occurred: {e}"
 ```
 
 ## 📊 Summary
 
-- **Total files processed:** 27
+- **Total files processed:** 34
 - **Directory:** `src`
-- **Generated:** 2025-06-12 20:28:44
+- **Generated:** 2025-06-14 01:16:36
 
 ---
 
