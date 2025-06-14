@@ -2,13 +2,13 @@
 import json
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import duckdb
 import matplotlib.pyplot as plt
-import subprocess
-import sys
 from openai import BadRequestError
 
 from src.config.settings import DB_PATH

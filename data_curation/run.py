@@ -61,7 +61,7 @@ try:
                     print(f"  Executing statement {statement_num} from {sql_file}...", end="")
                     sys.stdout.flush()
                     con.execute(statement)
-                    print(f" ✅")
+                    print(" ✅")
                     sys.stdout.flush()
 
             print(f"✅ Successfully executed all statements in {sql_file}")

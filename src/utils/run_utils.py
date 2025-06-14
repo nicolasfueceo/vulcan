@@ -131,7 +131,7 @@ def config_list_from_json(file_path: str) -> List[Dict]:
         return []
 
 
-def restart_pipeline(config: Dict[str, Any] = None) -> None:
+def restart_pipeline(config: Optional[Dict[str, Any]] = None) -> None:
     """
     Restarts the pipeline with an optional configuration update.
     This function should be called by the ReflectionAgent when deciding to continue.

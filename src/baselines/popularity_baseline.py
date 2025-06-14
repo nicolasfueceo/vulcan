@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from src.baselines.ranking_utils import get_top_n_recommendations, calculate_ndcg
+from src.baselines.ranking_utils import calculate_ndcg
 
 def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
     """

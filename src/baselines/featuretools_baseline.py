@@ -1,6 +1,5 @@
 import featuretools as ft
 import pandas as pd
-from loguru import logger
 
 
 def run_featuretools_baseline(

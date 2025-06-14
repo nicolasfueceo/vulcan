@@ -2,18 +2,14 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 import pytest
-from loguru import logger
 
 from src.agents.strategy_team.optimization_agent_v2 import (
     VULCANOptimizer,
-    run_optimization,
 )
-from src.data.cv_data_manager import CVDataManager
 from src.utils.run_utils import init_run, terminate_pipeline
 
 

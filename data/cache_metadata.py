@@ -46,7 +46,7 @@ def extract_table_samples(n_samples: int = 5) -> Dict[str, pd.DataFrame]:
             # For reviews, sample by user to get complete user histories
             if table == "curated_reviews":
                 # Get random users
-                user_sample = conn.execute(
+                conn.execute(
                     """
                     SELECT DISTINCT user_id 
                     FROM curated_reviews 
@@ -68,7 +68,7 @@ def extract_table_samples(n_samples: int = 5) -> Dict[str, pd.DataFrame]:
             # For books, sample by author to get complete author catalogs
             elif table == "curated_books":
                 # Get random authors
-                author_sample = conn.execute(
+                conn.execute(
                     """
                     SELECT DISTINCT author 
                     FROM curated_books 

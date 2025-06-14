@@ -45,7 +45,6 @@ def calculate_ndcg(
     ground_truth: {user_id: [item1, item2, ...]}
     batch_size: Number of users to process at once (to avoid OOM)
     """
-    import numpy as np
     user_ids = list(recommendations.keys())
     ndcgs = []
     for i in range(0, len(user_ids), batch_size):

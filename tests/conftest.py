@@ -1,8 +1,5 @@
 """Pytest configuration and fixtures for VULCAN tests."""
-import os
-import shutil
 from pathlib import Path
-from typing import Generator, Optional
 
 import duckdb
 import pandas as pd
@@ -40,7 +37,7 @@ def create_test_database(test_db_path: Path) -> Path:
         "age": [25, 30, 35, 40, 45, 22, 28, 33, 38, 42],
     })
     
-    items = pd.DataFrame({
+    pd.DataFrame({
         "item_id": [f"item{i}" for i in range(1, 21)],
         "popularity": range(1, 21),
     })
@@ -57,7 +54,7 @@ def create_test_database(test_db_path: Path) -> Path:
                 "timestamp": 1000 + user_idx * 10 + item_idx,
             })
     
-    interactions_df = pd.DataFrame(interactions)
+    pd.DataFrame(interactions)
     
     # Create database and load data
     conn = duckdb.connect(str(test_db_path))
@@ -72,7 +69,7 @@ def create_test_database(test_db_path: Path) -> Path:
         {"fold_idx": 0, "user_id": f"user{i+1}", "split": "train" if i < 8 else "test"}
         for i in range(10)
     ]
-    cv_splits_df = pd.DataFrame(cv_splits)
+    pd.DataFrame(cv_splits)
     conn.execute("CREATE TABLE cv_splits AS SELECT * FROM cv_splits_df")
     
     conn.close()

@@ -1,6 +1,5 @@
 # /Users/nicolasdhnr/Documents/VULCAN/debug_user_counts.py
 import duckdb
-import pandas as pd
 from pathlib import Path
 
 print("Analyzing user rating distribution in goodreads_curated.duckdb...")

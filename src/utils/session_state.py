@@ -1,10 +1,9 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import duckdb
 from loguru import logger
-
 
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
@@ -70,9 +69,7 @@ class SessionState:
 
                 # Load run counters
                 self.ideation_run_count = data.get("ideation_run_count", 0)
-                self.feature_realization_run_count = data.get(
-                    "feature_realization_run_count", 0
-                )
+                self.feature_realization_run_count = data.get("feature_realization_run_count", 0)
                 self.reflection_run_count = data.get("reflection_run_count", 0)
 
                 logger.info(
@@ -246,7 +243,7 @@ class SessionState:
         self,
         image_path: str,
         prompt: str,
-    ) -> str:
+    ) -> Union[str, None]:
         """
         Analyzes an image file using OpenAI's GPT-4o vision model.
         This tool automatically resolves the path relative to the run's output directory.
@@ -280,9 +277,7 @@ class SessionState:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                },
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
                             },
                         ],
                     }

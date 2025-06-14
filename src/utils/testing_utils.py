@@ -17,7 +17,7 @@ def assert_json_schema(instance: dict, schema_path: str) -> None:
 
 def load_test_data(
     n_reviews: int, n_items: int, n_users: int
-) -> (pd.DataFrame, pd.DataFrame):
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Creates a synthetic toy dataset with random ratings, random words."""
     # Create reviews data
     review_data = {
