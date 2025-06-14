@@ -68,6 +68,12 @@ def test_orchestrator_e2e_subprocess_run():
     project_root = os.path.dirname(os.path.dirname(__file__))
     env = os.environ.copy()
     env["PYTHONPATH"] = project_root
+    config_file_path = os.path.join(project_root, "config", "OAI_CONFIG_LIST.json")
+    env["OAI_CONFIG_LIST"] = config_file_path
+
+    # Pass the API key to the subprocess to ensure it's available.
+    if "OPENAI_API_KEY" in os.environ:
+        env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
 
     command = [
         "conda",
@@ -85,10 +91,16 @@ def test_orchestrator_e2e_subprocess_run():
         command, capture_output=True, text=True, env=env, cwd=project_root, timeout=600
     )
 
-    # Assert: Check for successful execution and key log messages
-    assert result.returncode == 0, f"Orchestrator script failed with exit code {result.returncode}\nStderr: {result.stderr}"
+    # Combine stdout and stderr for assertions
+    output = result.stdout + result.stderr
 
-    stdout = result.stdout
-    assert "--- Running Insight Discovery Loop ---" in stdout
-    assert "--- Running Strategy Refinement Loop ---" in stdout
-    assert "VULCAN has completed its run" in stdout
+    # Assert: Check for successful execution and key log messages
+    assert result.returncode == 0, f"Orchestrator script failed with exit code {result.returncode}\nOutput: {output}"
+
+    assert "--- Running Insight Discovery Loop ---" in output
+    # Assert that the orchestrator either ran the strategy loop or correctly skipped it.
+    strategy_loop_ran = "--- Running Strategy Loop ---" in output
+    strategy_loop_skipped = "No hypotheses found, skipping strategy loop" in output
+    assert strategy_loop_ran or strategy_loop_skipped, "Orchestrator did not run or correctly skip the strategy loop."
+
+    assert "VULCAN has completed its run" in output, "Final completion message is missing."

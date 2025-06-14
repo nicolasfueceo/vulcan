@@ -228,9 +228,19 @@ class SessionState:
             report += "\n"
         return report
 
-    def get_final_hypotheses(self) -> Optional[List[Hypothesis]]:
+    def get_final_hypotheses(self) -> List[Hypothesis]:
         """Returns the final list of vetted hypotheses."""
-        return self.hypotheses if self.hypotheses else None
+        return self.hypotheses
+
+    def get_all_table_names(self) -> List[str]:
+        """Returns a list of all table names in the database."""
+        try:
+            # DuckDB's way to list all tables
+            tables_df = self.db_connection.execute("SHOW TABLES;").fetchdf()
+            return tables_df["name"].tolist()
+        except Exception as e:
+            logger.error(f"Failed to get table names from database: {e}")
+            return []
 
     def vision_tool(
         self,

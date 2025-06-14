@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -133,6 +133,7 @@ def get_add_insight_tool(session_state):
         supporting_code: str = None,
         plot_path: str = None,
         plot_interpretation: str = None,
+        quality_score: Optional[float] = None,
     ) -> str:
         """
         Adds a structured insight to the session report.
@@ -144,7 +145,7 @@ def get_add_insight_tool(session_state):
             supporting_code: The exact SQL or Python code used to generate the finding
             plot_path: The path to the plot that visualizes the finding
             plot_interpretation: LLM-generated analysis of what the plot shows
-
+            quality_score: The quality score of the insight
         Returns:
             Confirmation message
         """
@@ -156,6 +157,7 @@ def get_add_insight_tool(session_state):
                 supporting_code=supporting_code,
                 plot_path=plot_path,
                 plot_interpretation=plot_interpretation,
+                quality_score=quality_score,
             )
 
             session_state.add_insight(insight)

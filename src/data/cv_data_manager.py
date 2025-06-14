@@ -392,7 +392,10 @@ class CVDataManager:
             test_users = sample_users(test_users, sample_frac)
 
         # Get column list for query
-        column_list = ", ".join(columns) if columns else "*"
+        if columns:
+            column_list = ", ".join([f"r.{c}" for c in columns])
+        else:
+            column_list = "r.*"
 
         def process_chunk(
             chunk: List[str], chunk_idx: int, purpose: str
@@ -497,6 +500,9 @@ class CVDataManager:
         test_df = (
             process_user_list(test_users, "test") if test_users else pd.DataFrame()
         )
+
+        logger.critical(f"TRAIN DF COLUMNS before return: {train_df.columns}")
+        logger.critical(f"TRAIN DF HEAD before return:\n{train_df.head()}")
 
         # Return based on split_type
         if split_type == "train_val":
@@ -626,6 +632,7 @@ class CVDataManager:
             logger.error(f"Error parsing CV summary file: {e}")
             return {
                 "status": "error",
+
                 "message": f"Invalid CV summary file: {e}",
                 "n_folds": 0,
                 "folds": [],

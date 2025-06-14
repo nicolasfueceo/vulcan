@@ -29,6 +29,11 @@ jsonschema>=4.19.0
 loguru>=0.7.0
 autogen[gemini]>=0.2.0
 
+# Recommender System Baselines
+featuretools>=1.29.0
+scikit-surprise>=1.1.3
+deepctr-torch>=0.3.0
+
 # Additional dependencies
 tensorboard>=2.14.0
 

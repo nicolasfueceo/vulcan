@@ -47,7 +47,7 @@ def load_prompt(template_name: str, **kwargs) -> str:
     """
     try:
         # Refresh database schema to ensure it's current
-        schema = _refresh_database_schema()
+        _refresh_database_schema()
 
         # Load and render the template
         template = _jinja_env.get_template(template_name)

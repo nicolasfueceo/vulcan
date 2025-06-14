@@ -23,6 +23,17 @@ class Insight(BaseModel):
         None,
         description="A detailed, LLM-generated analysis of what the plot shows and its implications.",
     )
+    quality_score: Optional[float] = Field(
+        None, description="A score from 1-10 indicating the quality of the insight."
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadata about the insight, like the round it was added.",
+    )
+    tables_used: List[str] = Field(
+        default_factory=list,
+        description="List of table names used to generate the insight.",
+    )
 
 
 class Hypothesis(BaseModel):
@@ -57,8 +68,8 @@ class Hypothesis(BaseModel):
     )
 
     @validator("rationale")
-    def rationale_must_be_non_empty(cls, v):  # noqa: N805
-        if not v or not v.strip():
+    def rationale_must_be_non_empty(cls, v):
+        if not v:
             raise ValueError("Rationale cannot be empty.")
         return v
 
@@ -106,7 +117,7 @@ class CandidateFeature(BaseModel):
             except SyntaxError as e:
                 raise ValueError(
                     f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
-                )
+                ) from e
         # Add more validation for 'llm' or 'composition' types if needed
         return True
 
@@ -139,7 +150,7 @@ class RealizedFeature(BaseModel):
         except SyntaxError as e:
             raise ValueError(
                 f"Invalid Python syntax in generated code for '{self.name}': {e}"
-            )
+            ) from e
 
         # Find the function definition in the AST
         func_defs = [
