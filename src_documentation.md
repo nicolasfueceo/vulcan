@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-14 01:16:36
+Generated on: 2025-06-14 18:10:43
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -8,9 +8,22 @@ This document contains the complete source code structure and contents of the `s
 
 ```
 ├── .gitignore
+├── .ruff_cache/
+│   ├── .gitignore
+│   ├── 0.11.13/
+│   │   ├── 1231301740235175813
+│   │   ├── 12404207031273964348
+│   │   ├── 13043826984468259098
+│   │   ├── 14303290313017948516
+│   │   ├── 17033856446843569390
+│   │   ├── 3096963027186623868
+│   │   ├── 3495669085465520408
+│   │   ├── 450221922813433944
+│   │   ├── 5320217578922298852
+│   │   ├── 8475453963848076840
+│   │   └── 901234538733284022
+│   └── CACHEDIR.TAG
 ├── README.md
-├── coding_utils/
-│   └── safe_delete.py
 ├── config/
 │   └── OAI_CONFIG_LIST.json
 ├── data/
@@ -45,15 +58,21 @@ This document contains the complete source code structure and contents of the `s
 │       └── verify_curated_dates.py
 ├── debug_user_counts.py
 ├── docs/
-│   ├── code_mindmap.mermaid
-│   └── context.md
+│   └── code_mindmap.mermaid
 ├── generate_src_docs.py
+├── report/
+│   ├── .DS_Store
+│   └── plan/
+│       ├── context.md
+│       ├── intro.md
+│       └── overall.md
 ├── requirements.txt
 ├── scripts/
 │   ├── __pycache__/
 │   ├── check_lightfm_openmp.py
 │   └── inspect_cv_splits.py
 ├── src/
+│   ├── __pycache__/
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   ├── __pycache__/
@@ -68,9 +87,17 @@ This document contains the complete source code structure and contents of the `s
 │   │       ├── optimization_agent_v2.py
 │   │       ├── reflection_agent.py
 │   │       └── strategy_team_agents.py
+│   ├── baselines/
+│   │   ├── __pycache__/
+│   │   ├── deepfm_baseline.py
+│   │   ├── featuretools_baseline.py
+│   │   ├── popularity_baseline.py
+│   │   ├── ranking_utils.py
+│   │   ├── run_all_baselines.py
+│   │   └── svd_baseline.py
 │   ├── config/
 │   │   ├── __pycache__/
-│   │   ├── logging.py
+│   │   ├── log_config.py
 │   │   ├── settings.py
 │   │   └── tensorboard.py
 │   ├── core/
@@ -134,6 +161,7 @@ This document contains the complete source code structure and contents of the `s
 │       ├── session_state.py
 │       ├── testing_utils.py
 │       └── tools.py
+├── src.zip
 ├── src_documentation.md
 └── tests/
     ├── __init__.py
@@ -141,7 +169,8 @@ This document contains the complete source code structure and contents of the `s
     ├── conftest.py
     ├── debug_db_connection.py
     ├── test_optimization_agent.py
-    └── test_optimization_end_to_end.py
+    ├── test_optimization_end_to_end.py
+    └── test_orchestrator_e2e.py
 ```
 
 ## 📄 File Contents (src directory only)
@@ -262,22 +291,22 @@ class EvaluationAgent:
 
 ### `agents/strategy_team/feature_realization_agent.py`
 
-**File size:** 10,748 bytes
+**File size:** 12,270 bytes
 
 ```python
 # src/agents/strategy_team/feature_realization_agent.py
 import json
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import autogen
 from loguru import logger
 
 from src.schemas.models import CandidateFeature, RealizedFeature
-from src.utils.decorators import agent_run_decorator
 from src.utils.feature_registry import feature_registry
 from src.utils.prompt_utils import load_prompt
 from src.utils.session_state import SessionState
 from src.utils.tools import execute_python
+from src.utils.decorators import agent_run_decorator
 
 
 class FeatureRealizationAgent:
@@ -301,60 +330,97 @@ class FeatureRealizationAgent:
     @agent_run_decorator("FeatureRealizationAgent")
     def run(self) -> None:
         """
-        Main method to realize candidate features from the session state.
+        Main method to realize candidate features from the session state,
+        with a self-correction loop for validation failures.
         """
         logger.info("Starting feature realization...")
-        candidate_features = self.session_state.get_state("candidate_features", [])
-        if not candidate_features:
+        candidate_features_data = self.session_state.get_candidate_features()
+        if not candidate_features_data:
             logger.warning("No candidate features found to realize.")
             self.session_state.set_state("realized_features", [])
             return
 
+        candidate_features = [CandidateFeature(**f) for f in candidate_features_data]
         realized_features: List[RealizedFeature] = []
+        MAX_RETRIES = 2  # Allow up to 2 correction attempts per feature
+
+        # Create a user proxy agent for the chat
+        user_proxy = autogen.UserProxyAgent(
+            name="TempProxy",
+            human_input_mode="NEVER",
+            code_execution_config=False,  # We execute code in our own sandbox
+        )
 
         for candidate in candidate_features:
             logger.info(f"Attempting to realize feature: {candidate.name}")
-            realized_feature = None
-            try:
-                if candidate.type == "code":
-                    realized_feature = self._realize_code_feature(candidate)
-                elif candidate.type == "llm":
-                    realized_feature = self._realize_llm_feature(candidate)
-                elif candidate.type == "composition":
-                    realized_feature = self._realize_composition_feature(candidate)
+            
+            is_realized = False
+            last_error = ""
+            code_str = ""
+
+            for attempt in range(MAX_RETRIES + 1): # +1 to include initial attempt
+                if attempt == 0:
+                    # First attempt: Generate code from the original spec
+                    message = load_prompt("agents/feature_realization.j2", **candidate.model_dump())
                 else:
-                    logger.warning(
-                        f"Unknown feature type '{candidate.type}' for candidate {candidate.name}. Skipping."
-                    )
-                    continue
+                    # Retry attempt: Provide the error context and ask for a fix
+                    logger.warning(f"Retrying realization for '{candidate.name}' (Attempt {attempt}/{MAX_RETRIES}). Error: {last_error}")
+                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:
+---
+ERROR:
+{last_error}
+---
+ORIGINAL CODE:
+```python
+{code_str}
+```
+Please analyze the error and the original spec, then provide a corrected version of the full Python function.
+The function MUST be complete, including all necessary imports and the function signature.
 
-                if realized_feature:
-                    logger.info(f"Validating realized feature: {realized_feature.name}")
-                    is_valid = self._validate_feature(realized_feature)
-                    realized_feature.passed_test = is_valid
-                    if is_valid:
-                        logger.success(
-                            f"Successfully validated and realized feature: {realized_feature.name}"
-                        )
-                        self._register_feature(realized_feature)
-                        realized_features.append(realized_feature)
-                    else:
-                        logger.error(
-                            f"Validation failed for feature: {realized_feature.name}"
-                        )
-                else:
-                    logger.error(f"Realization failed for candidate: {candidate.name}")
+Original Spec: {candidate.spec}
+"""
+                # Initiate a chat to generate/fix the code
+                user_proxy.initiate_chat(self.llm_agent, message=message, max_turns=1, silent=True)
+                last_message = user_proxy.last_message(self.llm_agent)
+                
+                if not last_message or "content" not in last_message:
+                    last_error = "LLM response was empty or invalid."
+                    code_str = ""
+                    continue # Go to the next retry attempt
 
-            except Exception as e:  # pylint: disable=broad-except # Catching a broad exception is intentional here.
-                logger.error(
-                    f"An unexpected error occurred while realizing feature {candidate.name}: {e}",
-                    exc_info=True,
-                )
+                response_msg = last_message["content"]
 
-        self.session_state.set_state("realized_features", realized_features)
-        logger.info(
-            f"Finished feature realization. Successfully realized and validated {len(realized_features)} features."
-        )
+                try:
+                    code_str = response_msg.split("```python")[1].split("```")[0].strip()
+                except IndexError:
+                    code_str = ""
+                    last_error = "LLM response did not contain a valid Python code block."
+                    continue  # Go to the next retry attempt
+
+                # --- Validation ---
+                passed, last_error = self._validate_feature(candidate.name, code_str, candidate.params)
+
+                if passed:
+                    logger.success(f"Successfully validated feature '{candidate.name}' on attempt {attempt + 1}.")
+                    is_realized = True
+                    break  # Exit the retry loop on success
+
+            # After the loop, create the final RealizedFeature object
+            realized = RealizedFeature(
+                name=candidate.name,
+                code_str=code_str,
+                params=candidate.params,
+                passed_test=is_realized,
+                type=candidate.type,
+                source_candidate=candidate,
+            )
+            realized_features.append(realized)
+            if is_realized:
+                self._register_feature(realized)
+
+        self.session_state.set_state("realized_features", [r.model_dump() for r in realized_features])
+        successful_count = len([r for r in realized_features if r.passed_test])
+        logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features.")
 
     def _register_feature(self, feature: RealizedFeature):
         """Registers a validated feature in the feature registry."""
@@ -493,36 +559,35 @@ def {candidate.name}(df: pd.DataFrame, {", ".join(all_params.keys())}):
             source_candidate=candidate,
         )
 
-    def _validate_feature(self, feature: RealizedFeature) -> bool:
-        """Validates the feature's code by executing it in a sandbox."""
-        logger.info(f"Validating feature: {feature.name}")
+    def _validate_feature(self, name: str, code_str: str, params: Dict) -> Tuple[bool, str]:
+        """
+        Validates the feature's code by executing it in a sandbox.
+        Returns a tuple of (bool, str) for (pass/fail, error_message).
+        """
+        logger.info(f"Validating feature: {name}")
         try:
-            # A robust solution would involve a secure sandbox with data serialization.
-            # For now, we just check for syntax errors and basic callability.
+            # The new prompt template ensures the generated function can handle an empty dataframe.
             param_args = ", ".join(
-                [f"{key}={repr(value)}" for key, value in feature.params.items()]
+                [f"{key}={repr(value)}" for key, value in params.items()]
             )
             validation_code = (
-                feature.code_str
-                + "\n# Validation Call\n"
-                + f"print({feature.name}(pd.DataFrame(), {param_args}))"
+                code_str
+                + "\nimport pandas as pd\nimport numpy as np\n# Validation Call\n"
+                + f"print({name}(pd.DataFrame(), {param_args}))"
             )
 
             output = execute_python(validation_code)
 
             if "ERROR:" in output:
-                logger.warning(
-                    f"Validation failed for {feature.name}. Error:\n{output}"
-                )
-                return False
+                logger.warning(f"Validation failed for {name}. Error:\n{output}")
+                return False, output
 
-            logger.success(f"Validation successful for {feature.name}")
-            return True
-        except Exception as e:  # pylint: disable=broad-except # Catching a broad exception is intentional here.
-            logger.error(
-                f"Exception during validation for {feature.name}: {e}", exc_info=True
-            )
-            return False
+            logger.success(f"Validation successful for {name}")
+            return True, ""
+        except Exception as e:  # pylint: disable=broad-except
+            error_message = f"Exception during validation for {name}: {e}"
+            logger.error(error_message, exc_info=True)
+            return False, str(e)
 ```
 
 ### `agents/strategy_team/hypothesis_agents.py`
@@ -1389,13 +1454,514 @@ def get_strategy_team_agents(
     return agents
 ```
 
-### `config/logging.py`
+### `baselines/deepfm_baseline.py`
 
-**File size:** 1,288 bytes
+**File size:** 4,140 bytes
 
 ```python
-import logging
+import itertools
+
+import pandas as pd
+import torch
+from deepctr_torch.inputs import SparseFeat, get_feature_names
+from deepctr_torch.models import DeepFM
+from loguru import logger
+from sklearn.preprocessing import LabelEncoder
+
+from src.baselines.ranking_utils import calculate_ndcg, get_top_n_recommendations
+
+
+def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+    """
+    Runs the DeepFM baseline for recommendation.
+
+    This function preprocesses the data, defines feature columns for DeepCTR, and then
+    trains and evaluates the DeepFM model.
+
+    Args:
+        train_df: DataFrame for training. Expected columns: ['user_id', 'book_id', 'rating'].
+        test_df: DataFrame for testing. Expected columns: ['user_id', 'book_id', 'rating'].
+
+    Returns:
+        A dictionary containing the final evaluation metrics (MSE and NDCG@10).
+    """
+    logger.info("Starting DeepFM baseline...")
+
+    # 1. Data Preprocessing
+    logger.info("Preprocessing data for DeepFM...")
+    data = pd.concat([train_df, test_df], ignore_index=True)
+    sparse_features = ["user_id", "book_id"]
+    target = "rating"
+
+    for feat in sparse_features:
+        lbe = LabelEncoder()
+        data[feat] = lbe.fit_transform(data[feat])
+
+    # 2. Define Feature Columns
+    logger.info("Defining feature columns for DeepCTR...")
+    feat_voc_size = {feat: data[feat].nunique() for feat in sparse_features}
+    fixlen_feature_columns = [
+        SparseFeat(feat, vocabulary_size=feat_voc_size[feat], embedding_dim=4)
+        for feat in sparse_features
+    ]
+    dnn_feature_columns = fixlen_feature_columns
+    linear_feature_columns = fixlen_feature_columns
+    feature_names = get_feature_names(linear_feature_columns + dnn_feature_columns)
+
+    # 3. Split data for training and testing
+    train = data.iloc[: len(train_df)]
+    test = data.iloc[len(train_df) :]
+    train_model_input = {name: train[name] for name in feature_names}
+    test_model_input = {name: test[name] for name in feature_names}
+    train_labels = train[target].values
+    test_labels = test[target].values
+
+    # 4. Instantiate and Train Model
+    logger.info("Instantiating and training DeepFM model...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = DeepFM(
+        linear_feature_columns=linear_feature_columns,
+        dnn_feature_columns=dnn_feature_columns,
+        task="regression",
+        device=device,
+    )
+    model.compile("adam", "mse", metrics=["mse"])
+    model.fit(
+        train_model_input,
+        train_labels,
+        batch_size=256,
+        epochs=10,
+        verbose=1,
+        validation_data=(test_model_input, test_labels),
+    )
+
+    # 5. Evaluate for Ranking (NDCG@10)
+    logger.info("Evaluating model for ranking (NDCG@10)...")
+    all_users = data["user_id"].unique()
+    all_items = data["book_id"].unique()
+    all_pairs = pd.DataFrame(
+        list(itertools.product(all_users, all_items)), columns=["user_id", "book_id"]
+    )
+    train_pairs = train[["user_id", "book_id"]].drop_duplicates()
+    anti_test_df = pd.merge(
+        all_pairs, train_pairs, on=["user_id", "book_id"], how="left", indicator=True
+    )
+    anti_test_df = anti_test_df[anti_test_df["_merge"] == "left_only"].drop(
+        columns=["_merge"]
+    )
+    anti_test_model_input = {name: anti_test_df[name] for name in feature_names}
+    anti_test_predictions = model.predict(anti_test_model_input, batch_size=256)
+    anti_test_df["rating"] = anti_test_predictions
+    top_n = get_top_n_recommendations(anti_test_df, n=10)
+    ndcg_score = calculate_ndcg(top_n, test, k=10, batch_size=1000)
+    logger.info(f"DeepFM baseline NDCG@10: {ndcg_score:.4f}")
+
+    # 6. Evaluate for Accuracy (MSE)
+    logger.info("Evaluating model on the test set...")
+    eval_result = model.evaluate(test_model_input, test_labels, batch_size=256)
+    logger.info(f"DeepFM evaluation results: {eval_result}")
+
+    # 7. Return Metrics
+    metrics = {
+        "mse": eval_result.get("val_mse", eval_result.get("mse", -1)),
+        "ndcg@10": ndcg_score,
+    }
+    logger.success("DeepFM baseline finished successfully.")
+    return metrics
+```
+
+### `baselines/featuretools_baseline.py`
+
+**File size:** 3,363 bytes
+
+```python
+import featuretools as ft
+import pandas as pd
+from loguru import logger
+
+
+def run_featuretools_baseline(
+    train_df: pd.DataFrame, books_df: pd.DataFrame, users_df: pd.DataFrame
+) -> pd.DataFrame:
+    # Featuretools requires nanosecond precision for datetime columns.
+    # Convert all relevant columns to ensure compatibility.
+    import logging
+    logger = logging.getLogger("featuretools_baseline")
+    def clean_datetime_columns(df):
+        for col in ["date_added", "date_updated", "read_at", "started_at"]:
+            if col in df.columns and str(df[col].dtype).startswith("datetime64"):
+                if hasattr(df[col].dt, "tz") and df[col].dt.tz is not None:
+                    df[col] = df[col].dt.tz_localize(None)
+                df[col] = df[col].astype("datetime64[ns]")
+        return df
+
+    train_df = clean_datetime_columns(train_df)
+    books_df = clean_datetime_columns(books_df)
+    users_df = clean_datetime_columns(users_df)
+    """
+    Runs the Featuretools baseline to generate features for the recommender system.
+
+    This function takes the raw training dataframes, creates a Featuretools EntitySet,
+    defines the relationships between them, and then runs Deep Feature Synthesis (DFS)
+    to automatically generate a feature matrix.
+
+    Args:
+        train_df: DataFrame containing the training interactions (e.g., ratings).
+                  Expected columns: ['user_id', 'book_id', 'rating', 'rating_id'].
+        books_df: DataFrame containing book metadata.
+                  Expected columns: ['book_id', ...].
+        users_df: DataFrame containing user metadata.
+                  Expected columns: ['user_id', ...].
+
+    Returns:
+        A pandas DataFrame containing the generated feature matrix. The matrix will
+        have the same index as the input `train_df`.
+    """
+    logger.info("Starting Featuretools baseline...")
+
+    # 1. Create an EntitySet
+    logger.info("Creating EntitySet and adding dataframes...")
+    es = ft.EntitySet(id="goodreads_recsys")
+
+    es = es.add_dataframe(
+        dataframe_name="ratings",
+        dataframe=train_df,
+        index="rating_id",
+        make_index=True,
+        time_index="date_added",
+    )
+
+    es = es.add_dataframe(
+        dataframe_name="users", dataframe=users_df, index="user_id"
+    )
+
+    es = es.add_dataframe(
+        dataframe_name="books", dataframe=books_df, index="book_id"
+    )
+
+    # 2. Define Relationships
+    logger.info("Defining relationships between entities...")
+    es = es.add_relationship("users", "user_id", "ratings", "user_id")
+    es = es.add_relationship("books", "book_id", "ratings", "book_id")
+
+    # 3. Run Deep Feature Synthesis (DFS)
+    logger.info("Running Deep Feature Synthesis (DFS)...")
+    feature_matrix, feature_defs = ft.dfs(
+        entityset=es,
+        target_dataframe_name="ratings",
+        agg_primitives=["mean", "sum", "count", "std", "max", "min", "mode"],
+        trans_primitives=["month", "weekday", "time_since_previous"],
+        max_depth=2,
+        verbose=True,
+        n_jobs=-1,  # Use all available cores
+    )
+
+    logger.info(f"Featuretools generated {feature_matrix.shape[1]} features.")
+    logger.info(f"Shape of the resulting feature matrix: {feature_matrix.shape}")
+
+    # 4. Return & Save
+    logger.success("Featuretools baseline finished successfully.")
+    return feature_matrix
+```
+
+### `baselines/popularity_baseline.py`
+
+**File size:** 1,074 bytes
+
+```python
+import pandas as pd
+import numpy as np
+from src.baselines.ranking_utils import get_top_n_recommendations, calculate_ndcg
+
+def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
+    """
+    Recommend the most popular items (books) in the training set to all users in the test set.
+    Returns NDCG@10 and the list of most popular books.
+    """
+    # Compute most popular books by count of ratings in train set
+    pop_books = (
+        train_df.groupby('book_id')['rating'].count()
+        .sort_values(ascending=False)
+        .head(top_n)
+        .index.tolist()
+    )
+    # For each user in test set, recommend the same top-N popular books
+    user_ids = test_df['user_id'].unique()
+    recommendations = {user_id: pop_books for user_id in user_ids}
+
+    # Prepare ground truth for NDCG
+    ground_truth = (
+        test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+    )
+    ndcg = calculate_ndcg(recommendations, ground_truth, k=top_n)
+    return {
+        'ndcg@10': ndcg,
+        'top_n_books': pop_books
+    }
+```
+
+### `baselines/ranking_utils.py`
+
+**File size:** 2,192 bytes
+
+```python
+import numpy as np
+import pandas as pd
+
+
+def get_top_n_recommendations(
+    predictions_df: pd.DataFrame,
+    user_col: str = "user_id",
+    item_col: str = "book_id",
+    rating_col: str = "rating",
+    n: int = 10,
+) -> dict:
+    """
+    Get the top-N recommendations for each user from a predictions dataframe.
+
+    Args:
+        predictions_df (pd.DataFrame): DataFrame with user, item, and rating columns.
+        user_col (str): Name of the user ID column.
+        item_col (str): Name of the item ID column.
+        rating_col (str): Name of the rating/prediction column.
+        n (int): The number of recommendations to output for each user.
+
+    Returns:
+        A dict where keys are user IDs and values are lists of tuples:
+        [(item ID, estimated rating), ...]
+    """
+    top_n = {}
+    for user_id, group in predictions_df.groupby(user_col):
+        top_n[user_id] = list(
+            group.nlargest(n, rating_col)[[item_col, rating_col]].itertuples(
+                index=False, name=None
+            )
+        )
+    return top_n
+
+
+def calculate_ndcg(
+    recommendations: dict,
+    ground_truth: dict,
+    k: int = 10,
+    batch_size: int = 1000,
+) -> float:
+    """
+    Calculate mean NDCG@k for a set of recommendations and ground truth, processing users in batches.
+    recommendations: {user_id: [rec1, rec2, ...]}
+    ground_truth: {user_id: [item1, item2, ...]}
+    batch_size: Number of users to process at once (to avoid OOM)
+    """
+    import numpy as np
+    user_ids = list(recommendations.keys())
+    ndcgs = []
+    for i in range(0, len(user_ids), batch_size):
+        batch_users = user_ids[i:i+batch_size]
+        for user_id in batch_users:
+            recs = recommendations[user_id]
+            gt = ground_truth.get(user_id, [])
+            if not gt:
+                continue
+            ideal_dcg = sum([1.0 / np.log2(j + 2) for j in range(min(len(gt), k))])
+            dcg = 0.0
+            for j, rec in enumerate(recs[:k]):
+                if rec in gt:
+                    dcg += 1.0 / np.log2(j + 2)
+            ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0.0
+            ndcgs.append(ndcg)
+    return float(np.mean(ndcgs)) if ndcgs else 0.0
+```
+
+### `baselines/run_all_baselines.py`
+
+**File size:** 4,708 bytes
+
+```python
+import json
+from pathlib import Path
+
+from loguru import logger
+
+from src.baselines.deepfm_baseline import run_deepfm_baseline
+from src.baselines.featuretools_baseline import run_featuretools_baseline
+from src.baselines.svd_baseline import run_svd_baseline
+from src.data.cv_data_manager import CVDataManager
+
+
+def main():
+    """
+    Main function to run all baseline models and save their results.
+
+    This script orchestrates the following steps:
+    1. Initializes the CVDataManager to load the dataset.
+    2. Retrieves the data for the first cross-validation fold.
+    3. Runs three baseline models in sequence:
+        - Featuretools for automated feature engineering.
+        - SVD for classic collaborative filtering.
+        - DeepFM for a deep learning-based recommendation.
+    4. Aggregates the performance metrics (e.g., RMSE, MAE, MSE, NDCG@10) from each baseline.
+    5. Saves the aggregated results to a JSON file in the 'reports' directory.
+    """
+    logger.info("Starting the execution of all baseline models...")
+
+    # 1. Initialize DataManager and load data
+    logger.info("Initializing CVDataManager...")
+    db_path = "data/goodreads_curated.duckdb"
+    splits_dir = "data/splits"
+    data_manager = CVDataManager(db_path=db_path, splits_dir=splits_dir)
+
+    logger.info("Loading users and books metadata...")
+    conn = data_manager.db_connection
+    try:
+        users_df = conn.execute("SELECT * FROM users").fetchdf()
+        books_df = conn.execute("SELECT * FROM book_series").fetchdf()
+    finally:
+        data_manager._return_connection(conn)
+    logger.success("Metadata loaded.")
+
+    logger.info("Loading train/test data for fold 0...")
+    # Use 'full_train' to get combined training and validation data against the test set.
+    train_df, test_df = data_manager.get_fold_data(fold_idx=0, split_type="full_train")
+
+    # Dictionary to store results from all baselines
+    all_results = {}
+
+    # 2. Run Featuretools baseline
+    logger.info("--- Running Featuretools Baseline ---")
+    try:
+        featuretools_results = run_featuretools_baseline(train_df, books_df, users_df)
+        all_results["featuretools"] = {
+            "status": "success",
+            "feature_matrix_shape": list(featuretools_results.shape),
+        }
+        logger.success("Featuretools baseline completed.")
+    except Exception as e:
+        logger.error(f"Featuretools baseline failed: {e}")
+        all_results["featuretools"] = {"status": "failure", "error": str(e)}
+
+    # 3. Run SVD baseline (full dataset)
+    logger.info("--- Running SVD Baseline ---")
+    try:
+        svd_results = run_svd_baseline(train_df, test_df)
+        all_results["svd"] = {"status": "success", "metrics": svd_results}
+        logger.success(f"SVD baseline completed. Metrics: {svd_results}")
+    except Exception as e:
+        logger.error(f"SVD baseline failed: {e}")
+        all_results["svd"] = {"status": "failure", "error": str(e)}
+
+    # 5. Run Popularity baseline (to be implemented)
+    logger.info("--- Running Popularity Baseline ---")
+    try:
+        from src.baselines.popularity_baseline import run_popularity_baseline
+        popularity_results = run_popularity_baseline(train_df, test_df)
+        all_results["popularity"] = {"status": "success", "metrics": popularity_results}
+        logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
+    except Exception as e:
+        logger.error(f"Popularity baseline failed: {e}")
+        all_results["popularity"] = {"status": "failure", "error": str(e)}
+
+    # 4. Run DeepFM baseline
+    logger.info("--- Running DeepFM Baseline ---")
+    try:
+        deepfm_results = run_deepfm_baseline(train_df, test_df)
+        all_results["deepfm"] = {"status": "success", "metrics": deepfm_results}
+        logger.success(f"DeepFM baseline completed. Metrics: {deepfm_results}")
+    except Exception as e:
+        logger.error(f"DeepFM baseline failed: {e}")
+        all_results["deepfm"] = {"status": "failure", "error": str(e)}
+
+    # 5. Save results to a JSON file
+    try:
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        results_path = reports_dir / "baseline_results.json"
+
+        logger.info(f"Saving aggregated baseline results to {results_path}")
+        with open(results_path, "w") as f:
+            json.dump(all_results, f, indent=4)
+
+        logger.success(f"Results successfully saved to {results_path}")
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to save results to file: {e}")
+        logger.error(f"Current Working Directory: {Path.cwd()}")
+
+    logger.success("All baseline models have been executed.")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### `baselines/svd_baseline.py`
+
+**File size:** 2,096 bytes
+
+```python
+import pandas as pd
+from loguru import logger
+from surprise import SVD, Dataset, Reader
+from surprise.accuracy import mae, rmse
+
+from src.baselines.ranking_utils import (
+    calculate_ndcg,
+    get_top_n_recommendations,
+)
+
+
+def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+    """
+    Runs the SVD baseline, evaluating with RMSE, MAE, and NDCG@10.
+    """
+    logger.info("Starting SVD baseline...")
+
+    # 1. Load Data
+    reader = Reader(rating_scale=(1, 5))
+    train_data = Dataset.load_from_df(train_df[["user_id", "book_id", "rating"]], reader)
+    trainset = train_data.build_full_trainset()
+    testset = list(test_df[['user_id', 'book_id', 'rating']].itertuples(index=False, name=None))
+
+    # Build an anti-test set for generating predictions for items not in the training set
+    anti_testset = trainset.build_anti_testset()
+
+    # 2. Train Model
+    logger.info("Training SVD model...")
+    model = SVD(n_factors=100, n_epochs=20, lr_all=0.005, reg_all=0.02, random_state=42, verbose=False)
+    model.fit(trainset)
+
+    # 3. Evaluate for Accuracy (RMSE, MAE)
+    logger.info("Evaluating model for accuracy (RMSE, MAE)...")
+    accuracy_predictions = model.test(testset)
+    rmse_score = rmse(accuracy_predictions, verbose=False)
+    mae_score = mae(accuracy_predictions, verbose=False)
+    logger.info(f"SVD baseline RMSE: {rmse_score:.4f}, MAE: {mae_score:.4f}")
+
+    # 4. Evaluate for Ranking (NDCG)
+    logger.info("Evaluating model for ranking (NDCG@10)...")
+    ranking_predictions = model.test(anti_testset)
+
+    # Convert predictions to a DataFrame
+    predictions_df = pd.DataFrame(
+        ranking_predictions,
+        columns=["user_id", "book_id", "true_rating", "rating", "details"],
+    )
+
+    top_n = get_top_n_recommendations(predictions_df, n=10)
+    ndcg_score = calculate_ndcg(top_n, test_df, n=10)
+    logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
+
+    # 5. Return Metrics
+    metrics = {"rmse": rmse_score, "mae": mae_score, "ndcg@10": ndcg_score}
+    logger.success("SVD baseline finished successfully.")
+    return metrics
+```
+
+### `config/log_config.py`
+
+**File size:** 1,289 bytes
+
+```python
 import sys
+import logging
 
 from loguru import logger
 
@@ -1413,7 +1979,7 @@ def setup_logging(log_level: str = "INFO") -> None:
         sys.stdout,
         level=log_level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        colorize=True,
+        colorize=False,
     )
 
     # Add a file sink for the main pipeline log
@@ -1938,7 +2504,7 @@ registry = ToolRegistry()
 
 ### `data/cv_data_manager.py`
 
-**File size:** 22,595 bytes
+**File size:** 22,822 bytes
 
 ```python
 """
@@ -2335,7 +2901,10 @@ class CVDataManager:
             test_users = sample_users(test_users, sample_frac)
 
         # Get column list for query
-        column_list = ", ".join(columns) if columns else "*"
+        if columns:
+            column_list = ", ".join([f"r.{c}" for c in columns])
+        else:
+            column_list = "r.*"
 
         def process_chunk(
             chunk: List[str], chunk_idx: int, purpose: str
@@ -2440,6 +3009,9 @@ class CVDataManager:
         test_df = (
             process_user_list(test_users, "test") if test_users else pd.DataFrame()
         )
+
+        logger.critical(f"TRAIN DF COLUMNS before return: {train_df.columns}")
+        logger.critical(f"TRAIN DF HEAD before return:\n{train_df.head()}")
 
         # Return based on split_type
         if split_type == "train_val":
@@ -2569,6 +3141,7 @@ class CVDataManager:
             logger.error(f"Error parsing CV summary file: {e}")
             return {
                 "status": "error",
+
                 "message": f"Invalid CV summary file: {e}",
                 "n_folds": 0,
                 "folds": [],
@@ -2930,7 +3503,7 @@ def run_feature_ideation(session_state: SessionState, llm_config: Dict):
 
 ### `orchestration/insight.py`
 
-**File size:** 3,169 bytes
+**File size:** 3,181 bytes
 
 ```python
 """
@@ -2938,7 +3511,7 @@ Orchestration module for the insight discovery team.
 """
 
 from typing import Dict
-
+import json 
 import autogen
 from loguru import logger
 
@@ -3038,128 +3611,39 @@ def _extract_view_descriptions(messages: list) -> dict:
 
 ### `orchestration/realization.py`
 
-**File size:** 4,199 bytes
+**File size:** 1,282 bytes
 
 ```python
 import logging
-from typing import Any, Callable, Dict, List
+from typing import Dict
 
-import pandas as pd
-
-try:
-    from src.agents.strategy_team.feature_realization_agent import (
-        FeatureRealizationAgent,
-    )
-except ImportError:
-    from agents.strategy_team.feature_realization_agent import (
-        FeatureRealizationAgent,
-    )
-
-from src.core.database import fetch_df
-from src.schemas.models import CandidateFeature, RealizedFeature
-from src.utils.prompt_utils import load_prompt
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.utils.session_state import SessionState
 
 logger = logging.getLogger(__name__)
 
 
-def _get_test_data_sample(dependencies: List[str]) -> pd.DataFrame:
-    """
-    Fetches a small, relevant data sample for testing a feature.
-    For simplicity, we'll fetch from curated_reviews, as it's the most common base.
-    A more advanced implementation would join tables based on dependencies.
-    """
-    return fetch_df("SELECT * FROM curated_reviews LIMIT 100;")
-
-
-def _run_sandboxed_test(
-    feature_name: str, code_str: str, params: Dict[str, Any]
-) -> (bool, str):
-    """
-    Executes the generated feature code on a sample DataFrame to test for errors.
-    Returns (passed, error_message).
-    """
-    try:
-        # Create a callable function from the code string
-        exec_globals = {}
-        exec(code_str, exec_globals)
-        feature_func: Callable = exec_globals[feature_name]
-
-        # Get a data sample and run the test
-        df_sample = _get_test_data_sample([])  # Simple sample for now
-
-        # Call with default parameters
-        result = feature_func(df_sample, **params)
-
-        if not isinstance(result, pd.Series):
-            return False, "Function did not return a pandas Series."
-
-        return True, ""
-
-    except Exception as e:
-        logger.error(f"Sandboxed test failed for feature '{feature_name}': {e}")
-        return False, str(e)
-
-
 def run_feature_realization(session_state: SessionState, llm_config: Dict):
-    """Orchestrates the Feature Realization phase."""
+    """
+    Orchestrates the Feature Realization phase by invoking the FeatureRealizationAgent.
+
+    This function instantiates the agent and calls its run() method. The agent is
+    responsible for the entire feature realization lifecycle, including:
+    - Reading candidate features from the session state.
+    - Interacting with the LLM to generate code.
+    - Validating the generated code in a sandbox.
+    - Retrying with a self-correction loop if validation fails.
+    - Writing the final realized features back to the session state.
+    """
     logger.info("--- Running Feature Realization Step ---")
 
-    candidate_features = session_state.get_candidate_features()
-    if not candidate_features:
-        logger.warning("No candidate features found. Skipping realization.")
-        return
+    # Instantiate the agent. It will use the session_state to get the candidates
+    # and other necessary info like db_path.
+    agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
 
-    realized_features: List[RealizedFeature] = []
+    # The agent's run method encapsulates all the logic for generation and validation.
+    agent.run()
 
-    # For now, we'll use a simple agent setup. A more complex one might be a chat.
-    agent = FeatureRealizationAgent(llm_config=llm_config)
-
-    for cand_data in candidate_features:
-        candidate = CandidateFeature(**cand_data)
-        logger.info(f"Attempting to realize feature: {candidate.name}")
-
-        prompt = load_prompt("agents/feature_realization.j2", **candidate.model_dump())
-
-        # In a real scenario, you'd call the agent here
-        # response = agent.generate_reply(prompt)
-        # For this test, we'll use a placeholder response
-        code_str = f"def {candidate.name}(df, **kwargs):\n    # Placeholder for {candidate.name}\n    return pd.Series([0] * len(df), name='{candidate.name}')"
-
-        passed, error_msg = _run_sandboxed_test(
-            candidate.name, code_str, candidate.params
-        )
-
-        realized = RealizedFeature(
-            name=candidate.name,
-            code_str=code_str,
-            params=candidate.params,
-            passed_test=passed,
-            type=candidate.type,
-            source_candidate=candidate,
-        )
-
-        try:
-            realized.validate_code()
-            if passed:
-                realized_features.append(realized)
-                logger.info(
-                    f"Successfully realized and validated feature: {candidate.name}"
-                )
-            else:
-                logger.warning(
-                    f"Feature '{candidate.name}' realized but failed sandbox test: {error_msg}"
-                )
-
-        except ValueError as e:
-            logger.error(
-                f"Failed to validate generated code for '{candidate.name}': {e}"
-            )
-
-    session_state.set_state(
-        "realized_features", [f.model_dump() for f in realized_features]
-    )
-    logger.info(f"Saved {len(realized_features)} successfully realized features.")
     logger.info("--- Feature Realization Step Complete ---")
 ```
 
@@ -3295,28 +3779,19 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 26,634 bytes
+**File size:** 19,599 bytes
 
 ```python
 import json
-import logging
 import os
 import sys
+import traceback
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
 
-# Load environment variables from .env file if it exists
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass  # dotenv is optional
-
-# This is no longer needed with a proper project structure and installation.
-# # Add project root to Python path for proper imports
-# project_root = Path(__file__).parent.parent
-# sys.path.insert(0, str(project_root))
 import autogen
+from autogen import Agent
+from dotenv import load_dotenv
 from loguru import logger
 
 from src.agents.discovery_team.insight_discovery_agents import (
@@ -3325,7 +3800,7 @@ from src.agents.discovery_team.insight_discovery_agents import (
 from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.agents.strategy_team.reflection_agent import ReflectionAgent
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
-from src.config.logging import setup_logging
+from src.config.log_config import setup_logging
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
 from src.utils.session_state import SessionState
 from src.utils.tools import (
@@ -3338,509 +3813,380 @@ from src.utils.tools import (
     vision_tool,
 )
 
-# Load environment variables
+# Load environment variables from .env file at the beginning.
+load_dotenv()
 
 
-def run_discovery_loop(session_state: SessionState):
-    """Orchestrates the Insight Discovery Team to find patterns in the data."""
-    logging.info("--- Running Insight Discovery Loop ---")
+# --- Helper Functions for SmartGroupChatManager ---
 
-    config_list = config_list_from_json(
-        os.getenv("OAI_CONFIG_LIST", "config/OAI_CONFIG_LIST.json")
+
+def should_continue_exploration(session_state: SessionState, round_count: int) -> bool:
+    """Determines if exploration should continue based on insights and coverage."""
+    insights = session_state.insights
+    if not insights:
+        return True  # Must find at least one insight
+
+    high_quality_insights = [
+        i for i in insights if i.quality_score is not None and i.quality_score >= 8
+    ]
+    if len(high_quality_insights) >= 5:
+        logger.info("Termination condition: Found 5+ high-quality insights.")
+        return False
+
+    if len(insights) >= 15:
+        logger.info("Termination condition: Found 15+ total insights.")
+        return False
+
+    if round_count > 50:
+        last_insight_round = max(
+            (i.metadata.get("round_added", 0) for i in insights), default=0
+        )
+        if round_count - last_insight_round > 20:
+            logger.info("Termination condition: No new insights in the last 20 rounds.")
+            return False
+
+    if len(insights) > 5:
+        tables_in_insights = {t for i in insights for t in i.tables_used}
+        all_tables = set(session_state.get_all_table_names())
+        coverage = len(tables_in_insights) / len(all_tables) if all_tables else 0
+        if coverage < 0.3:
+            logger.info(
+                f"Continuation condition: Low table coverage ({coverage:.1%}). Encouraging more exploration."
+            )
+            return True
+        if coverage > 0.7 and len(insights) >= 8:
+            logger.info(
+                f"Termination condition: High table coverage ({coverage:.1%}) with sufficient insights."
+            )
+            return False
+
+    return True
+
+
+def get_progress_prompt(session_state: SessionState, round_count: int) -> Optional[str]:
+    """Generate a progress prompt to guide agents when they seem stuck."""
+    insights = session_state.insights
+    if not insights:
+        return "It's been a while and no insights have been reported. As a reminder, your goal is to find interesting patterns. Please review the schema and propose a query."
+
+    tables_in_insights = {t for i in insights for t in i.tables_used}
+    all_tables = set(session_state.get_all_table_names())
+    unexplored_tables = all_tables - tables_in_insights
+
+    if round_count > 20 and unexplored_tables:
+        return f"Great work so far. We've analyzed {len(tables_in_insights)} tables, but these remain unexplored: {', '.join(list(unexplored_tables)[:3])}. Consider formulating a hypothesis involving one of these."
+
+    low_detail_insights = [i for i in insights if len(i.finding) < 100]
+    if low_detail_insights:
+        return f"The insight '{low_detail_insights[0].title}' is a bit brief. Can the DataScientist elaborate on its significance or provide more supporting evidence?"
+
+    return None
+
+
+def _fallback_compression(messages: List[Dict], keep_recent: int = 20) -> List[Dict]:
+    """Fallback keyword-based compression if LLM compression fails."""
+    logger.warning("Executing fallback context compression.")
+    if len(messages) <= keep_recent:
+        return messages
+
+    compressed_messages = []
+    keywords = ["insight", "hypothesis", "important", "significant", "surprising"]
+    for msg in messages[:-keep_recent]:
+        if any(keyword in msg.get("content", "").lower() for keyword in keywords):
+            new_content = f"(Summarized): {msg['content'][:200]}..."
+            compressed_messages.append({**msg, "content": new_content})
+
+    return compressed_messages + messages[-keep_recent:]
+
+
+def compress_conversation_context(
+    messages: List[Dict], keep_recent: int = 20
+) -> List[Dict]:
+    """Intelligently compress conversation context using LLM summarization."""
+    if len(messages) <= keep_recent:
+        return messages
+
+    logger.info(
+        f"Compressing conversation context, keeping last {keep_recent} messages."
     )
+    try:
+        config_file_path = os.getenv("OAI_CONFIG_LIST")
+        if not config_file_path:
+            raise ValueError("OAI_CONFIG_LIST environment variable not set.")
+        config_list_all = config_list_from_json(config_file_path)
+        config_list = [
+            config for config in config_list_all if config.get("model") == "gpt-4o"
+        ]
+        if not config_list:
+            raise ValueError("No config found for summarization model.")
 
-    # Validate and substitute the API key
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key.strip() == "":
-        raise ValueError("OPENAI_API_KEY environment variable is empty or not set.")
+        summarizer_llm_config = {
+            "config_list": config_list,
+            "cache_seed": None,
+            "temperature": 0.2,
+        }
+        summarizer_client = autogen.AssistantAgent(
+            "summarizer", llm_config=summarizer_llm_config
+        )
 
-    logging.info(f"API key loaded with length: {len(api_key)}")
+        conversation_to_summarize = "\n".join(
+            [f"{m.get('role')}: {m.get('content')}" for m in messages[:-keep_recent]]
+        )
+        prompt = f"Please summarize the key findings, decisions, and unresolved questions from the following conversation history. Be concise, but do not lose critical information. The summary will be used as context for an ongoing AI agent discussion.\n\n---\n{conversation_to_summarize}\n---"
 
-    # Manually substitute the API key to ensure it's loaded
-    for config in config_list:
-        if config.get("api_key") == "${OPENAI_API_KEY}":
-            config["api_key"] = api_key
-            logging.info("Substituted API key in config")
-        elif not config.get("api_key"):
-            raise ValueError(f"No API key found in config: {config}")
+        response = summarizer_client.generate_reply(
+            messages=[{"role": "user", "content": prompt}]
+        )
+        summary_message = {
+            "role": "system",
+            "content": f"## Conversation Summary ##\n{response}",
+        }
+        return [summary_message] + messages[-keep_recent:]
+    except ValueError as e:
+        logger.error(
+            f"Could not initialize LLM config. Please check your configuration. Error: {e}"
+        )
+        # Re-raise to be caught by main and terminate the run.
+        raise
+    except Exception as e:
+        logger.error(f"LLM-based context compression failed: {e}")
+        return _fallback_compression(messages, keep_recent)
 
-    # Validate final config
-    for i, config in enumerate(config_list):
-        if not config.get("api_key") or config.get("api_key").strip() == "":
-            raise ValueError(
-                f"Config {i} has empty API key after substitution: {config}"
+
+def get_llm_config_list() -> Optional[Dict[str, Any]]:
+    """
+    Loads LLM configuration from the path specified in OAI_CONFIG_LIST,
+    injects the API key, and returns a dictionary for autogen.
+
+    Returns:
+        A dictionary containing the 'config_list' and 'cache_seed', or None if config fails.
+    """
+    try:
+        config_file_path = os.getenv("OAI_CONFIG_LIST")
+        if not config_file_path:
+            logger.error("OAI_CONFIG_LIST environment variable not set.")
+            raise ValueError("OAI_CONFIG_LIST environment variable not set.")
+
+        logger.debug(f"Loading LLM configuration from: {config_file_path}")
+        config_list = config_list_from_json(file_path=config_file_path)
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not found. Relying on config file.")
+        else:
+            logger.debug("Injecting OPENAI_API_KEY into LLM config.")
+            for c in config_list:
+                c.update({"api_key": api_key})
+
+        if not config_list:
+            logger.error(
+                "No valid LLM configurations found after loading. Check file content and path."
+            )
+            raise ValueError("No valid LLM configurations found.")
+
+        logger.info(f"Successfully loaded {len(config_list)} LLM configurations.")
+        return {"config_list": config_list, "cache_seed": None}
+
+    except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"Failed to load or parse LLM config: {e}", exc_info=True)
+        return None
+
+
+# --- Enhanced Conversation Manager ---
+
+
+class SmartGroupChatManager(autogen.GroupChatManager):
+    """A customized GroupChatManager with context compression and progress monitoring."""
+
+    round_count: int = 0
+
+    def __init__(self, groupchat: autogen.GroupChat, llm_config: Dict[str, Any]):
+        super().__init__(groupchat=groupchat, llm_config=llm_config)
+        self.round_count = 0  # Reset round count for each new chat
+
+    def run_chat(self, messages, sender, config):
+        """Override the main chat runner to add smart features."""
+        session_state = config.get("session_state")
+        if not session_state:
+            logger.error("SessionState not found in config for SmartGroupChatManager.")
+            return super().run_chat(messages, sender, config)
+
+        self.round_count += 1
+
+        if self.round_count % 10 == 0:
+            insights_count = len(session_state.insights)
+            logger.info(
+                "Exploration progress: Round {}, {} insights captured",
+                self.round_count,
+                insights_count,
             )
 
-    logging.info(f"Final config list validated with {len(config_list)} configurations")
+        if self.round_count % 25 == 0:
+            try:
+                self.groupchat.messages = compress_conversation_context(
+                    self.groupchat.messages
+                )
+                logger.info(
+                    "Applied LLM context compression at round {}", self.round_count
+                )
+            except Exception as e:
+                logger.warning("Context compression failed: {}", e)
 
-    llm_config = {"config_list": config_list, "cache_seed": None}
+        if self.round_count > 15 and not should_continue_exploration(
+            session_state, self.round_count
+        ):
+            logger.info("Exploration criteria met, terminating conversation")
+            self.groupchat.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "TERMINATE",
+                    "name": "SystemCoordinator",
+                }
+            )
+        if self.round_count > 0 and self.round_count % 20 == 0:
+            logger.warning("Potential loop detected. Resetting agents.")
+            for agent in self.groupchat.agents:
+                agent.reset()
 
-    # This agent will execute code blocks and call functions
+        if self.round_count > 5 and self.round_count % 15 == 0:
+            if progress_prompt := get_progress_prompt(session_state, self.round_count):
+                logger.info("Adding progress guidance at round {}", self.round_count)
+                self.groupchat.messages.append(
+                    {
+                        "role": "user",
+                        "content": progress_prompt,
+                        "name": "SystemCoordinator",
+                    }
+                )
+
+        return super().run_chat(messages, sender, config)
+
+
+# --- Orchestration Loops ---
+
+
+def run_discovery_loop(session_state: SessionState) -> str:
+    """Orchestrates the Insight Discovery Team to find patterns in the data."""
+    logger.info("--- Running Insight Discovery Loop ---")
+    llm_config = get_llm_config_list()
+    if not llm_config:
+        raise RuntimeError(
+            "Failed to get LLM configuration, cannot proceed with discovery."
+        )
+
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
         max_consecutive_auto_reply=10,
-        is_termination_msg=lambda x: "TERMINATE" in x.get("content", ""),
-        code_execution_config={
-            "work_dir": str(get_run_dir()),
-            "use_docker": False,
-        },  # Enable code execution
+        is_termination_msg=lambda x: "TERMINATE" in x.get("content", "").strip(),
+        code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
 
     assistant_agents = get_insight_discovery_agents(llm_config)
+    analyst = assistant_agents["QuantitativeAnalyst"]
+    researcher = assistant_agents["DataRepresenter"]
+    critic = assistant_agents["PatternSeeker"]
 
-    # Register the granular tools for the agents
-    for agent in assistant_agents.values():
+    for agent in [analyst, researcher, critic]:
         autogen.register_function(
             run_sql_query,
             caller=agent,
             executor=user_proxy,
             name="run_sql_query",
-            description="Executes a read-only SQL query and returns the result as markdown.",
+            description="Run a SQL query.",
         )
         autogen.register_function(
             get_table_sample,
             caller=agent,
             executor=user_proxy,
             name="get_table_sample",
-            description="Retrieves a random sample of rows from a specified table.",
+            description="Get a sample of rows from a table.",
         )
         autogen.register_function(
             create_analysis_view,
             caller=agent,
             executor=user_proxy,
             name="create_analysis_view",
-            description="Creates a SQL view with documentation for complex analysis.",
+            description="Create a temporary SQL view.",
         )
         autogen.register_function(
             vision_tool,
             caller=agent,
             executor=user_proxy,
             name="vision_tool",
-            description="Analyzes image files using vision AI.",
+            description="Analyze an image.",
         )
         autogen.register_function(
             get_add_insight_tool(session_state),
             caller=agent,
             executor=user_proxy,
             name="add_insight_to_report",
-            description="Saves structured insights to the session report.",
+            description="Saves insights to the report.",
         )
 
-    # Enhanced GroupChat with intelligent context management
+    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic]
     group_chat = autogen.GroupChat(
-        agents=[user_proxy] + list(assistant_agents.values()),
-        messages=[],
-        max_round=500,  # High limit instead of -1 (uncapped), our SmartGroupChatManager will handle termination
-        allow_repeat_speaker=True,
+        agents=agents, messages=[], max_round=100, allow_repeat_speaker=False
     )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
-    # Close the session database connection to avoid lock conflicts during agent execution
-    logging.info("Closing database connection for agent execution...")
+    logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
-
-    def should_continue_exploration(
-        session_state: SessionState, round_count: int
-    ) -> bool:
-        """Determines if exploration should continue based on insights and coverage."""
-        insights = len(session_state.insights)
-        min_insights = 32  # Minimum insights needed for comprehensive analysis
-
-        # Always continue if we don't have enough insights
-        if insights < min_insights:
-            logging.info(
-                f"Continuing exploration: {insights}/{min_insights} insights captured"
-            )
-            return True
-
-        # After minimum insights, check for completeness every 10 rounds
-        if round_count % 10 == 0 and insights >= min_insights:
-            logging.info(
-                f"Evaluating exploration completeness: {insights} insights, round {round_count}"
-            )
-
-            # Check if we have coverage across major areas
-            insight_titles = [
-                insight.title.lower() for insight in session_state.insights
-            ]
-            coverage_areas = {
-                "rating": any("rating" in title for title in insight_titles),
-                "genre": any(
-                    any(term in title for term in ["genre", "shelf", "category"])
-                    for title in insight_titles
-                ),
-                "author": any("author" in title for title in insight_titles),
-                "temporal": any(
-                    any(term in title for term in ["time", "year", "date", "temporal"])
-                    for title in insight_titles
-                ),
-                "user": any("user" in title for title in insight_titles),
-            }
-
-            covered_areas = sum(coverage_areas.values())
-            if covered_areas >= 4:  # Need coverage of at least 4/5 major areas
-                logging.info(
-                    f"Sufficient coverage achieved: {covered_areas}/5 areas covered"
-                )
-                return False
-
-        # Safety limit - don't run indefinitely
-        if round_count > 200:
-            logging.warning(
-                f"Reached maximum round limit ({round_count}), stopping exploration"
-            )
-            return False
-
-        # Continue if we haven't reached the insight threshold or coverage
-        return True
-
-    def get_progress_prompt(session_state: SessionState, round_count: int) -> str:
-        """Generate a progress prompt to guide agents when they seem stuck."""
-        insights = len(session_state.insights)
-
-        if insights == 0 and round_count > 5:
-            return "\n\nIMPORTANT: No insights have been captured yet. Please ensure you call `add_insight_to_report()` after each analysis to record your findings. Focus on generating actual insights, not just data exploration."
-
-        if insights < 4 and round_count > 15:
-            return f"\n\nPROGRESS CHECK: Only {insights} insights captured after {round_count} rounds. Please focus on generating concrete insights using `add_insight_to_report()` and ensure comprehensive coverage of rating patterns, genres, authors, and user behavior."
-
-        # Check coverage gaps
-        insight_titles = [insight.title.lower() for insight in session_state.insights]
-        missing_areas = []
-        if not any("rating" in title for title in insight_titles):
-            missing_areas.append("rating analysis")
-        if not any(
-            any(term in title for term in ["genre", "shelf", "category"])
-            for title in insight_titles
-        ):
-            missing_areas.append("genre/category analysis")
-        if not any("author" in title for title in insight_titles):
-            missing_areas.append("author analysis")
-        if not any(
-            any(term in title for term in ["time", "year", "date", "temporal"])
-            for title in insight_titles
-        ):
-            missing_areas.append("temporal analysis")
-        if not any("user" in title for title in insight_titles):
-            missing_areas.append("user behavior analysis")
-
-        if missing_areas and round_count % 20 == 0:
-            return f"\n\nCOVERAGE GAP: Missing analysis in: {', '.join(missing_areas)}. Please prioritize these areas in your next analysis."
-
-        return ""
-
-    def compress_conversation_context(
-        messages: list, keep_recent: int = 20, llm_config: dict = None
-    ) -> list:
-        """Intelligently compress conversation context using LLM summarization."""
-        if len(messages) <= keep_recent * 2:
-            return messages  # No compression needed if conversation is still short
-
-        logging.info(
-            f"Compressing context with LLM: {len(messages)} -> target ~{keep_recent * 2} messages"
-        )
-
-        # Always preserve system messages and recent messages
-        system_messages = [
-            msg for msg in messages[:3] if msg.get("role") in ["user", "system"]
-        ]
-        recent_messages = messages[-keep_recent:]
-        middle_messages = messages[len(system_messages) : -keep_recent]
-
-        if not middle_messages:
-            return messages
-
-        try:
-            # Create an LLM client for compression
-            from openai import BadRequestError, OpenAI
-
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-            # Group middle messages into chunks for summarization
-            chunk_size = 15  # Process in chunks to avoid token limits
-            compressed_summaries = []
-
-            for i in range(0, len(middle_messages), chunk_size):
-                chunk = middle_messages[i : i + chunk_size]
-
-                # Create conversation text for summarization
-                conversation_text = ""
-                for msg in chunk:
-                    role = msg.get("name", msg.get("role", "unknown"))
-                    content = msg.get("content", "")
-                    conversation_text += f"{role}: {content}\n\n"
-
-                # Ask LLM to compress this chunk
-                compression_prompt = f"""You are compressing a conversation between data analysis agents exploring a book recommendation database. 
-
-Please create a concise summary that preserves:
-1. All specific insights and findings discovered
-2. Key analysis results, correlations, and statistics  
-3. Important database views created
-4. Significant plots generated and their interpretations
-5. Critical decision points and conclusions
-
-Focus on preserving factual discoveries and actionable insights while removing redundant discussion.
-
-CONVERSATION CHUNK TO COMPRESS:
-{conversation_text}
-
-COMPRESSED SUMMARY (preserve all insights and key findings):"""
-
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",  # Use mini for cost efficiency in compression
-                        messages=[{"role": "user", "content": compression_prompt}],
-                        max_tokens=64000,
-                        temperature=0.1,  # Low temperature for consistent compression
-                    )
-
-                    summary = response.choices[0].message.content
-
-                    # Create a compressed message
-                    compressed_msg = {
-                        "role": "assistant",
-                        "name": "ContextCompressor",
-                        "content": f"[COMPRESSED SUMMARY of rounds {i + len(system_messages) + 1}-{i + len(system_messages) + len(chunk)}]\n\n{summary}",
-                    }
-                    compressed_summaries.append(compressed_msg)
-                except BadRequestError as e:
-                    if "context_length_exceeded" in str(e):
-                        logging.warning(
-                            f"Context length exceeded in compression chunk {i // chunk_size + 1}. Reducing chunk size and retrying..."
-                        )
-                        # Reduce chunk size and retry with smaller chunks
-                        smaller_chunk_size = max(5, chunk_size // 2)
-                        logging.info(
-                            f"Reducing chunk size from {chunk_size} to {smaller_chunk_size}"
-                        )
-                        chunk_size = smaller_chunk_size
-                        i -= chunk_size  # Retry the current chunk with smaller size
-                        continue
-                    raise
-
-            logging.info(
-                f"LLM compression: {len(middle_messages)} messages -> {len(compressed_summaries)} summaries"
-            )
-
-            # Combine preserved and compressed content
-            compressed_context = (
-                system_messages + compressed_summaries + recent_messages
-            )
-            logging.info(
-                f"Context compression completed: {len(messages)} -> {len(compressed_context)} messages"
-            )
-            return compressed_context
-
-        except Exception as e:
-            logging.warning(
-                f"LLM compression failed: {e}. Falling back to keyword-based compression."
-            )
-            return _fallback_compression(messages, keep_recent)
-
-    def _fallback_compression(messages: list, keep_recent: int = 20) -> list:
-        """Fallback keyword-based compression if LLM compression fails."""
-        if len(messages) <= keep_recent * 2:
-            return messages
-
-        # Always keep the initial system message and recent messages
-        system_messages = [
-            msg for msg in messages[:3] if msg.get("role") in ["user", "system"]
-        ]
-        recent_messages = messages[-keep_recent:]
-
-        # Extract key insights and tool execution results from middle messages
-        key_messages = []
-        for msg in messages[len(system_messages) : -keep_recent]:
-            content = msg.get("content", "")
-            # Keep messages with insights, analysis results, or tool outputs
-            if any(
-                keyword in content.lower()
-                for keyword in [
-                    "insight:",
-                    "analysis:",
-                    "correlation:",
-                    "finding:",
-                    "plot_saved:",
-                    "view_created:",
-                    "stdout:",
-                    "pattern:",
-                    "hypothesis:",
-                    "recommendation:",
-                    "conclusion:",
-                ]
-            ):
-                key_messages.append(msg)
-
-        # Combine and return compressed context
-        compressed = (
-            system_messages + key_messages[-8:] + recent_messages
-        )  # Keep max 8 key messages
-        logging.info(
-            f"Fallback compression completed: retained {len(compressed)} messages"
-        )
-        return compressed
-
     try:
-        round_count = 0
         initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
-
-        # Enhanced conversation with custom termination logic
-        class SmartGroupChatManager(autogen.GroupChatManager):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.round_count = 0
-
-            def run_chat(self, messages, sender, config=None):
-                """Override the main chat runner to add our smart features."""
-                self.round_count += 1
-
-                # Log progress
-                if self.round_count % 10 == 0:
-                    insights_count = len(session_state.insights)
-                    logging.info(
-                        f"Exploration progress: Round {self.round_count}, {insights_count} insights captured"
-                    )
-                    if session_state.insights:
-                        recent_insights = session_state.insights[-3:]
-                        logging.info(
-                            f"Recent insights: {[insight.title for insight in recent_insights]}"
-                        )
-
-                # Apply context compression periodically
-                if self.round_count % 25 == 0:
-                    try:
-                        self.groupchat.messages = compress_conversation_context(
-                            self.groupchat.messages, llm_config=llm_config
-                        )
-                        logging.info(
-                            f"Applied LLM context compression at round {self.round_count}"
-                        )
-                    except Exception as e:
-                        logging.warning(f"Context compression failed: {e}")
-
-                # Check termination only after sufficient rounds
-                if self.round_count > 15:
-                    if not should_continue_exploration(session_state, self.round_count):
-                        logging.info(
-                            "Exploration criteria met, terminating conversation"
-                        )
-                        # Add termination message to conversation
-                        termination_msg = {
-                            "role": "assistant",
-                            "content": "TERMINATE - Exploration criteria met. Sufficient insights captured with good coverage.",
-                            "name": "SystemCoordinator",
-                        }
-                        self.groupchat.messages.append(termination_msg)
-                        return True  # Signal termination
-
-                # Add progress prompts when needed
-                if self.round_count > 5 and self.round_count % 15 == 0:
-                    progress_prompt = get_progress_prompt(
-                        session_state, self.round_count
-                    )
-                    if progress_prompt:
-                        logging.info(
-                            f"Adding progress guidance at round {self.round_count}"
-                        )
-                        guidance_msg = {
-                            "role": "user",
-                            "content": progress_prompt,
-                            "name": "SystemCoordinator",
-                        }
-                        self.groupchat.messages.append(guidance_msg)
-
-                # Call the parent implementation
-                res = super().run_chat(messages, sender, config)
-                # super() returns a tuple (final, reply). If reply is None, substitute a fallback.
-                if isinstance(res, tuple) and len(res) == 2:
-                    final, reply = res
-                    if reply is None:
-                        logging.warning(
-                            "Parent run_chat returned None reply; substituting fallback message to avoid crash."
-                        )
-                        reply = {
-                            "role": "assistant",
-                            "content": "ERROR: Reply generation failed (empty). Please review the previous tool call outputs and ensure a proper assistant response.",
-                        }
-                    return final, reply
-                # In unexpected cases, just return res as-is
-                return res
-
-        # Create the enhanced manager
-        smart_manager = SmartGroupChatManager(
-            groupchat=group_chat, llm_config=llm_config
+        user_proxy.initiate_chat(
+            manager, message=initial_message, session_state=session_state
         )
 
-        # Start the conversation using AutoGen's standard pattern
-        user_proxy.initiate_chat(smart_manager, message=initial_message)
-
-        insights_count = len(session_state.insights)
-        logging.info(
-            f"Exploration completed after {smart_manager.round_count} rounds with {insights_count} insights"
+        logger.info(
+            "Exploration completed after {} rounds with {} insights",
+            manager.round_count,
+            len(session_state.insights),
         )
-
-        logging.info("--- FINAL INSIGHTS SUMMARY ---")
-        logging.info(session_state.get_final_insight_report())
+        logger.info("--- FINAL INSIGHTS SUMMARY ---")
+        logger.info(session_state.get_final_insight_report())
 
         run_dir = get_run_dir()
         views_file = run_dir / "generated_views.json"
         if views_file.exists():
-            with open(views_file, "r") as f:
+            with open(views_file, "r", encoding="utf-8") as f:
                 views_data = json.load(f)
-            logging.info(f"Total views created: {len(views_data.get('views', []))}")
+            logger.info("Total views created: {}", len(views_data.get("views", [])))
         else:
-            logging.info("Total views created: 0")
-
+            logger.info("Total views created: 0")
     finally:
-        # Reopen the connection after agent execution
-        logging.info("Reopening database connection...")
+        logger.info("Reopening database connection...")
         session_state.reconnect()
 
-    logging.info("--- Insight Discovery Loop Complete ---")
+    logger.info("--- Insight Discovery Loop Complete ---")
     return session_state.get_final_insight_report()
 
 
-def run_strategy_loop(session_state: SessionState):
+def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
     """Orchestrates the Strategy Team to refine insights and generate features."""
-    logging.info("--- Running Strategy Loop ---")
-
-    # Get insights from discovery loop
+    logger.info("--- Running Strategy Loop ---")
     insights_report = session_state.get_final_insight_report()
-    if "No insights" in insights_report:
-        logging.warning("Skipping strategy loop as no insights were generated.")
+    if not session_state.insights:
+        logger.warning("No insights found, skipping strategy loop.")
         return None
 
-    # Load view descriptions
-    views_file = get_run_dir() / "generated_views.json"
-    view_descriptions = "No views created in the previous step."
+    run_dir = get_run_dir()
+    views_file = run_dir / "generated_views.json"
+    view_descriptions = "No views created yet."
     if views_file.exists():
-        with open(views_file, "r") as f:
-            views_data = json.load(f).get("views", [])
-            view_descriptions = "\n".join(
-                [f"- {v['name']}: {v['rationale']}" for v in views_data]
-            )
+        with open(views_file, "r", encoding="utf-8") as f:
+            views_data = json.load(f)
+        if views_data.get("views"):
+            view_descriptions = json.dumps(views_data, indent=2)
 
-    # Configure LLM
-    config_list = config_list_from_json(
-        os.getenv("OAI_CONFIG_LIST", "config/OAI_CONFIG_LIST.json")
-    )
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is not set.")
+    llm_config = get_llm_config_list()
+    if not llm_config:
+        raise RuntimeError(
+            "Failed to get LLM configuration, cannot proceed with strategy."
+        )
 
-    for config in config_list:
-        if config.get("api_key") == "${OPENAI_API_KEY}":
-            config["api_key"] = api_key
-
-    llm_config = {"config_list": config_list, "cache_seed": None}
-
-    # Initialize strategy team agents
     agents = get_strategy_team_agents(llm_config)
     user_proxy = agents.pop("user_proxy")
-
-    # Register tools
     user_proxy.register_function(
         function_map={
             "run_sql_query": run_sql_query,
@@ -3848,117 +4194,97 @@ def run_strategy_loop(session_state: SessionState):
         }
     )
 
-    # Create group chat
+    strategy_agents: Sequence[Agent] = [user_proxy] + list(agents.values())
     group_chat = autogen.GroupChat(
-        agents=[user_proxy] + list(agents.values()),
-        messages=[],
-        max_round=50,
-        allow_repeat_speaker=True,
+        agents=strategy_agents, messages=[], max_round=50, allow_repeat_speaker=True
     )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
-    # Close DB connection during agent execution
-    logging.info("Closing database connection for strategy agent execution...")
+    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
+
+    logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
-
     try:
-        # Start the strategy team chat
         user_proxy.initiate_chat(
             manager,
-            message=f"""Welcome strategists. Your task is to:
-1. Refine the insights into concrete, testable hypotheses
-2. Convert approved hypotheses into features
-3. Implement and optimize these features
-4. Reflect on the results and suggest next steps
-
-You can use `run_sql_query` to verify findings. When the final list is agreed upon, the EngineerAgent must call `finalize_hypotheses`.
-
---- INSIGHTS REPORT ---
-{insights_report}
-
---- AVAILABLE VIEWS ---
-{view_descriptions}
-""",
+            message=f"Welcome strategists. Your task is to:\n1. Refine insights into hypotheses\n2. Convert hypotheses to features\n3. Implement and optimize features\n4. Reflect on results.\nUse `run_sql_query` to verify findings. Call `finalize_hypotheses` when done.\n\n--- INSIGHTS REPORT ---\n{insights_report}\n\n--- AVAILABLE VIEWS ---\n{view_descriptions}",
+            session_state=session_state,
         )
 
-        # After the strategy team has proposed candidate features, realize them.
         logger.info("--- Running Feature Realization ---")
-        feature_realization_agent = FeatureRealizationAgent(
+        FeatureRealizationAgent(
             llm_config=llm_config, session_state=session_state
-        )
-        feature_realization_agent.run()
+        ).run()
         logger.info("--- Feature Realization Complete ---")
 
-        # After strategy team completes, run reflection
-        reflection_agent = ReflectionAgent(llm_config)
-        reflection_results = reflection_agent.run(session_state)
-
+        reflection_results = ReflectionAgent(llm_config).run(session_state)
     finally:
         session_state.reconnect()
 
-    logging.info("--- Strategy Loop Complete ---")
+    logger.info("--- Strategy Loop Complete ---")
     return reflection_results
 
 
-def main():
-    """
-    Main function to run the VULCAN agent orchestration.
-    """
-    # Initialize the run
+def main() -> str:
+    """Main function to run the VULCAN agent orchestration."""
     run_id, run_dir = init_run()
     logger.info(f"Starting VULCAN Run ID: {run_id}")
-
-    # Setup logging
     setup_logging()
-
-    # Initialize session state
     session_state = SessionState(run_dir)
+
+    discovery_report = "Discovery loop did not generate a report."
+    strategy_report = "Strategy loop was not run or did not generate a report."
 
     try:
         should_continue = True
         while should_continue:
-            # Run discovery loop
-            run_discovery_loop(session_state)
+            discovery_report = run_discovery_loop(session_state)
+            report = session_state.get_final_insight_report()
+            logger.info(report)
 
-            # Run strategy loop
-            reflection_results = run_strategy_loop(session_state)
-
-            # Check for hypotheses to see if we should break early
-            hypotheses = session_state.get_final_hypotheses()
-            if not hypotheses:
-                logger.info("No hypotheses generated. Ending pipeline.")
+            if not session_state.get_final_hypotheses():
+                logger.info("No hypotheses found, skipping strategy loop.")
+                strategy_report = "Strategy loop skipped: No hypotheses were generated."
                 break
 
-            # Check if we should continue based on reflection
+            reflection_results = run_strategy_loop(session_state)
+
+            if reflection_results:
+                strategy_report = json.dumps(reflection_results, indent=2)
+
             should_continue = (
                 reflection_results.get("should_continue", False)
                 if reflection_results
                 else False
             )
-            if should_continue:
-                logger.info("Reflection suggests to continue. Starting next loop.")
-            else:
+            if not should_continue:
                 logger.info("Pipeline completion criteria met. Ending pipeline.")
 
     except Exception as e:
-        logging.error(f"An error occurred during orchestration: {e}", exc_info=True)
+        logger.error(
+            f"An uncaught exception occurred during orchestration: {type(e).__name__}: {e}"
+        )
+        logger.error(traceback.format_exc())
+        strategy_report = f"Run failed with error: {e}"
     finally:
         session_state.close_connection()
-
-        # Clean up any generated views
         cleanup_analysis_views(Path(session_state.run_dir))
-        logging.info("View cleanup process initiated.")
+        logger.info("View cleanup process initiated.")
+        logger.info("Run finished. Session state saved.")
 
-        logging.info("Run finished. Session state saved.")
+    final_report = (
+        f"# VULCAN Run Complete: {run_id}\n\n"
+        f"## Discovery Loop Report\n{discovery_report}\n\n"
+        f"## Strategy Refinement Report\n{strategy_report}\n"
+    )
+    logger.info("VULCAN has completed its run.")
+    return final_report
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"VULCAN run failed: {e}")
-        logger.exception(e)
-        # Optional: Add any cleanup logic here
+        logger.error(f"VULCAN run failed: {e}", exc_info=True)
         sys.exit(1)
 ```
 
@@ -4019,7 +4345,7 @@ if __name__ == "__main__":
 
 ### `schemas/models.py`
 
-**File size:** 6,138 bytes
+**File size:** 6,555 bytes
 
 ```python
 # src/utils/schemas.py
@@ -4046,6 +4372,17 @@ class Insight(BaseModel):
     plot_interpretation: Optional[str] = Field(
         None,
         description="A detailed, LLM-generated analysis of what the plot shows and its implications.",
+    )
+    quality_score: Optional[float] = Field(
+        None, description="A score from 1-10 indicating the quality of the insight."
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadata about the insight, like the round it was added.",
+    )
+    tables_used: List[str] = Field(
+        default_factory=list,
+        description="List of table names used to generate the insight.",
     )
 
 
@@ -4081,8 +4418,8 @@ class Hypothesis(BaseModel):
     )
 
     @validator("rationale")
-    def rationale_must_be_non_empty(cls, v):  # noqa: N805
-        if not v or not v.strip():
+    def rationale_must_be_non_empty(cls, v):
+        if not v:
             raise ValueError("Rationale cannot be empty.")
         return v
 
@@ -4130,7 +4467,7 @@ class CandidateFeature(BaseModel):
             except SyntaxError as e:
                 raise ValueError(
                     f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
-                )
+                ) from e
         # Add more validation for 'llm' or 'composition' types if needed
         return True
 
@@ -4163,7 +4500,7 @@ class RealizedFeature(BaseModel):
         except SyntaxError as e:
             raise ValueError(
                 f"Invalid Python syntax in generated code for '{self.name}': {e}"
-            )
+            ) from e
 
         # Find the function definition in the AST
         func_defs = [
@@ -4280,7 +4617,7 @@ def get_feature(name: str):
 
 ### `utils/logging_utils.py`
 
-**File size:** 2,056 bytes
+**File size:** 1,937 bytes
 
 ```python
 # src/utils/logging_utils.py
@@ -4318,37 +4655,37 @@ class InterceptHandler(logging.Handler):
 
 
 
-def log_agent_context(agent_name: str, context: Dict[str, Any]) -> None:
+def log_agent_context(context: Dict[str, Any]) -> None:
     """Log the context passed to an agent."""
     logger.info(f"Context received: {context}")
 
 
-def log_agent_response(agent_name: str, response: Dict[str, Any]) -> None:
+def log_agent_response(response: Dict[str, Any]) -> None:
     """Log the response from an agent."""
     logger.info(f"Response generated: {response}")
 
 
-def log_agent_error(agent_name: str, error: Exception) -> None:
+def log_agent_error(error: Exception) -> None:
     """Log an error that occurred in an agent."""
     logger.error(f"Error occurred: {str(error)}")
 
 
-def log_llm_prompt(agent_name: str, prompt: str) -> None:
+def log_llm_prompt(prompt: str) -> None:
     """Log the prompt sent to the LLM."""
     logger.info(f"📤 LLM PROMPT:\n{'-' * 50}\n{prompt}\n{'-' * 50}")
 
 
-def log_llm_response(agent_name: str, response: str) -> None:
+def log_llm_response(response: str) -> None:
     """Log the response from the LLM."""
     logger.info(f"📥 LLM RESPONSE:\n{'-' * 50}\n{response}\n{'-' * 50}")
 
 
-def log_tool_call(agent_name: str, tool_name: str, tool_args: Dict[str, Any]) -> None:
+def log_tool_call(tool_name: str, tool_args: Dict[str, Any]) -> None:
     """Log a tool call being made."""
     logger.info(f"🔧 TOOL CALL: {tool_name} with args: {tool_args}")
 
 
-def log_tool_result(agent_name: str, tool_name: str, result: Any) -> None:
+def log_tool_result(tool_name: str, result: Any) -> None:
     """Log the result of a tool call."""
     logger.info(f"🔧 TOOL RESULT from {tool_name}: {result}")
 
@@ -4422,7 +4759,7 @@ plot_manager = PlotManager()
 
 ### `utils/prompt_utils.py`
 
-**File size:** 2,893 bytes
+**File size:** 2,884 bytes
 
 ```python
 import logging
@@ -4474,7 +4811,7 @@ def load_prompt(template_name: str, **kwargs) -> str:
     """
     try:
         # Refresh database schema to ensure it's current
-        schema = _refresh_database_schema()
+        _refresh_database_schema()
 
         # Load and render the template
         template = _jinja_env.get_template(template_name)
@@ -4752,7 +5089,7 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 13,819 bytes
+**File size:** 14,203 bytes
 
 ```python
 import json
@@ -4985,9 +5322,19 @@ class SessionState:
             report += "\n"
         return report
 
-    def get_final_hypotheses(self) -> Optional[List[Hypothesis]]:
+    def get_final_hypotheses(self) -> List[Hypothesis]:
         """Returns the final list of vetted hypotheses."""
-        return self.hypotheses if self.hypotheses else None
+        return self.hypotheses
+
+    def get_all_table_names(self) -> List[str]:
+        """Returns a list of all table names in the database."""
+        try:
+            # DuckDB's way to list all tables
+            tables_df = self.db_connection.execute("SHOW TABLES;").fetchdf()
+            return tables_df["name"].tolist()
+        except Exception as e:
+            logger.error(f"Failed to get table names from database: {e}")
+            return []
 
     def vision_tool(
         self,
@@ -5169,7 +5516,7 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 12,415 bytes
+**File size:** 12,576 bytes
 
 ```python
 # -*- coding: utf-8 -*-
@@ -5177,7 +5524,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -5307,6 +5654,7 @@ def get_add_insight_tool(session_state):
         supporting_code: str = None,
         plot_path: str = None,
         plot_interpretation: str = None,
+        quality_score: Optional[float] = None,
     ) -> str:
         """
         Adds a structured insight to the session report.
@@ -5318,7 +5666,7 @@ def get_add_insight_tool(session_state):
             supporting_code: The exact SQL or Python code used to generate the finding
             plot_path: The path to the plot that visualizes the finding
             plot_interpretation: LLM-generated analysis of what the plot shows
-
+            quality_score: The quality score of the insight
         Returns:
             Confirmation message
         """
@@ -5330,6 +5678,7 @@ def get_add_insight_tool(session_state):
                 supporting_code=supporting_code,
                 plot_path=plot_path,
                 plot_interpretation=plot_interpretation,
+                quality_score=quality_score,
             )
 
             session_state.add_insight(insight)
@@ -5507,9 +5856,9 @@ def execute_python(code: str, timeout: int = 60) -> str:
 
 ## 📊 Summary
 
-- **Total files processed:** 34
+- **Total files processed:** 40
 - **Directory:** `src`
-- **Generated:** 2025-06-14 01:16:36
+- **Generated:** 2025-06-14 18:10:43
 
 ---
 
