@@ -1,0 +1,67 @@
+\doublespacing
+
+\chapter{Introduction}
+\label{ch:intro}
+
+\section{The Centrality of Recommendation in the Digital Economy}
+\label{sec:intro_motivation}
+
+Recommender systems have evolved from a niche academic interest into fundamental infrastructure of the digital economy. They mediate a substantial proportion of user interactions with information, shaping content consumption on platforms such as Netflix and YouTube, influencing purchasing decisions on Amazon, and curating cultural exposure on Spotify. The economic and societal impact is considerable; however, despite decades of advancement, these systems grapple with foundational challenges that limit their efficacy and trustworthiness. A primary issue is the \textit{cold-start problem}, which arises when the system has insufficient interaction data for new users or items, rendering it incapable of producing accurate, personalised recommendations~\cite{Schein2002ColdStart}. This dependency on historical data reveals a critical limitation of many classical architectures. Concurrently, a growing demand for algorithmic transparency has highlighted the opacity of many systems. Users are frequently presented with recommendations without a clear rationale, eroding trust and preventing meaningful user control—a deficiency termed a lack of \textit{scrutability}~\cite{Tintarev2011Explainable}. These persistent challenges underscore the need for new paradigms that move beyond simple pattern matching towards more robust, transparent, and data-efficient reasoning.
+
+\section{A Multi-Paradigm Evolution and the Feature Engineering Bottleneck}
+\label{sec:intro_evolution}
+
+The history of recommender systems is best understood as a series of paradigm shifts, each developed to address the shortcomings of its predecessors. The field's inception can be traced to early \textit{Collaborative Filtering} (CF) systems, which operated on the intuitive principle that users who have agreed in the past will agree in the future~\cite{Resnick1994GroupLens}. While pioneering, these memory-based methods struggled with the scalability and data sparsity inherent in large-scale systems. A significant breakthrough came with the popularisation of \textit{Matrix Factorisation} (MF) techniques during the Netflix Prize competition~\cite{Koren2009MatrixFactorization}. By decomposing the sparse user-item interaction matrix into low-dimensional latent factor representations for users and items, MF models could generalise far more effectively and capture nuanced preferences. This marked a shift towards model-based approaches.
+
+The subsequent rise of deep learning introduced a third paradigm, enabling the modelling of complex, non-linear relationships within the data. Architectures such as \textit{Neural Collaborative Filtering}~\cite{He2017NCF} and Google's two-tower \textit{Wide \& Deep} networks~\cite{Cheng2016WideDeep} demonstrated superior performance by learning intricate feature interactions automatically. However, extensive research has shown that the performance gains from increasingly complex model architectures are subject to diminishing returns. The critical insight, first articulated by Koren et al. and now widely accepted, is that the ultimate performance of any recommender system is fundamentally constrained by the quality of its input features~\cite{Koren2009MatrixFactorization}. This has reframed the central challenge in the field, shifting focus from model architecture design to the \textit{feature engineering bottleneck}.
+
+\section{Automated Feature Engineering: Promise and Unfulfilled Potential}
+\label{sec:intro_autofe}
+
+Feature engineering—the process of transforming raw data into informative representations—has traditionally been a manual, labor-intensive task reliant on domain expertise and intuition. In response to this bottleneck, the field of \textit{Automated Feature Engineering} (AutoFE) emerged, aiming to systematize and accelerate feature discovery. Seminal systems like Deep Feature Synthesis (DFS) approached this problem through combinatorial exploration, automatically applying a set of mathematical primitives to generate thousands of candidate features from relational data~\cite{Kanter2015DeepFeatureSynthesis}.
+
+While powerful, these first-generation AutoFE tools suffer from a critical limitation: they operate without semantic understanding or strategic reasoning. The combinatorial explosion of features they produce is often dominated by irrelevant or redundant candidates, requiring extensive downstream filtering. These systems are fundamentally syntactic, unable to distinguish between a feature that is mathematically valid and one that is semantically meaningful for the recommendation task at hand. This lack of domain-aware, hypothesis-driven exploration represents a significant gap, preventing these tools from replicating the strategic intelligence of an expert data scientist.
+
+\section{The Advent of Large Language Models as Reasoning Engines}
+\label{sec:intro_llms}
+
+The emergence of Large Language Models (LLMs) such as GPT-4 and LLaMA has fundamentally transformed the landscape of recommender systems, introducing new capabilities for semantic understanding, reasoning, and autonomous decision-making~\cite{Touvron2023LLaMA, Wang2024RecMind, Zhang2023AgentCF}. Unlike previous advances, LLMs are not limited to a single stage of the recommendation pipeline; they have demonstrated utility in feature engineering, representation learning, data augmentation, inference, and explainability~\cite{Wang2023LLMAgentsSurvey, Zou2025FEBP}.
+
+In feature engineering, LLMs can be prompted with schema and sample data to generate candidate features that encode domain knowledge and user intent in natural language form. This approach, as exemplified by recent frameworks such as FEBP, has outperformed traditional combinatorial methods by producing features that are both semantically meaningful and empirically effective~\cite{Zou2025FEBP}. LLMs also facilitate the creation of synthetic training data through agent-based simulation of user interactions, addressing the persistent challenge of data sparsity in conversational recommendation settings~\cite{Wang2024RecMind, Mysore2023NarrativeDriven}.
+
+Architecturally, the integration of LLMs into recommender systems can be categorised along two axes: (1) whether the LLM is fine-tuned for the domain or used in a "frozen" state, and (2) whether it functions as the core recommendation engine or as an augmentation to classical models~\cite{Xu2024Prompting, Lin2024Survey}. Fine-tuned LLMs, when used as foundational models, can leverage retrieval modules for re-ranking or generate recommendations directly, achieving competitive performance with far greater data efficiency in few-shot settings~\cite{Cao2024Aligning}. However, these approaches incur significant computational and privacy costs. Hybrid systems, where LLMs enhance classical collaborative filtering or matrix factorisation models, offer improved scalability and retrocompatibility with existing infrastructure but often sacrifice explainability and interpretability~\cite{Qiu2021UBERT}.
+
+A critical insight from both the literature and our own empirical work is that single-agent LLMs, despite their generality, are limited by their inability to self-critique, explore hypotheses iteratively, or integrate multiple perspectives~\cite{Zhang2023AgentCF}. This motivates the development of agentic, multi-agent frameworks, where specialised LLM-powered agents collaborate to simulate the workflow of a human data science team. In our project, this paradigm is operationalised through the VULCAN system, which decomposes the feature engineering process into insight discovery, strategy formation, candidate implementation, and critical evaluation, each managed by a dedicated agent. This agentic approach enables hypothesis-driven exploration, iterative refinement, and robust validation of features, addressing the limitations of both manual and automated single-agent methods.
+
+Despite their promise, LLM-based systems introduce new challenges, including susceptibility to bias~\cite{Deldjoo2024Biases}, privacy risks related to prompt injection and data leakage~\cite{Yi2024PromptInjection}, and the need for rigorous benchmarking to ensure fairness and robustness. Our implementation explicitly addresses these concerns through open-source tooling, transparent evaluation, and the use of synthetic data to supplement real-world interactions.
+
+In summary, LLMs represent a transformative step towards intelligent, interpretable, and agentic recommender systems. However, realising their full potential requires not only technical innovation but also careful architectural design, empirical validation, and critical reflection on their limitations and societal impacts.
+\section{Problem Statement: Towards Collaborative, Agentic Intelligence}
+\label{sec:intro_problem}
+
+The preceding analysis reveals a clear research gap. The field has progressed from manual feature engineering to combinatorial automation and, recently, to semantic generation with single LLMs. Yet, no existing framework effectively integrates strategic, hypothesis-driven reasoning, collaborative problem-solving, and iterative validation into a single, cohesive system for feature engineering. The central problem this thesis addresses is therefore formally stated as:
+
+\blockquote{\itshape
+How can a collaborative multi-agent system be designed to leverage the reasoning capabilities of Large Language Models to autonomously discover, implement, and validate high-quality, interpretable features for recommender systems?}
+
+At its theoretical core, this problem can be framed as a \textit{bilevel optimization} task [CITE: Colson et al., 2007]. The overall goal is to find a set of features that maximizes recommendation quality. This constitutes the \textit{outer loop} of the optimization. However, the quality of any given feature set can only be evaluated after a recommendation model has been trained using those features—the \textit{inner loop}. The performance of the inner loop is directly dependent on the decisions made in the outer loop. Formally, we seek to optimize a vector of feature-engineering hyperparameters, $\theta$, to minimize a complex objective function $J(\theta)$:
+
+\begin{equation}
+    \theta^* = \arg\min_{\theta} J(L(M(D_{train}, \theta)))
+\end{equation}
+
+where $M$ is the recommender model, $D_{train}$ is the training data, $L$ is the model's loss on a validation set, and $J$ is the outer-loop objective function that may include terms for accuracy, feature complexity, and interpretability [cite: context.md]. Existing AutoFE methods attempt to solve this by brute-force search over $\theta$, whereas this thesis proposes to solve it through an intelligent, agentic search.
+
+\section{Contributions and Thesis Outline}
+\label{sec:intro_contributions}
+
+To address the problem statement, this thesis presents VULCAN, a novel multi-agent framework for automated feature engineering. The primary contributions of this work are fourfold:
+
+\begin{enumerate}
+    \item \textbf{A Novel Multi-Agent Architecture for Feature Engineering.} We design, implement, and evaluate VULCAN, a framework that operationalizes the data science workflow by decomposing it into distinct, collaborative agent teams responsible for insight discovery, strategy formation, feature implementation, and optimization.
+    \item \textbf{Agentic Algorithms for Hypothesis-Driven Feature Synthesis.} We develop novel prompting strategies and a self-correction loop that enables an LLM-powered agent to translate high-level hypotheses into robust, validated, and parameterized feature-generation code.
+    \item \textbf{A Rigorous Empirical Evaluation.} We conduct a comprehensive set of experiments benchmarking the features generated by VULCAN against those from manual engineering and state-of-the-art automated baselines, including Featuretools, on multiple real-world datasets.
+    \item \textbf{An Open-Source Toolkit for Reproducible Research.} We release the complete source code for the VULCAN framework, experimental pipelines, and analysis scripts to ensure reproducibility and facilitate future research in agentic data science.
+\end{enumerate}
+
+The remainder of this thesis is structured to detail these contributions. \textbf{Chapter 2} describes the methodology, detailing the VULCAN system architecture, the roles of each agent, and the bilevel optimization objective. \textbf{Chapter 3} outlines the experimental setup, including the datasets, baseline models, and evaluation metrics used for our comparative analysis. \textbf{Chapter 4} presents and discusses the empirical results, including ablation studies that analyze the impact of key system components. Finally, \textbf{Chapter 5} concludes by summarizing the findings, acknowledging the limitations of this work, and proposing directions for future research.

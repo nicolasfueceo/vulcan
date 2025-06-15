@@ -66,5 +66,20 @@ class ToolRegistry:
         return tool.func(**filtered_kwargs)
 
 
+# Register add_to_central_memory tool
+
+def register_add_to_central_memory_tool(session_state):
+    try:
+        from src.utils.tools import get_add_to_central_memory_tool
+        registry.register(
+            name="add_to_central_memory",
+            description="Add a structured note and reasoning to the session's central memory for cross-epoch sharing.",
+            required_args=["note", "reasoning", "agent"],
+            optional_args=["metadata"],
+        )(get_add_to_central_memory_tool(session_state))
+    except ImportError:
+        # Tool not yet implemented or available
+        pass
+
 # Create global registry instance
 registry = ToolRegistry()

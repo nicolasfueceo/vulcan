@@ -1,0 +1,597 @@
+Tips for Report Writing…
+With some notes on presentations, too
+
+AAB
+Version 0.9
+Feb, 2022
+
+BICI Lab Tips for Reports
+
+1
+
+Project Assessment
+
+Assessment of Final Year Projects (FYPs) is by
+more than one member of staff, and generally
+the second assessor is deliberately from another
+area of research, or is randomly selected.
+
+BICI Lab Tips for Reports
+
+2
+
+Project Assessment
+The report must stand on its own, providing a clear
+progression into details of experiments from a
+broad introduction, gradually honing into the main
+contribution of your project (funnel-structure).
+In the conclusion and discussion, you can broaden
+out again to place the work into context (reverse
+funnel).
+BICI Lab Tips for Reports
+
+3
+
+Introduction
+Body
+“Funnel Structure” to
+help organise your
+report writing.
+
+Body
+Body
+Conclusions
+BICI Lab Tips for Reports
+
+4
+
+… “a mini-funnel”
+for the Abstract.
+
+Introduction
+Body
+“Funnel Structure” to
+help organise your
+report writing.
+
+Body
+
+Body
+Conclusions
+BICI Lab Tips for Reports
+
+5
+
+Figure Guidelines
+• Ensure that all figures have large, readable
+axis and value labels (text).
+• Use consistent colours and font sizes for all
+figures.
+
+• Ensure that lines on plots are sufficiently thick.
+BICI Lab Tips for Reports
+
+6
+
+Examples
+
+Matplotlib examples; these are not good examples, because axes are not labelled!
+BICI Lab Tips for Reports
+
+7
+
+Several figures combined….
+Note the consistency and sizes of
+fonts. These are all data generated
+figures, so can be
+generated programmatically.
+Note use of different types of plot
+(combined) to provide insight and
+analysis.
+Clear , readable diagrams; sparsely
+added annotations to enhance
+Interpretation.
+Symbols would be defined in caption.
+
+Garasto et al., 2018.
+
+BICI Lab Tips for Reports
+
+8
+
+10 Rules for Figures (1/2)
+1. Know Your Audience
+2. Identify Your Message
+3. Adapt the Figure to the Support Medium
+4. Captions Are Not Optional
+
+5. Do Not Trust the “Default” plot settings.
+BICI Lab Tips for Reports
+
+9
+
+10 Rules for Figures (2/2)
+6. Use Color Effectively
+7. Do Not Mislead the Reader
+8. Avoid “Chartjunk”
+9. Message >> Beauty
+10. Get the Right Tool (Matlab, Matplotlib with
+Seaborn, Inkscape)
+BICI Lab Tips for Reports
+
+10
+
+Other links for figure prep….
+From:
+https://journals.plos.org/ploscompbiol/article?i
+d=10.1371/journal.pcbi.1003833
+See also: https://www.aje.com/dist/docs/GuideCreating-Effective-Scientific-Figures-forPublication.pdf
+
+BICI Lab Tips for Reports
+
+11
+
+Figure preparation (flowcharts, etc)
+You WILL need to modify figures as you move
+from draft to final version of report/thesis;
+
+Therefore, save every figure in an editable
+format. NOT PNG, TIFF, JPG etc.
+
+BICI Lab Tips for Reports
+
+12
+
+An example of a v. good diagram
+Observe:
+Without knowing anything about what
+the paper is about, the figure and caption
+conveys a HUGE amount of information.
+Key decision to split into (A) and (B).
+“A” sets the context of the paper, and
+“B” provides a brief insight into the specific
+contribution of this paper.
+
+From Raman et al. https://www.pnas.org/content/116/21/10537
+BICI Lab Tips for Reports
+
+13
+
+Figure preparation (from experiments)
+• You WILL need to modify figures as you move
+from draft to final version of report/thesis;
+• You have two options:
+1. Write separate scripts/programs to generate each
+figure;
+
+2. Save every figure in an editable format. NOT PNG,
+TIFF, JPG etc.
+BICI Lab Tips for Reports
+
+14
+
+Examples of editable formats
+Editable means a VECTOR fomat:
+• SVG: editable using Inkscape
+• PDF (not recommended); sometimes editable via Inkscape
+• Something like TIKZ (not that easy…)
+• Power Point (not recommended)
+• Word (not recommended)
+See also http://cellbio.emory.edu/bnanes/figures/.
+BICI Lab Tips for Reports
+
+15
+
+Common error….
+• Thinking: “I can’t fit the figures in…”
+• Yes you can – in LaTeX, you can use the subcaption or
+subfigure environments (choice depends on compatibility).
+• Worst case – combine outside of document (usually for final
+version).
+• For data generated figures, there are programmatic ways of
+combining plots:
+https://matplotlib.org/3.1.0/tutorials/intermediate/constrainedlayout_guide.html
+
+BICI Lab Tips for Reports
+
+16
+
+For the AI/ML Component of Projects
+(where applicable)
+
+BICI Lab Tips for Reports
+
+17
+
+Don’t just report your “best” result
+Include results from different types of network/training
+algorithms in tabular form, not just your “final” result.
+
+BICI Lab Tips for Reports
+
+18
+
+Other examples…
+A bit “shouty” in style (capitals, but this
+issue comes from the LaTeX template
+of the publisher)….
+
+Note the extensive captions, explanation of
+column headings; where appropriate,
+standard errors are included in the results.
+
+BICI Lab Tips for Reports
+
+19
+
+Include clear architecture descriptions
+
+BICI Lab Tips for Reports
+
+20
+
+Include variants, if compared
+
+BICI Lab Tips for Reports
+
+21
+
+Don’t just report your “best” result
+Include results from different types of network/training
+algorithms in tabular form, not just your “final” result.
+
+BICI Lab Tips for Reports
+
+22
+
+Don’t just report your “best” result
+Different network variants
+
+Include results from different types of network/training
+algorithms in tabular form, not just your “final” result.
+
+BICI Lab Tips for Reports
+
+23
+
+Don’t just report your “best” result
+Different network variants
+
+Include results from different types of network/training
+algorithms in tabular form, not just your “final” result.
+
+Different performance measures
+BICI Lab Tips for Reports
+
+24
+
+Don’t just report your “best” result
+Different network variants
+
+Include results from different types of network/training
+algorithms in tabular form, not just your “final” result.
+
+Results from other
+papers...
+
+Different performance measures
+BICI Lab Tips for Reports
+
+25
+
+Reporting Experiments
+• Give all relevant experimental details. DO NOT
+assume audience knows about CIFAR,
+Montezuma’s revenge etc.
+• More to the point, explain the significance of
+using a particular dataset or environment.
+Particularly true for robotics stream people.
+
+BICI Lab Tips for Reports
+
+26
+
+Reporting Experiments
+
+Average performance in a test set/in new
+environments is only part of the story; it is
+important to report on the variability of models.
+
+BICI Lab Tips for Reports
+
+27
+
+Reporting Experiments
+Include error bars/bounds for training curves; for
+example, compute the standard deviation of
+performance as a function of training epochs, add
+upper and lower bounds as (say) +/- 1.96 sigma as
+data and training partitioning is permuted.
+
+BICI Lab Tips for Reports
+
+28
+
+Reporting Experiments
+
+BICI Lab Tips for Reports
+
+29
+
+Reporting Experiments
+• Standard deviation of performance can be
+computed in different ways, e.g. permuting
+training and test data, or starting training with
+multiple random seeds at initialisation.
+• Permuting training and test data gives some
+indication of how repeatable results might be
+in other datasets.
+BICI Lab Tips for Reports
+
+30
+
+Reporting Experiments
+
+• If you can’t permute data, or are working with
+rather restricted environments, use a
+collection of several random seeds for weight
+initialisation.
+
+BICI Lab Tips for Reports
+
+31
+
+Reporting Experiments
+You can also report results of final trained performance –
+and its variability – under data permutations or weight seed
+initialisation using tables. Note the format of mean (s.d.) below,
+but you can also use +/- notation.
+
+BICI Lab Tips for Reports
+
+32
+
+Reporting Experiments
+For the formatting of tables, see
+https://inf.ethz.ch/personal/markusp/teaching/guid
+es/guide-tables.pdf
+The LaTeX package “booktabs” has several useful
+constructs for good table formatting.
+Like figures, captions are not optional – they should
+be descriptive, and highlight key messages about
+the outcomes we can see from the table.
+BICI Lab Tips for Reports
+
+33
+
+Big Hint…
+
+A common problem in reporting work is that the
+quantity of work spent on experiments is not
+appreciated by assessors.
+
+BICI Lab Tips for Reports
+
+34
+
+Big Hint…
+The solution to this is to “squeeze as much out of your
+experiments as possible”.
+Tip: even experiments that don’t yield good performance
+can be reported. But don’t report performance where
+training is not at all happening (e.g. flat training curves).
+Tip: many authors will include performance results from
+other papers/techniques in the same table, citing papers
+where those results are reported (important!).
+BICI Lab Tips for Reports
+
+35
+
+Other tips….
+• Equations: by all means, use them. A balance to
+equations and text is key to having a readable
+report.
+• If you’ve done something “hacky” in coding, write
+an equation to express it (could be a novel
+contribution).
+• You can also express contributions/ideas through
+pseudo-code; treat as equations (label, define
+inputs/outputs etc) + add captions (like tables).
+BICI Lab Tips for Reports
+
+36
+
+Other tips….
+• Do a spell-check (of course!) AND a check for
+consistency of spelling/hyphenation.
+• Punctuation – lots of people get very upset about
+bad punctuation. Get feedback from friends.
+
+• Citation style – check for consistency (best
+sometimes, online citation entries are
+inconsistent)
+BICI Lab Tips for Reports
+
+37
+
+Get feedback on your report!!!
+• The most common source of “low” marks comes
+from not getting feedback EARLY ENOUGH on
+reports.
+
+• Provide early drafts – it does not matter if they are
+imperfect – you are NOT being assessed in the
+feedback phase…..
+
+BICI Lab Tips for Reports
+
+38
+
+Get feedback on your report!!!
+• The most common source of “low” marks comes
+from not getting feedback EARLY ENOUGH on
+reports.
+
+• Provide early drafts – it does not matter if they are
+imperfect – you are NOT being assessed in the
+feedback phase…
+
+BICI Lab Tips for Reports
+
+39
+
+Presentation Tips
+• Plan on 1 minute per slide; 20 m talk, no more
+than 20 slides.
+
+• Minimal text on slide. Do not read off things
+from slides: that is annoying.
+
+BICI Lab Tips for Reports
+
+40
+
+Speak at the right speed/volume
+• Important: if you have a tendency to speak
+fast, DON’T…You get this right from rehearsing
+the talk before you give it. Often, several
+times.
+• Speak relatively loudly (you need to practice
+this, with friendly feedback): remember, some
+people may have hearing problems.
+BICI Lab Tips for Reports
+
+41
+
+Presentation Tips
+• Do use humour where you can, but keep it
+sparse.
+• Do acknowledge collaborations etc;
+acknowledge sources of funding (PhD/RA
+students: if you are supported by a
+scholarship, say so on last slide, for example).
+
+BICI Lab Tips for Reports
+
+42
+
+Presentation Tips
+• A slide may have several figures (along the lines
+of Slide 7 and 8 of this presentation).
+• You can spend time explaining carefully each
+graph/image on the slide; allow up to 2 minutes
+for such slides.
+• Do not rush your presentation; instead, have
+extra slides to bring up if more details are needed
+BICI Lab Tips for Reports
+
+43
+
+Animations
+• Highly useful, particularly if you have timevarying images. Just incorporate as movies.
+
+• Check that movies play on the machine you
+will give the talk.
+• Remember to come up with some spoken
+explanation of what people should observe in
+the animations.
+BICI Lab Tips for Reports
+
+44
+
+Wisdom from Maria Petrou
+“You can’t just say it: you have to beat them over the head
+with it!” [The late Maria Petrou – critiquing one of my grant
+applications]
+Translation: Spell it out! Don’t assume your audience will
+understand what you are showing them in a graph or image.
+Point to what you want them to see and say (generalized
+example):
+“Note how X improves Y according to metric Z”.
+BICI Lab Tips for Reports
+
+45
+
+Presentation Tips
+• Do not underestimate how important it is to use
+the right way of explaining concepts: your
+audience will always misinterpret everything!
+• The only guard against misinterpretation of your
+work/what you say is to get feedback on your
+presentation before you present, so you know
+how to update slides to disambiguate.
+• Remember that technical terminology is often
+overloaded (in the coding sense!). Define
+everything.
+BICI Lab Tips for Reports
+
+46
+
+Avoid, avoid, avoid
+• The tendency to “play it cool” and drink water
+while you speak.
+• Speaking too quietly in an attempt to appear
+relaxed (a common issue with tech
+presentations). It is deeply irritating to most
+people that will be involved in assessing you.
+
+BICI Lab Tips for Reports
+
+47
+
+Rehearse, Rehearse, Rehearse
+• Sounds simple, but in order to be able to
+rehearse, you cannot leave the slide prep to
+the last minute!
+• True story: We have rehearsed presentations
+with students applying for PhD positions. It
+has made the difference!
+
+BICI Lab Tips for Reports
+
+48
+
+Assessment of Reports
+
+The slides following this on assessment are OLD;
+they were once applicable to reports for MScs
+and UGs; but they give a hint of what to look out
+for in report/paper writing!
+
+BICI Lab Tips for Reports
+
+49
+
+Assessment “criteria”
+Note that the
+Project Report
+carries a significant
+amount of weight.
+
+BICI Lab Tips for Reports
+
+50
+
+Assessment “criteria…”
+Things to note:
+1. First AND second marker give
+extensive justification.
+2. Clarity of report is vital (avoid
+undefined terminology that is
+specific to the sub-field).
+3. Literature survey == appropriate use
+of citations.
+4. Conclusions drawn from data ->
+in the text AND in table and figure
+captions.
+BICI Lab Tips for Reports
+
+51
+
+Questions ?
+
+BICI Lab Tips for Reports
+
+52
+
+

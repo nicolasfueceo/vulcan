@@ -15,15 +15,11 @@ from autogen import Agent
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.agents.discovery_team.insight_discovery_agents import (
-    get_insight_discovery_agents,
-)
-from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
-from src.agents.strategy_team.reflection_agent import ReflectionAgent
+from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.session_state import SessionState
+from src.utils.session_state import SessionState, CoverageTracker
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
@@ -366,19 +362,15 @@ def run_discovery_loop(session_state: SessionState) -> str:
 def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
     """Orchestrates the Strategy Team to refine insights and generate features."""
     logger.info("--- Running Strategy Loop ---")
-    insights_report = session_state.get_final_insight_report()
     if not session_state.insights:
         logger.warning("No insights found, skipping strategy loop.")
         return None
 
     run_dir = get_run_dir()
     views_file = run_dir / "generated_views.json"
-    view_descriptions = "No views created yet."
     if views_file.exists():
         with open(views_file, "r", encoding="utf-8") as f:
-            views_data = json.load(f)
-        if views_data.get("views"):
-            view_descriptions = json.dumps(views_data, indent=2)
+            json.load(f)
 
     llm_config = get_llm_config_list()
     if not llm_config:
@@ -394,56 +386,9 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
     )
 
     strategy_agents: Sequence[Agent] = [user_proxy] + list(agents.values())
-    group_chat = autogen.GroupChat(
-        agents=strategy_agents, messages=[], max_round=50, allow_repeat_speaker=True
-    )
-
-    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
     logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
-    try:
-        user_proxy.initiate_chat(
-            manager,
-            message=f"Welcome strategists. Your task is to:\n1. Refine insights into hypotheses\n2. Convert hypotheses to features\n3. Implement and optimize features\n4. Reflect on results.\nUse `run_sql_query` to verify findings. Call `finalize_hypotheses` when done.\n\n--- INSIGHTS REPORT ---\n{insights_report}\n\n--- AVAILABLE VIEWS ---\n{view_descriptions}",
-            session_state=session_state,
-        )
-
-        logger.info("--- Running Feature Realization ---")
-        FeatureRealizationAgent(llm_config=llm_config, session_state=session_state).run()
-        logger.info("--- Feature Realization Complete ---")
-
-        # --- Wire fast_mode_frac/sample_frac to optimizer.optimize ---
-        from src.agents.strategy_team import optimization_agent_v2
-
-        sample_frac = session_state.get_state("optimizer_sample_frac")
-        logger.info(f"[run_strategy_loop] Passing sample_frac={sample_frac} to optimizer.optimize")
-        # Get realized features (as dicts)
-        realized_features = session_state.get_state("realized_features")
-        if realized_features:
-            logger.info(
-                f"[run_strategy_loop] Running VULCANOptimizer on {len(realized_features)} features (sample_frac={sample_frac})"
-            )
-            optimizer = optimization_agent_v2.VULCANOptimizer(
-                db_path=session_state.get_state("db_path"), session=session_state
-            )
-            optimization_result = optimizer.optimize(
-                features=realized_features,
-                n_trials=3,  # Keep small for test speed
-                use_fast_mode=sample_frac is not None,
-                sample_frac=sample_frac,
-            )
-            logger.info(f"[run_strategy_loop] Optimization result: {optimization_result}")
-            session_state.set_state("optimization_result", optimization_result)
-        else:
-            logger.warning("[run_strategy_loop] No realized features found for optimization.")
-
-        reflection_results = ReflectionAgent(llm_config).run(session_state)
-    finally:
-        session_state.reconnect()
-
-    logger.info("--- Strategy Loop Complete ---")
-    return reflection_results
 
 
 def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
@@ -451,64 +396,49 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     Main function to run the VULCAN agent orchestration.
     Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
     After all epochs, a final full-data optimization and evaluation is performed.
-    Args:
-        epochs: Number of fast-mode epochs to run before final full-data optimization.
-        fast_mode_frac: Fraction of users to sample in fast_mode (stratified sampling).
     """
+
     run_id, run_dir = init_run()
     logger.info(f"Starting VULCAN Run ID: {run_id}")
     setup_logging()
     session_state = SessionState(run_dir)
-    # Ensure fast_mode_frac is set for all downstream logic
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
-    discovery_report = "Discovery loop did not generate a report."
-    strategy_report = "Strategy loop was not run or did not generate a report."
     all_epoch_reports = []
+    coverage_tracker = CoverageTracker()
 
     try:
         for epoch in range(epochs):
             logger.info(f"=== Starting Epoch {epoch + 1} / {epochs} (fast_mode) ===")
-            # Set fast_mode sampling for this epoch
             session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
             discovery_report = run_discovery_loop(session_state)
-            report = session_state.get_final_insight_report()
-            logger.info(report)
+            logger.info(session_state.get_final_insight_report())
 
             if not session_state.get_final_hypotheses():
                 logger.info("No hypotheses found, skipping strategy loop.")
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
-                all_epoch_reports.append(
-                    {
-                        "epoch": epoch + 1,
-                        "discovery_report": discovery_report,
-                        "strategy_report": strategy_report,
-                    }
-                )
-                break
+            else:
+                reflection_results = run_strategy_loop(session_state)
+                if reflection_results:
+                    strategy_report = json.dumps(reflection_results, indent=2)
+                else:
+                    strategy_report = "Strategy loop did not return results."
 
-            reflection_results = run_strategy_loop(session_state)
+            summary = session_state.summarise_central_memory()
+            session_state.epoch_summary = summary
+            session_state.save_to_disk()
+            session_state.clear_central_memory()
 
-            if reflection_results:
-                strategy_report = json.dumps(reflection_results, indent=2)
+            coverage_tracker.update_coverage(session_state)
             all_epoch_reports.append(
                 {
                     "epoch": epoch + 1,
                     "discovery_report": discovery_report,
                     "strategy_report": strategy_report,
+                    "epoch_summary": summary,
+                    "coverage": coverage_tracker.get_coverage(),
                 }
             )
-
-        # --- Final full-data optimization and evaluation ---
-        logger.info("=== Starting Final Full-Data Optimization and Evaluation ===")
-        session_state.set_state("fast_mode_sample_frac", None)  # Use full data
-        # Re-run strategy loop on full data (features/hypotheses are reused)
-        reflection_results = run_strategy_loop(session_state)
-        if reflection_results:
-            strategy_report = json.dumps(reflection_results, indent=2)
-        else:
-            strategy_report = "Final full-data strategy loop did not return results."
-        # Optionally, run evaluation agent here if needed
         # from src.agents.strategy_team.evaluation_agent import EvaluationAgent
         # EvaluationAgent().run(session_state)
 
@@ -530,6 +460,7 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
         f"## Final Strategy Refinement Report\n{strategy_report}\n"
     )
     logger.info("VULCAN has completed its run.")
+    print(final_report)
     return final_report
 
 

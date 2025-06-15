@@ -13,49 +13,99 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-\section{Title section}
+\section{Motivation}
+Recommender systems have become foundational infrastructure for the digital economy, driving engagement and revenue across platforms such as Netflix, Amazon, and YouTube~\cite{Resnick1994GroupLens,Koren2009MatrixFactorization,Linden2003Amazon}. Their societal and economic impact is profound, with personalization algorithms shaping not only individual user experiences but also broader patterns of information consumption and commerce~\cite{Planning_Report}. However, persistent challenges remain. The cold-start problem, lack of scrutability, and limited transparency continue to undermine user trust and system effectiveness~\cite{Planning_Report}. Users are often unable to understand or influence why certain recommendations are made, leading to reduced trust, especially when recommendations deviate from expectations. These issues are exacerbated by the increasing complexity of underlying models and the opacity of automated feature engineering (AutoFE) methods, which often operate as black boxes. The need for interpretable, narrative-driven, and agentic recommenders is now recognized as a critical research direction~\cite{litterature_review,Planning_Report}. Figure~\ref{fig:coldstart_framework} (adapted from the planning report) illustrates the proposed framework for resolving the cold-start problem through narrative-driven recommendation, emphasizing the integration of conversational feedback and LLM-powered reasoning. This thesis is motivated by the imperative to develop recommender systems that are not only accurate but also transparent, scrutable, and adaptable to evolving user needs and societal expectations.
 
-\kant[1]
+% -- Self-critique checklist:
+% - Are all claims supported by citations from both the literature review and planning report?
+% - Is the motivation deeply contextualized and non-superficial?
+% - Are figures referenced and described?
+% - Is the language formal and precise?
+% --
 
-Example of citation are here
-\cite{AdaAroKre:71,PadScaAst:16a,PadScaAst:16b,PavVdWNij:06,PurBorVar:96,SLICOT,Sca:16,Sca:16a,Sca:16b,Sca:17,Sca:18}.
+\section{Evolution of Recommender Systems}
+The historical trajectory of recommender systems is characterized by a sequence of paradigm shifts, each catalyzed by new technical and societal demands~\cite{litterature_review,Planning_Report}. Early collaborative filtering (CF) methods, such as GroupLens~\cite{Resnick1994GroupLens}, relied on user-user and item-item similarities but suffered from scalability and cold-start limitations~\cite{Planning_Report}. Amazon's item-to-item CF~\cite{Linden2003Amazon} addressed scalability, while matrix factorization (MF) approaches~\cite{Koren2009MatrixFactorization} unified prior paradigms by capturing latent user and item features, as demonstrated during the Netflix Prize competition. The integration of deep learning, notably through Two Tower Networks~\cite{Cheng2016WideDeep} and Neural Collaborative Filtering (NCF)~\cite{He2017NCF}, enabled non-linear modeling of rich feature sets, while BERT4Rec~\cite{Sun2019BERT4Rec} introduced temporal dynamics via self-attention mechanisms. Despite these advances, the feature engineering bottleneck persisted: the effectiveness of recommender systems increasingly depended on the quality of input features rather than model architecture alone~\cite{Kanter2015Featuretools,litterature_review}.
 
-And some acronyms: \ac{USA} and \ac{LTI} systems.
+Automated feature engineering (AutoFE) tools such as Featuretools~\cite{Kanter2015Featuretools} and Deep Feature Synthesis (DFS) systematized feature generation, but often lacked domain awareness and interpretability, generating vast numbers of features with limited semantic relevance~\cite{litterature_review}. Deep learning-based AutoFE further advanced representation learning but introduced new challenges in transparency and adaptability. Knowledge graph-based approaches improved explainability to some extent but did not fully resolve the core limitations~\cite{Planning_Report}. Figure~\ref{fig:rs_pipeline} (from the planning report) illustrates the modern recommender system pipeline, highlighting the centrality of feature engineering and the integration of LLMs at multiple stages.
 
-\subsection{Title subsection}
+Recent literature identifies a shift: model sophistication has reached diminishing returns, and the field now recognizes feature engineering as the new frontier for innovation~\cite{litterature_review}. This section critically assesses each paradigm, highlighting both technical advances and persistent limitations, and sets the stage for the introduction of LLM-driven, agentic approaches.
 
-\kant[1-10]
+% -- Self-critique checklist:
+% - Are all paradigms covered and critically assessed?
+% - Are transitions and limitations clearly articulated?
+% - Are figures referenced and described?
+% - Are all claims and references verified?
+% --
 
+\section{Large Language Models (LLMs) in Recommender Systems}
+Large Language Models (LLMs) have revolutionized artificial intelligence, enabling unprecedented advances in natural language understanding, reasoning, and code generation~\cite{Touvron2023LLaMA,Wang2023LLMAgentsSurvey}. Architecturally, LLMs are deep neural networks—typically based on the Transformer architecture—trained on massive corpora to capture linguistic and world knowledge. Their capabilities span context-aware text generation, code synthesis, and conversational reasoning, making them highly versatile for data-driven applications.
 
-\begin{figure}
-\centering
-\includegraphics[width=0.8\columnwidth]{imgs/buildmagnitude.pdf}
-\caption[Short description for list of figures]{This figure is taken from \cite{Sca:16}.}
-\label{fig-magnitude}
-\end{figure}%
+In recommender systems, LLMs have been integrated at multiple stages of the pipeline (see Figure~\ref{fig:rs_pipeline}):
+\begin{itemize}
+    \item \textbf{Feature Engineering and Representation:} LLMs generate rich, context-sensitive embeddings for users and items by processing textual metadata, reviews, and interaction histories. Approaches such as KALM4Rec~\cite{KALM4Rec} and KAR~\cite{KAR} leverage LLMs for semantic feature extraction, improving cold-start performance and interpretability~\cite{Planning_Report}.
+    \item \textbf{Data Augmentation and Simulation:} LLM-powered agents can simulate user conversations and generate synthetic data, enabling the training of conversational recommenders in domains lacking labeled data~\cite{Ramos2024Synthetic,Planning_Report}.
+    \item \textbf{Model Selection and Hybrid Architectures:} The field distinguishes between fine-tuned LLMs as foundational models~\cite{Cao2023SequentialRec,Ramos2024UPR} and classical recommenders enhanced by LLMs for feature extraction or explanation~\cite{U-BERT}. Figure~\ref{fig:llm_adaptation_quadrants} (adapted from the planning report) illustrates this taxonomy, showing the trade-offs between model complexity, explainability, and collaborative information.
+    \item \textbf{Agentic and Multi-Agent Paradigms:} Recent research explores orchestrating teams of LLM-powered agents, each specializing in data exploration, domain reasoning, or feature implementation~\cite{Wang2024RecMind,MACRec}. These multi-agent systems demonstrate emergent intelligence and collaborative problem-solving, exceeding the capabilities of single-agent approaches~\cite{litterature_review}.
+\end{itemize}
 
+Despite these advances, limitations persist. LLM-based recommenders often rely on static feature sets and lack systematic frameworks for interpretable, adaptive feature discovery~\cite{litterature_review}. Challenges include integrating domain knowledge, ensuring scalability, and maintaining transparency in feature selection. The computational cost and data requirements of LLMs further constrain real-world deployment. This section synthesizes insights from both the literature review and planning report to present a comprehensive, critical perspective on the state of LLMs in recommender systems.
 
-\kant[1-4]
+% -- Self-critique checklist:
+% - Are all technical claims and applications supported by dense citations?
+% - Are figures referenced and described?
+% - Are limitations and open challenges discussed?
+% - Is the narrative comprehensive and non-superficial?
+% --
 
-\subsection{Title subsection}
+\section{Problem Statement}
+Despite decades of progress and the integration of large language models (LLMs), recommender systems still face a fundamental challenge: the systematic, interpretable, and adaptive engineering of informative features~\cite{litterature_review,Planning_Report}. Traditional AutoFE tools and even recent LLM-powered agentic systems often operate with static or predefined feature sets, lacking mechanisms for collaborative, context-aware, and transparent feature creation~\cite{Kanter2015Featuretools,Zou2025FEBP,Wang2024RecMind}. This bottleneck is widely recognized in both the academic literature and practitioner surveys, with the quality of feature engineering now seen as the primary determinant of system performance~\cite{litterature_review}.
 
-\kant[1-3]
+Current LLM-based and agentic paradigms excel at leveraging user and item representations, simulating complex interactions, and generating code or explanations. However, they rarely address the full feature engineering pipeline: from hypothesis generation and candidate synthesis to validation, selection, and optimization~\cite{Wang2023LLMAgentsSurvey,Planning_Report}. Black-box automation compounds the issue by obscuring the rationale behind feature choices, undermining transparency and user trust. The absence of principled, agentic frameworks for interpretable, end-to-end feature engineering constitutes a critical research gap.
 
+This thesis addresses the question: How can we design, implement, and evaluate a multi-agent system that leverages LLMs and domain expertise to autonomously discover, synthesize, and optimize features for recommender systems—while maintaining interpretability, scalability, and real-world applicability? The answer requires integrating insights from both the literature review and planning report, and developing a framework that advances beyond current limitations.
 
-\section{Title section}
+% -- Self-critique checklist:
+% - Is the research gap clearly articulated and non-trivial?
+% - Are limitations of prior approaches and the need for agentic frameworks supported by citations?
+% - Is the problem statement specific, actionable, and relevant?
+% - Are all BibTeX references correct?
+% --
 
-\kant[1-5]
+\section{Contributions}
+This thesis makes the following contributions to the field of recommender systems and automated feature engineering, as mapped to the research gaps identified above:
+\begin{enumerate}
+    \item \textbf{Agentic Feature Engineering Framework:} Proposes and implements a novel multi-agent system that leverages LLMs and domain expertise for interpretable, collaborative, and end-to-end feature engineering. The framework supports hypothesis generation, feature synthesis, validation, and optimization, and is designed for transparency, extensibility, and reproducibility~\cite{Wang2024RecMind,Zou2025FEBP,Planning_Report}.
+    \item \textbf{Integration of LLMs in Multi-Agent Collaboration:} Demonstrates how LLMs can be orchestrated within specialized agent teams (insight discovery, strategy, implementation, evaluation) to address the full pipeline of feature engineering, from candidate generation to code realization and quality assurance~\cite{litterature_review,MACRec}.
+    \item \textbf{Empirical Evaluation and Benchmarking:} Provides a rigorous empirical evaluation of the proposed system on real-world datasets, benchmarking its performance against state-of-the-art AutoFE and LLM-based approaches. Evaluation includes metrics for recommendation quality, feature diversity, interpretability, and computational efficiency~\cite{litterature_review,Planning_Report}.
+    \item \textbf{Open-Source Implementation:} Delivers a modular, open-source software package for agentic feature engineering, with documentation, reproducible experiments, and extensible APIs to support future research and adoption.
+\end{enumerate}
 
-\section{Notation}
+Collectively, these contributions advance the state of the art in interpretable, scalable, and autonomous feature engineering for recommender systems, addressing both theoretical and practical challenges identified in the literature and planning report.
 
-Standard notation has been adopted in the Thesis, most of which is defined in this section and used throughout the remainder of the Thesis. When new notation, not included in this section is introduced, this is defined in the relevant parts of the Thesis.\smallskip\\
-\indent The symbol $\mathbb{R}_{\ge0}$ ($\mathbb{R}_{>0}$) denotes the set of non-negative (positive) real numbers; $\mathbb{C}_{<0}$ denotes the set of complex numbers with strictly negative real part; $\mathbb{C}_{0}$ denotes the set of complex numbers with zero real part and $\mathbb{D}_{<1}$ the set of complex numbers with modulo less than one.\smallskip\\
-\indent The symbol $I$ denotes the identity matrix and $\sigma(A)$ denotes the spectrum of the matrix $A\in\mathbb{R}^{n\times n}$. The symbol $\otimes$ indicates the Kronecker product and $||A||$ indicates the induced Euclidean matrix norm. Given a list of $n$ elements $a_i$, $\diag(a_i)$ indicates a diagonal matrix with diagonal elements equal to the $a_i$'s. The vectorization of a matrix $A\in\mathbb{R}^{n\times m}$, denoted by $\vect(A)$, is the $nm \times 1$ vector obtained by stacking the columns of the matrix $A$ one on top of the other, namely $\vect(A)=[a_1^{\top},a_2^{\top},\dots,a_m^{\top}]^{\top}$, where $a_i\in\mathbb{R}^n$ are the columns of $A$ and the superscript $\top$ denotes the transposition operator. The superscript $*$ indicates the conjugate transpose operator.\smallskip\\
-\indent The symbol $\Re[z]$ indicates the real part of the complex number $z$, $\Im[z]$ denotes its imaginary part and $\iota$ denotes the imaginary unit. The symbol $\epsilon_k$ indicates a vector with the $k$-th element equal to 1 and with all the other elements equal to 0. Given a function $f$, $\overline{F}$ represents its phasor at $\omega$, whereas $<\!f(t)\!>$ indicates its time average.\smallskip\\
-\indent Given a set of delays $\{\tau_j\}$, the symbol $\mathfrak{R}_T^n=\mathfrak{R}_T^n([-T,0],\mathbb{R}^n)$, with $T=  \max_j\{\tau_j\}$, indicates the set of continuous functions mapping the interval $[-T,0]$ into $\mathbb{R}^n$ with the topology of uniform convergence . The subscripts ``$\tau_j$'' and ``$\chi_j$'' denote the translation operator, \textit{e.g.}\ $x_{\tau_j}(t)=x(t-\tau_j)$.\smallskip\\
-\indent Let $\bar s \in \mathbb{C}$ and $A(s)\in \mathbb{C}^{n \times n}$. Then $\bar s\notin\sigma(A(s))$ means that $\det(\bar s I-A(\bar s ))\ne0$. $\sigma(A(s))\subset\mathbb{C}_{<0}$ means that for all $\bar s$ such that $\det(\bar s I-A(\bar s ))=0$, $\bar s \in\mathbb{C}_{<0}$.\smallskip\\
-\indent The symbol $\mathcal{L}(f(t))$ denotes the Laplace transform of the function $f(t)$ (provided that $f(t)$ is Laplace transformable) and $\mathcal{L}^{-1}\{F(s)\}$ denotes the inverse Laplace transform of $F(s)$ (provided it exists). With some abuse of notation, $\sigma(\mathcal{L}(f(t)))$ denotes the set of poles of $\mathcal{L}(f(t))$. Given two functions, $f:Y\to Z$ and $g:X\to Y$, with $f\,\circ\,g:X\to Z$ we denote the composite function $(f\,\circ\,g)(x)=f(g(x))$ which maps all $x\in X$ to $f(g(x))\in Z$.
+% -- Self-critique checklist:
+% - Are the contributions mapped to specific research gaps?
+% - Is each contribution non-trivial and justified by citations?
+% - Are claims of novelty and impact supported?
+% - Are all BibTeX references correct?
+% --
 
+\section{Thesis Outline}
+This thesis is organized to systematically address the research objectives and contributions outlined above:
+\begin{itemize}
+    \item \textbf{Chapter 1: Introduction} — Presents the context, motivation, evolution of recommender systems, integration of LLMs and agentic paradigms, the core problem statement, and the thesis contributions. Each section is deeply referenced and integrates insights from both the literature review and planning report.
+    \item \textbf{Chapter 2: Methodology} — Details the design and implementation of the agentic feature engineering framework, describing the system architecture, agent roles (insight discovery, strategy, implementation, evaluation), and the integration of LLMs. Methodological choices are justified with reference to both theoretical and empirical literature.
+    \item \textbf{Chapter 3: Experimental Evaluation} — Describes the experimental setup, datasets, evaluation metrics, and comparative analysis with baseline methods. Emphasis is placed on reproducibility, benchmarking, and critical evaluation.
+    \item \textbf{Chapter 4: Results and Discussion} — Presents empirical findings, interprets results in the context of prior work, and discusses strengths, limitations, and broader implications for the field.
+    \item \textbf{Chapter 5: Conclusion and Future Work} — Summarizes the main contributions, reflects on the research impact, and outlines directions for future work, including open research questions and potential extensions.
+\end{itemize}
+
+Each chapter is self-contained, logically ordered, and explicitly linked to the research questions and contributions. Figures, tables, and code references are provided throughout to enhance clarity and reproducibility.
+
+% -- Self-critique checklist:
+% - Is the outline precise, logically connected to objectives, and free of filler?
+% - Are chapter descriptions aligned with actual structure and research goals?
+% - Are connections to research objectives and contributions explicit?
+% --
 
 \section{Published material}
 

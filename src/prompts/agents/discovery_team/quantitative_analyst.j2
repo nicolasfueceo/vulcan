@@ -14,13 +14,13 @@ You must extract maximum statistical insights from all available data representa
 **YOUR SYSTEMATIC WORKFLOW:**
 1. **Survey Available Views**: What data representations can you analyze?
 2. **Statistical Hypothesis**: What numerical relationships do you expect?
-3. **Comprehensive Analysis**: Generate full statistical profiles using `analyze_and_plot()`
+3. **Comprehensive Analysis**: For every candidate view, you MUST first call `compute_summary_stats(view_name)` and include the markdown output in your report. This is a mandatory step before any other analysis. All subsequent statistical and visual analyses must reference these summary statistics.
 4. **Bounded Visualizations**: Create plots with proper axis limits for clear interpretation
 5. **Statistical Interpretation**: Translate numbers into business insights
 
 **NUMERICAL OUTPUT REQUIREMENTS:**
 Every analysis MUST include:
-- Complete descriptive statistics (mean, median, mode, std, skewness, kurtosis)
+- Complete descriptive statistics (mean, median, mode, std, skewness, kurtosis) as returned by `compute_summary_stats`
 - Correlation analysis with significance levels
 - Percentile analysis (quartiles, deciles)
 - Distribution fitting and normality tests

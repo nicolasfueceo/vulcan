@@ -9,6 +9,62 @@ from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
 
 
+class CoverageTracker:
+    """
+    Tracks which tables, columns, and relationships have been explored.
+    """
+    def __init__(self):
+        self.tables_explored = set()
+        self.columns_explored = set()
+        self.relationships_explored = set()
+
+    def log_table(self, table: str):
+        self.tables_explored.add(table)
+
+    def log_column(self, table: str, column: str):
+        self.columns_explored.add((table, column))
+
+    def log_relationship(self, rel: str):
+        self.relationships_explored.add(rel)
+
+    def is_table_explored(self, table: str) -> bool:
+        return table in self.tables_explored
+
+    def is_column_explored(self, table: str, column: str) -> bool:
+        return (table, column) in self.columns_explored
+
+    def is_relationship_explored(self, rel: str) -> bool:
+        return rel in self.relationships_explored
+
+    def summary(self) -> dict:
+        return {
+            "tables_explored": list(self.tables_explored),
+            "columns_explored": list(self.columns_explored),
+            "relationships_explored": list(self.relationships_explored),
+        }
+
+    def update_coverage(self, session_state):
+        # Log all tables/columns/relationships from insights and hypotheses
+        for insight in getattr(session_state, 'insights', []):
+            for t in getattr(insight, 'tables_used', []):
+                self.log_table(t)
+            for col in getattr(insight, 'columns_used', []):
+                if isinstance(col, (list, tuple)) and len(col) == 2:
+                    self.log_column(col[0], col[1])
+            for rel in getattr(insight, 'relationships_used', []):
+                self.log_relationship(rel)
+        for hypo in getattr(session_state, 'hypotheses', []):
+            for t in getattr(hypo, 'tables_used', []):
+                self.log_table(t)
+            for col in getattr(hypo, 'columns_used', []):
+                if isinstance(col, (list, tuple)) and len(col) == 2:
+                    self.log_column(col[0], col[1])
+            for rel in getattr(hypo, 'relationships_used', []):
+                self.log_relationship(rel)
+
+    def get_coverage(self):
+        return self.summary()
+
 class SessionState:
     """Manages the state and artifacts of a single pipeline run."""
 
@@ -27,6 +83,13 @@ class SessionState:
         self.best_rmse: Optional[float] = None
         self.bo_history: Dict = {}
         self.reflections: List[Dict] = []
+
+        # Coverage tracker for systematic exploration
+        self.coverage_tracker = CoverageTracker()
+
+        # Central memory for cross-epoch and intra-epoch notes
+        self.central_memory: List[Dict] = []  # Each note: {"agent": str, "note": str, "reasoning": str, ...}
+        self.epoch_summary: str = ""  # Summary string for the epoch
 
         # Run counters for agents
         self.ideation_run_count: int = 0
@@ -62,6 +125,9 @@ class SessionState:
                 self.best_params = data.get("best_params", {})
                 self.best_rmse = data.get("best_rmse")
                 self.bo_history = data.get("bo_history", {})
+                # Load central memory and epoch summary if present
+                self.central_memory = data.get("central_memory", [])
+                self.epoch_summary = data.get("epoch_summary", "")
                 self.reflections = data.get("reflections", [])
                 self.set_state("features", data.get("features", {}))
                 self.set_state("metrics", data.get("metrics", {}))
@@ -298,6 +364,18 @@ class SessionState:
             return str(state_file)
         return None
 
+    def summarise_central_memory(self, max_entries: int = 10) -> str:
+        """Return a concise markdown bullet-list summary of recent central-memory notes."""
+        if not self.central_memory:
+            return "(No central memory notes this epoch.)"
+        recent = self.central_memory[-max_entries:]
+        lines = [f"- **{e['agent']}**: {e['note']} _(reason: {e['reasoning']})_" for e in recent]
+        return "\n".join(lines)
+
+    def clear_central_memory(self):
+        """Empties central memory list."""
+        self.central_memory.clear()
+
     def save_to_disk(self):
         """Saves the current session state to disk."""
         output = {
@@ -308,6 +386,8 @@ class SessionState:
             "best_params": self.best_params,
             "best_rmse": self.best_rmse,
             "bo_history": self.bo_history,
+            "central_memory": self.central_memory,
+            "epoch_summary": self.epoch_summary,
             "reflections": self.reflections,
             "features": self.get_state("features", {}),
             "metrics": self.get_state("metrics", {}),

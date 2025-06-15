@@ -18,6 +18,61 @@ from src.utils.run_utils import get_run_dir
 logger = logging.getLogger(__name__)
 
 
+def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
+    """
+    Computes comprehensive summary statistics for all columns in a DuckDB table or view.
+    - Numerical: mean, median, mode, std, min, max, skewness, kurtosis, percentiles, missing count/ratio.
+    - Categorical: unique count, top frequencies, mode, missing count/ratio.
+    Returns a markdown-formatted report.
+    """
+    import pandas as pd
+    import numpy as np
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            # Sample up to limit rows for efficiency
+            df = conn.execute(f'SELECT * FROM "{table_or_view}" LIMIT {limit}').fetchdf()
+        if df.empty:
+            return f"No data in {table_or_view}."
+        report = f"# Summary Statistics for `{table_or_view}`\n"
+        for col in df.columns:
+            report += f"\n## Column: `{col}`\n"
+            series = df[col]
+            n_missing = series.isnull().sum()
+            missing_ratio = n_missing / len(series)
+            report += f"- Missing: {n_missing} ({missing_ratio:.2%})\n"
+            if pd.api.types.is_numeric_dtype(series):
+                desc = series.describe(percentiles=[.05, .25, .5, .75, .95])
+                report += f"- Type: Numerical\n"
+                report += f"- Count: {desc['count']}\n"
+                report += f"- Mean: {desc['mean']:.4f}\n"
+                report += f"- Std: {desc['std']:.4f}\n"
+                report += f"- Min: {desc['min']}\n"
+                report += f"- 5th pct: {desc.get('5%', np.nan)}\n"
+                report += f"- 25th pct: {desc.get('25%', np.nan)}\n"
+                report += f"- Median: {desc['50%']}\n"
+                report += f"- 75th pct: {desc.get('75%', np.nan)}\n"
+                report += f"- 95th pct: {desc.get('95%', np.nan)}\n"
+                report += f"- Max: {desc['max']}\n"
+                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                report += f"- Mode: {mode}\n"
+                report += f"- Skewness: {series.skew():.4f}\n"
+                report += f"- Kurtosis: {series.kurtosis():.4f}\n"
+                report += f"- # Unique: {series.nunique()}\n"
+            else:
+                report += f"- Type: Categorical\n"
+                report += f"- # Unique: {series.nunique()}\n"
+                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                report += f"- Mode: {mode}\n"
+                top_freq = series.value_counts().head(5)
+                report += f"- Top Values:\n"
+                for idx, val in enumerate(top_freq.index):
+                    report += f"    - {val}: {top_freq.iloc[idx]}\n"
+            report += "---\n"
+        return report
+    except Exception as e:
+        logger.error(f"Failed to compute summary stats for {table_or_view}: {e}")
+        return f"ERROR: Could not compute summary stats for {table_or_view}: {e}"
+
 def run_sql_query(query: str) -> str:
     """
     Executes a read-only SQL query against the database and returns the result as a markdown string.
@@ -177,6 +232,7 @@ def get_add_insight_tool(session_state):
         title: str,
         finding: str,
         source_representation: str,
+        reasoning_trace: List[str],
         supporting_code: str = None,
         plot_path: str = None,
         plot_interpretation: str = None,
@@ -193,6 +249,7 @@ def get_add_insight_tool(session_state):
             plot_path: The path to the plot that visualizes the finding
             plot_interpretation: LLM-generated analysis of what the plot shows
             quality_score: The quality score of the insight
+            reasoning_trace: Step-by-step reasoning chain for this insight (required)
         Returns:
             Confirmation message
         """
@@ -205,6 +262,7 @@ def get_add_insight_tool(session_state):
                 plot_path=plot_path,
                 plot_interpretation=plot_interpretation,
                 quality_score=quality_score,
+                reasoning_trace=reasoning_trace,
             )
 
             session_state.add_insight(insight)
@@ -224,6 +282,39 @@ def get_add_insight_tool(session_state):
             raise
 
     return add_insight_to_report
+
+
+def get_add_to_central_memory_tool(session_state):
+    """Returns a function that agents can call to add notes to the shared central memory."""
+    from datetime import datetime
+
+    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict] = None) -> str:
+        """Appends a structured entry to ``session_state.central_memory`` and persists it.
+
+        Args:
+            note: The core note or finding.
+            reasoning: Short rationale explaining the significance of the note.
+            agent: Name or identifier of the calling agent.
+            metadata: Optional dict with extra context (e.g., related tables, feature names).
+        Returns:
+            Confirmation string on success.
+        """
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "agent": agent,
+            "note": note,
+            "reasoning": reasoning,
+        }
+        if metadata:
+            entry["metadata"] = metadata
+
+        session_state.central_memory.append(entry)
+        # Persist session state
+        session_state.save_to_disk()
+        logger.info("Central memory updated by %s", agent)
+        return f"Note added to central memory by {agent}."
+
+    return add_to_central_memory
 
 
 def get_finalize_hypotheses_tool(session_state):

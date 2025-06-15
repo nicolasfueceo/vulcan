@@ -35,9 +35,27 @@ Start with your analysis plan:
 - Specific hypothesis for this iteration
 - Expected numerical insights you'll extract
 - Visualization strategy with bounded axes
+- Reference the CoverageTracker to identify unexplored tables/relationships
+- Consult the central_memory for key findings and 'do not repeat' notes
 
 **Part 2: Execution**
 Execute your analysis using AutoGen's native function calling.
+
+**Part 3: Reasoning Chain**
+Provide a step-by-step markdown list of your reasoning process for this iteration. Each step should include:
+- Hypothesis or question
+- Planned tool call or analysis
+- Observation/result
+- How the result influenced your next step
+
+**Part 4: Self-Reflection**
+Reflect on your process:
+- What could be wrong or missing in your analysis?
+- What did you learn?
+- What is the next best question or area to explore?
+
+**Part 5: Reasoning Trace for Insights**
+For every insight you add, build and provide a `reasoning_trace` (list of reasoning steps) as part of the insight metadata. This will be exported in the final report for transparency.
 
 **--- NUMERICAL + VISUAL OUTPUT REQUIREMENTS ---**
 Every tool call MUST produce:

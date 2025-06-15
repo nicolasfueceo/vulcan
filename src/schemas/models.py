@@ -34,6 +34,10 @@ class Insight(BaseModel):
         default_factory=list,
         description="List of table names used to generate the insight.",
     )
+    reasoning_trace: List[str] = Field(
+        default_factory=list,
+        description="Step-by-step reasoning chain or trace of how this insight was derived. Each entry should represent a reasoning step, tool call, or reflection.",
+    )
 
 
 class Hypothesis(BaseModel):

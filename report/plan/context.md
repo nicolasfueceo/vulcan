@@ -1,113 +1,132 @@
-# context.md
+Purpose: This document provides the complete context for the VULCAN project. It serves as the single source of truth for understanding the project's motivation, its final architecture, the underlying theoretical framework, and the rigorous experimental plan designed to evaluate its contributions.
 
-## Project Purpose and Motivation
+1. Project Goal & Core Philosophy
+1.1. The Problem: The Feature Engineering Bottleneck
+Modern recommender systems, despite their sophisticated models, are fundamentally limited by the quality of their input features. Manual Feature Engineering (FE) is slow, expensive, and dependent on human intuition, while traditional Automated Feature Engineering (AutoFE) tools often act as "black boxes," combinatorially generating thousands of features without strategic reasoning or domain understanding [cite: Planning_Report.pdf].
 
-**VULCAN** is an agentic, modular, and extensible framework for automated data analysis, feature engineering, and recommendation system prototyping. It is designed to orchestrate a team of AI agents—each with specialized roles—to autonomously explore, analyze, and engineer features from large-scale tabular datasets (notably, Goodreads book data). The system aims to accelerate insight discovery, automate the end-to-end ML workflow, and provide robust baselines and evaluation for recommendation and ranking tasks.
+1.2. The VULCAN Hypothesis
+Our core thesis is that a collaborative multi-agent system, designed to simulate the hypothesis-driven workflow of an expert data science team, is a superior paradigm for automated feature engineering. We hypothesize that this approach can discover higher-quality, more novel, and more interpretable features than both manual methods and monolithic automated tools.
 
-VULCAN’s core motivation is to:
-- Enable autonomous, multi-agent exploration and reasoning over complex data.
-- Automate the feature ideation, realization, and evaluation pipeline.
-- Provide a reproducible, extensible platform for ML experimentation and benchmarking.
+1.3. Core Philosophy
+VULCAN is built on the principle of moving from "black-box" automation to transparent, reasoning-based automation. The system's intelligence emerges from the structured, adversarial, and collaborative interactions between specialized agents, each with a distinct role in the scientific discovery process.
 
----
+2. The VULCAN System Architecture (As Implemented)
+The system is a procedurally-driven pipeline managed by a central orchestrator (src/orchestrator.py). It operates on a SessionState object (src/utils/session_state.py) which acts as the single source of truth for a given experimental run [cite: src_documentation.md].
 
-## High-Level Architecture
+2.1. Phase 1: Insight & Strategy Formation
+This phase uses two autogen.GroupChat sessions to simulate a research and strategy team.
 
-The project is organized around the following architectural pillars:
+Insight Discovery Team (src/orchestration/insight.py):
 
-### 1. **Agent-Based Orchestration**
-- **Orchestrator (`orchestrator.py`)**: The central entry point, managing the flow of the pipeline and coordinating agent interactions.
-- **Agents (`agents/`)**: Modular agent definitions, grouped by team (e.g., `discovery_team`, `strategy_team`). Each agent is instantiated with its own prompt, LLM config, and tool access.
+Agents: A team of DataRepresenter, QuantitativeAnalyst, and PatternSeeker agents [cite: src/agents/discovery_team/insight_discovery_agents.py].
 
-### 2. **Pipeline Stages**
-- **Insight Discovery**: Agents collaborate to find patterns and generate hypotheses from the curated data.
-- **Feature Ideation**: Specialized agents brainstorm and validate candidate features based on discovered insights.
-- **Feature Realization**: Candidate features are engineered, validated, and materialized into feature matrices.
-- **Strategy & Evaluation**: Baseline models (e.g., SVD, DeepFM, Featuretools) are run and compared, with results scored and reported.
+Workflow: This team performs a comprehensive EDA on the data. It uses tools like create_analysis_view to simplify data, run_sql_query for analysis, and the multi-modal vision_tool to interpret plots. Its findings are saved as structured Insight objects to the SessionState [cite: src/utils/tools.py].
 
-### 3. **Data Handling and Utilities**
-- **Data Curation**: External scripts curate and normalize raw Goodreads data into a DuckDB database.
-- **Feature Matrix Construction (`data/feature_matrix.py`)**: Handles the transformation of engineered features into model-ready matrices.
-- **Session State (`utils/session_state.py`)**: Central state management for orchestrator runs.
-- **Schema Management (`schemas/`)**: Pydantic models for all major data artifacts.
+Orchestration: This chat is managed by a SmartGroupChatManager that uses an LLM for context compression and provides progress-nudging prompts to keep the agents on track [cite: src/orchestrator.py].
 
-### 4. **Configuration and Prompts**
-- **Config (`config/`)**: Centralized settings, logging, and LLM configuration management.
-- **Prompts (`prompts/`)**: Jinja2 templates for agent system messages, ensuring modular and reusable agent instructions.
+Strategy Team (src/orchestration/strategy.py):
 
-### 5. **Evaluation and Reporting**
-- **Baselines (`baselines/`)**: Scripts and utilities for running and evaluating ML baselines.
-- **Evaluation (`evaluation/`)**: Scoring and metrics calculation.
-- **Reporting (`report/`)**: Output artifacts, experiment summaries, and documentation.
+Agents: A team of HypothesisAgent, StrategistAgent, and EngineerAgent [cite: src/agents/strategy_team/strategy_team_agents.py].
 
----
+Workflow: This team receives the Insight Report from the SessionState and engages in a structured debate to critique and refine the raw insights into a final, vetted list of Hypothesis objects, which are then saved back to the SessionState.
 
-## Key Components and Their Roles
+2.2. Phase 2: Feature Generation & Optimization
 
-### `orchestrator.py`
-- The main pipeline driver. Loads environment/config, initializes agents, manages the group chat (via `SmartGroupChatManager`), and coordinates all pipeline stages from insight discovery to evaluation.
+Feature Ideation (src/orchestration/ideation.py): The FeatureIdeationAgent takes the vetted hypotheses and translates them into detailed CandidateFeature specifications, including definitions for tunable hyperparameters (parameter_spec) [cite: src/schemas/models.py].
 
-### `agents/`
-- **discovery_team/**: Defines agents for quantitative analysis, pattern seeking, and data representation.
-- **strategy_team/**: Agents focused on selecting, combining, and evaluating features and strategies.
+Feature Realization (src/orchestration/realization.py): The FeatureRealizationAgent is a critical component that implements a self-correction loop.
 
-### `orchestration/`
-- Contains legacy orchestration modules for ideation, insight, realization, and strategy. These are now largely superseded by the unified orchestrator but provide useful reference logic.
+It uses a "Coder" LLM agent to write a parameterized Python function based on the candidate feature's spec and a strict Jinja2 template (src/prompts/agents/feature_realization.j2).
 
-### `utils/`
-- **session_state.py**: Manages run state, caching, and database connections.
-- **tools.py**: Implements tool functions callable by agents (e.g., SQL execution, view creation).
-- **prompt_utils.py**: Loads and renders prompt templates for agents.
-- **run_utils.py**: Utilities for run management and reproducibility.
+It validates the generated code in a secure sandbox.
 
-### `data/`
-- **cv_data_manager.py**: Handles cross-validation splits and data partitioning.
-- **feature_matrix.py**: Builds feature matrices for ML models.
+If validation fails, it re-prompts the Coder agent with the failed code and the specific error message, instructing it to generate a fix. This loop continues until validation passes or retries are exhausted [cite: src/agents/strategy_team/feature_realization_agent.py].
 
-### `baselines/`
-- Implements and runs baseline models (SVD, DeepFM, Featuretools) for benchmarking against the agent-generated pipeline.
+Optimization (src/agents/strategy_team/optimization_agent_v2.py): This is a non-agentic module, the VULCANOptimizer, that implements the core bilevel optimization.
 
-### `schemas/`
-- **models.py**: Pydantic models for features, insights, and other pipeline artifacts.
-- **eda_report_schema.json**: JSON schema for EDA reports.
+It uses the optuna library for Bayesian Optimization.
 
-### `core/`
-- **database.py**: Core database interaction logic.
-- **llm.py**: Abstractions for LLM interaction.
-- **tools.py**: Core tool definitions.
+It performs robust, cross-validated evaluation using the CVDataManager [cite: src/data/cv_data_manager.py].
 
-### `config/`
-- **settings.py**: Centralized configuration (paths, environment, etc.).
-- **log_config.py**: Logging setup.
-- **tensorboard.py**: Tensorboard integration for experiment tracking.
+Its goal is to find the optimal set of feature hyperparameters that maximizes our formal objective function.
 
-### `prompts/`
-- Modular Jinja2 templates for all agent roles and pipeline stages, enabling flexible prompt engineering.
+2.3. Phase 3: Evaluation & Reflection
 
----
+Evaluation (src/agents/strategy_team/evaluation_agent.py): Takes the best hyperparameters from the optimization phase, retrains a final model, and evaluates it on a held-out test set to produce the final performance metrics [cite: src_documentation.md].
 
-## Workflow Overview
+Reflection (src/agents/strategy_team/reflection_agent.py): This agent analyzes the results of the entire run (from the SessionState) and controls the main while loop in the orchestrator, deciding whether to terminate or initiate a new "meta-learning" cycle [cite: src_documentation.md].
 
-1. **Data Curation**: Raw Goodreads data is curated into a normalized DuckDB database.
-2. **Orchestration Start**: The orchestrator loads configs, sets up logging, and initializes the session state.
-3. **Agent Team Formation**: Specialized agents are instantiated with their own prompts and LLM configs.
-4. **Insight Discovery Loop**: Agents collaborate to discover insights, generate SQL views, and propose hypotheses.
-5. **Feature Ideation & Realization**: Candidate features are brainstormed, validated, and engineered.
-6. **Feature Matrix Construction**: Features are materialized into matrices ready for ML modeling.
-7. **Baseline and Strategy Evaluation**: Baseline models are run and scored; agent strategies are compared.
-8. **Reporting**: Results, insights, and artifacts are saved for review and further iteration.
+3. Formal Problem Definition: Bilevel Optimization
+The theoretical core of VULCAN is a bilevel optimization problem.
 
----
+The Outer Loop: A search for the optimal vector of feature hyperparameters, θ 
+∗
+ . This is performed by the VULCANOptimizer using Bayesian Optimization.
+θ 
+∗
+ =argmin 
+θ
+​
+ J(θ)
 
-## Extensibility and Design Principles
+The Inner Loop: For any given set of features generated with parameters θ, a recommendation model (LightFM) is trained and evaluated.
 
-- **Modularity**: Each agent, tool, and pipeline stage is decoupled and easily swappable.
-- **Reproducibility**: Session state, configs, and data partitions are centrally managed for reproducible experiments.
-- **Scalability**: The agent framework and tool interface are designed for extension to new domains and tasks.
-- **Transparency**: Logging, reporting, and schema validation ensure traceability and debuggability.
+The Objective Function (J(θ)): The function to be minimized. It is a weighted sum designed to balance multiple objectives:
+J(θ)=−w 
+1
+​
+ ⋅LiftGain−w 
+2
+​
+ ⋅ClusterQuality+w 
+3
+​
+ ⋅FeatureComplexity
 
----
+LiftGain: Measures the improvement of intra-cluster recommendation accuracy (NDCG@10) over a global baseline model.
 
-## Summary
+ClusterQuality: Measures the quality of user clusters using the Silhouette Score.
 
-VULCAN is a sophisticated, agent-driven platform for automated data science and recommendation system prototyping. Its architecture balances automation, modularity, and extensibility, making it suitable for both research and production-grade ML pipelines. The project’s design empowers teams to rapidly iterate on feature engineering, insight discovery, and model evaluation with minimal manual intervention.
+FeatureComplexity: A penalty term based on the number or computational cost of the features.
+
+4. Thesis Evaluation Plan: Baselines & Experiments
+To prove the efficacy of VULCAN, we will conduct a rigorous experimental comparison.
+
+4.1. Baseline Models (src/baselines/)
+
+Feature Engineering Baselines:
+
+Featuretools: Represents the state-of-the-art in non-agentic, combinatorial AutoFE.
+
+Recommender System Baselines:
+
+SVD (surprise): A classic, feature-agnostic collaborative filtering model to establish a performance floor.
+
+DeepFM (deepctr-torch): A state-of-the-art deep learning model that learns feature interactions implicitly, representing an alternative paradigm to explicit FE.
+
+Controlled Arena:
+
+LightFM: This feature-aware model will be used as the "arena" to provide a fair, head-to-head comparison of the feature sets produced by VULCAN, Featuretools, and Manual FE.
+
+4.2. Planned Ablation Studies
+
+No Collaboration: Run a version of VULCAN as a linear agent pipeline to quantify the benefit of the GroupChat architecture.
+
+Simplified Objective: Run the optimizer with a simplified objective function (e.g., only LiftGain) to prove the value of the multi-objective approach.
+
+4.3. Planned Evaluation Metrics
+
+Accuracy: Precision@k, Recall@k, NDCG@k.
+
+Beyond-Accuracy: Novelty, Diversity, Catalog Coverage.
+
+System-Level: Feature Complexity, Computational Cost, and Cluster Quality (Silhouette Score).
+
+5. Logging & Artifacts
+The pipeline is instrumented to produce a standardized set of artifacts for each run, ensuring reproducibility and providing the data needed for analysis and plotting. Key artifacts saved in runtime/runs/<run_id>/artifacts/ include:
+
+optimization_study.pkl: The complete optuna study object.
+
+final_report.json: A comprehensive summary of all metrics, results, and run statistics.
+
+realized_features.json: A list of all features generated, including their code and validation status.
