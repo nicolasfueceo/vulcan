@@ -73,7 +73,27 @@ class EvaluationAgent:
             global_metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
             global_metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
         # --- 4. Clustering and Intra-Cluster Models ---
-        cluster_labels = cluster_users_kmeans(X_train, n_clusters=5, random_state=42)
+        from sklearn.metrics import silhouette_score
+        from sklearn.cluster import KMeans
+        def select_optimal_clusters(X, min_k=2, max_k=10):
+            best_k = min_k
+            best_score = -1
+            for k in range(min_k, min(max_k, len(X)) + 1):
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(X.values)
+                if len(set(labels)) < 2:
+                    continue
+                score = silhouette_score(X.values, labels)
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+            return best_k
+        n_clusters = select_optimal_clusters(X_train, min_k=2, max_k=10)
+        cluster_labels = cluster_users_kmeans(X_train, n_clusters=n_clusters, random_state=42)
+        logger.info(f"Selected n_clusters={n_clusters} for user clustering.")
+        # Log the number of clusters to TensorBoard and metrics
+        global_metrics["n_clusters"] = n_clusters
+        self.writer.add_scalar("clustering/n_clusters", n_clusters, self.run_count)
         clusters = {}
         cluster_metrics = {}
         for label in set(cluster_labels.values()):

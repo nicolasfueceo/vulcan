@@ -55,6 +55,53 @@ def save_plot(filename: str):
     return str(abs_path)
 
 
+def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png") -> str:
+    """
+    Executes a SQL query, generates a matplotlib plot, and saves it to the run-local 'plots' directory.
+    Args:
+        query: SQL SELECT query. Must return a DataFrame with named columns.
+        plot_type: One of ['scatter', 'bar', 'hist']
+        x: Name of the column for x-axis (required for scatter/bar)
+        y: Name of the column for y-axis (required for scatter/bar)
+        file_name: Desired file name for the output plot (should end with .png)
+    Returns:
+        Absolute path to the saved plot file, or error string.
+    """
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            df = conn.execute(query).fetchdf()
+        if df.empty:
+            return "ERROR: Query returned no data to plot."
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(8, 5))
+        if plot_type == "scatter":
+            if x is None or y is None:
+                return "ERROR: 'x' and 'y' must be specified for scatter plots."
+            plt.scatter(df[x], df[y], alpha=0.7)
+            plt.xlabel(x)
+            plt.ylabel(y)
+        elif plot_type == "bar":
+            if x is None or y is None:
+                return "ERROR: 'x' and 'y' must be specified for bar plots."
+            plt.bar(df[x], df[y])
+            plt.xlabel(x)
+            plt.ylabel(y)
+        elif plot_type == "hist":
+            if x is None:
+                return "ERROR: 'x' must be specified for histogram plots."
+            plt.hist(df[x], bins=20, alpha=0.7)
+            plt.xlabel(x)
+            plt.ylabel("Frequency")
+        else:
+            return f"ERROR: Unknown plot_type '{plot_type}'. Use 'scatter', 'bar', or 'hist'."
+        plt.title(f"{plot_type.title()} plot of {y if y else x}")
+        abs_path = save_plot(file_name)
+        return abs_path
+    except Exception as e:
+        logger.error(f"Failed to create plot: {e}")
+        return f"ERROR: Could not create plot. {e}"
+
+
 def create_analysis_view(view_name: str, sql_query: str, rationale: str):
     """
     Creates a permanent view for analysis. It opens a temporary write-enabled

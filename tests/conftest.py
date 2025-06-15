@@ -37,7 +37,7 @@ def create_test_database(test_db_path: Path) -> Path:
         "age": [25, 30, 35, 40, 45, 22, 28, 33, 38, 42],
     })
     
-    pd.DataFrame({
+    items = pd.DataFrame({
         "item_id": [f"item{i}" for i in range(1, 21)],
         "popularity": range(1, 21),
     })
@@ -59,6 +59,11 @@ def create_test_database(test_db_path: Path) -> Path:
     # Create database and load data
     conn = duckdb.connect(str(test_db_path))
     
+    # Register DataFrames to DuckDB connection
+    conn.register("users", users)
+    conn.register("items", items)
+    conn.register("interactions_df", pd.DataFrame(interactions))
+
     # Create tables
     conn.execute("CREATE TABLE users AS SELECT * FROM users")
     conn.execute("CREATE TABLE items AS SELECT * FROM items")
@@ -69,7 +74,8 @@ def create_test_database(test_db_path: Path) -> Path:
         {"fold_idx": 0, "user_id": f"user{i+1}", "split": "train" if i < 8 else "test"}
         for i in range(10)
     ]
-    pd.DataFrame(cv_splits)
+    cv_splits_df = pd.DataFrame(cv_splits)
+    conn.register("cv_splits_df", cv_splits_df)
     conn.execute("CREATE TABLE cv_splits AS SELECT * FROM cv_splits_df")
     
     conn.close()

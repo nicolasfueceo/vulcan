@@ -105,10 +105,14 @@ def score_trial(
     )
 
     # 4. Calculate final objective
+    # Optionally incorporate n_clusters into the reward (encourage meaningful segmentation)
+    n_clusters = scores.get("n_clusters", 1)
+    cluster_weight = weights.get("clusters", 0.05)  # configurable
     final_objective = -(
         weights["auc"] * scores.get("auc", 0)
         + weights["precision"] * scores.get("precision_at_10", 0)
         + weights["recall"] * scores.get("recall_at_10", 0)
+        + cluster_weight * n_clusters  # Encourage more/fewer clusters depending on sign
     )
 
     logger.info(f"Trial scores: {scores} -> Final objective: {final_objective:.4f}")

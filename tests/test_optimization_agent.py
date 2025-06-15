@@ -26,8 +26,13 @@ def run_around_tests():
 
 
 def test_optimization_agent_init(tmp_path):
-    """Test that the optimizer initializes correctly."""
-    optimizer = VULCANOptimizer(data_dir=tmp_path, n_jobs=1, random_state=42)
+    """Test that the optimizer initializes correctly with the curated Goodreads DB."""
+    optimizer = VULCANOptimizer(
+        data_dir=tmp_path,
+        n_jobs=1,
+        random_state=42,
+        db_path="data/goodreads_curated.duckdb"
+    )
     assert optimizer.data_dir == Path(tmp_path)
     assert optimizer.n_jobs == 1
     assert optimizer.random_state == 42

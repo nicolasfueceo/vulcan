@@ -3,7 +3,7 @@ from loguru import logger
 from surprise import SVD, Dataset, Reader
 from surprise.accuracy import mae, rmse
 
-from src.baselines.ranking_utils import (
+from .ranking_utils import (
     calculate_ndcg,
     get_top_n_recommendations,
 )
@@ -51,6 +51,11 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
 
     # 5. Return Metrics
-    metrics = {"rmse": rmse_score, "mae": mae_score, "ndcg@10": ndcg_score}
+    metrics = {
+        "rmse": test_rmse,
+        "mae": test_mae,
+        "ndcg@10": ndcg_score,
+    }
+    logger.info(f"SVD metrics: {metrics}")
     logger.success("SVD baseline finished successfully.")
     return metrics

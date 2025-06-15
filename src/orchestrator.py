@@ -1,6 +1,11 @@
 import json
 import os
 import sys
+
+# Ensure DB views are set up for pipeline compatibility
+import scripts.setup_views
+
+scripts.setup_views.setup_views()
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -54,9 +59,7 @@ def should_continue_exploration(session_state: SessionState, round_count: int) -
         return False
 
     if round_count > 50:
-        last_insight_round = max(
-            (i.metadata.get("round_added", 0) for i in insights), default=0
-        )
+        last_insight_round = max((i.metadata.get("round_added", 0) for i in insights), default=0)
         if round_count - last_insight_round > 20:
             logger.info("Termination condition: No new insights in the last 20 rounds.")
             return False
@@ -115,24 +118,18 @@ def _fallback_compression(messages: List[Dict], keep_recent: int = 20) -> List[D
     return compressed_messages + messages[-keep_recent:]
 
 
-def compress_conversation_context(
-    messages: List[Dict], keep_recent: int = 20
-) -> List[Dict]:
+def compress_conversation_context(messages: List[Dict], keep_recent: int = 20) -> List[Dict]:
     """Intelligently compress conversation context using LLM summarization."""
     if len(messages) <= keep_recent:
         return messages
 
-    logger.info(
-        f"Compressing conversation context, keeping last {keep_recent} messages."
-    )
+    logger.info(f"Compressing conversation context, keeping last {keep_recent} messages.")
     try:
         config_file_path = os.getenv("OAI_CONFIG_LIST")
         if not config_file_path:
             raise ValueError("OAI_CONFIG_LIST environment variable not set.")
         config_list_all = config_list_from_json(config_file_path)
-        config_list = [
-            config for config in config_list_all if config.get("model") == "gpt-4o"
-        ]
+        config_list = [config for config in config_list_all if config.get("model") == "gpt-4o"]
         if not config_list:
             raise ValueError("No config found for summarization model.")
 
@@ -141,18 +138,14 @@ def compress_conversation_context(
             "cache_seed": None,
             "temperature": 0.2,
         }
-        summarizer_client = autogen.AssistantAgent(
-            "summarizer", llm_config=summarizer_llm_config
-        )
+        summarizer_client = autogen.AssistantAgent("summarizer", llm_config=summarizer_llm_config)
 
         conversation_to_summarize = "\n".join(
             [f"{m.get('role')}: {m.get('content')}" for m in messages[:-keep_recent]]
         )
         prompt = f"Please summarize the key findings, decisions, and unresolved questions from the following conversation history. Be concise, but do not lose critical information. The summary will be used as context for an ongoing AI agent discussion.\n\n---\n{conversation_to_summarize}\n---"
 
-        response = summarizer_client.generate_reply(
-            messages=[{"role": "user", "content": prompt}]
-        )
+        response = summarizer_client.generate_reply(messages=[{"role": "user", "content": prompt}])
         summary_message = {
             "role": "system",
             "content": f"## Conversation Summary ##\n{response}",
@@ -239,12 +232,8 @@ class SmartGroupChatManager(autogen.GroupChatManager):
 
         if self.round_count % 25 == 0:
             try:
-                self.groupchat.messages = compress_conversation_context(
-                    self.groupchat.messages
-                )
-                logger.info(
-                    "Applied LLM context compression at round {}", self.round_count
-                )
+                self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
+                logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
@@ -286,9 +275,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     logger.info("--- Running Insight Discovery Loop ---")
     llm_config = get_llm_config_list()
     if not llm_config:
-        raise RuntimeError(
-            "Failed to get LLM configuration, cannot proceed with discovery."
-        )
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with discovery.")
 
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
@@ -350,9 +337,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     session_state.close_connection()
     try:
         initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
-        user_proxy.initiate_chat(
-            manager, message=initial_message, session_state=session_state
-        )
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
         logger.info(
             "Exploration completed after {} rounds with {} insights",
@@ -397,9 +382,7 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
 
     llm_config = get_llm_config_list()
     if not llm_config:
-        raise RuntimeError(
-            "Failed to get LLM configuration, cannot proceed with strategy."
-        )
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with strategy.")
 
     agents = get_strategy_team_agents(llm_config)
     user_proxy = agents.pop("user_proxy")
@@ -427,10 +410,33 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         )
 
         logger.info("--- Running Feature Realization ---")
-        FeatureRealizationAgent(
-            llm_config=llm_config, session_state=session_state
-        ).run()
+        FeatureRealizationAgent(llm_config=llm_config, session_state=session_state).run()
         logger.info("--- Feature Realization Complete ---")
+
+        # --- Wire fast_mode_frac/sample_frac to optimizer.optimize ---
+        from src.agents.strategy_team import optimization_agent_v2
+
+        sample_frac = session_state.get_state("optimizer_sample_frac")
+        logger.info(f"[run_strategy_loop] Passing sample_frac={sample_frac} to optimizer.optimize")
+        # Get realized features (as dicts)
+        realized_features = session_state.get_state("realized_features")
+        if realized_features:
+            logger.info(
+                f"[run_strategy_loop] Running VULCANOptimizer on {len(realized_features)} features (sample_frac={sample_frac})"
+            )
+            optimizer = optimization_agent_v2.VULCANOptimizer(
+                db_path=session_state.get_state("db_path"), session=session_state
+            )
+            optimization_result = optimizer.optimize(
+                features=realized_features,
+                n_trials=3,  # Keep small for test speed
+                use_fast_mode=sample_frac is not None,
+                sample_frac=sample_frac,
+            )
+            logger.info(f"[run_strategy_loop] Optimization result: {optimization_result}")
+            session_state.set_state("optimization_result", optimization_result)
+        else:
+            logger.warning("[run_strategy_loop] No realized features found for optimization.")
 
         reflection_results = ReflectionAgent(llm_config).run(session_state)
     finally:
@@ -440,19 +446,31 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
     return reflection_results
 
 
-def main() -> str:
-    """Main function to run the VULCAN agent orchestration."""
+def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+    """
+    Main function to run the VULCAN agent orchestration.
+    Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
+    After all epochs, a final full-data optimization and evaluation is performed.
+    Args:
+        epochs: Number of fast-mode epochs to run before final full-data optimization.
+        fast_mode_frac: Fraction of users to sample in fast_mode (stratified sampling).
+    """
     run_id, run_dir = init_run()
     logger.info(f"Starting VULCAN Run ID: {run_id}")
     setup_logging()
     session_state = SessionState(run_dir)
+    # Ensure fast_mode_frac is set for all downstream logic
+    session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
     discovery_report = "Discovery loop did not generate a report."
     strategy_report = "Strategy loop was not run or did not generate a report."
+    all_epoch_reports = []
 
     try:
-        should_continue = True
-        while should_continue:
+        for epoch in range(epochs):
+            logger.info(f"=== Starting Epoch {epoch + 1} / {epochs} (fast_mode) ===")
+            # Set fast_mode sampling for this epoch
+            session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
             discovery_report = run_discovery_loop(session_state)
             report = session_state.get_final_insight_report()
             logger.info(report)
@@ -460,20 +478,39 @@ def main() -> str:
             if not session_state.get_final_hypotheses():
                 logger.info("No hypotheses found, skipping strategy loop.")
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
+                all_epoch_reports.append(
+                    {
+                        "epoch": epoch + 1,
+                        "discovery_report": discovery_report,
+                        "strategy_report": strategy_report,
+                    }
+                )
                 break
 
             reflection_results = run_strategy_loop(session_state)
 
             if reflection_results:
                 strategy_report = json.dumps(reflection_results, indent=2)
-
-            should_continue = (
-                reflection_results.get("should_continue", False)
-                if reflection_results
-                else False
+            all_epoch_reports.append(
+                {
+                    "epoch": epoch + 1,
+                    "discovery_report": discovery_report,
+                    "strategy_report": strategy_report,
+                }
             )
-            if not should_continue:
-                logger.info("Pipeline completion criteria met. Ending pipeline.")
+
+        # --- Final full-data optimization and evaluation ---
+        logger.info("=== Starting Final Full-Data Optimization and Evaluation ===")
+        session_state.set_state("fast_mode_sample_frac", None)  # Use full data
+        # Re-run strategy loop on full data (features/hypotheses are reused)
+        reflection_results = run_strategy_loop(session_state)
+        if reflection_results:
+            strategy_report = json.dumps(reflection_results, indent=2)
+        else:
+            strategy_report = "Final full-data strategy loop did not return results."
+        # Optionally, run evaluation agent here if needed
+        # from src.agents.strategy_team.evaluation_agent import EvaluationAgent
+        # EvaluationAgent().run(session_state)
 
     except Exception as e:
         logger.error(
@@ -489,8 +526,8 @@ def main() -> str:
 
     final_report = (
         f"# VULCAN Run Complete: {run_id}\n\n"
-        f"## Discovery Loop Report\n{discovery_report}\n\n"
-        f"## Strategy Refinement Report\n{strategy_report}\n"
+        f"## Epoch Reports\n{json.dumps(all_epoch_reports, indent=2)}\n\n"
+        f"## Final Strategy Refinement Report\n{strategy_report}\n"
     )
     logger.info("VULCAN has completed its run.")
     return final_report

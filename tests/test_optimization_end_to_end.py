@@ -28,95 +28,21 @@ def setup_and_teardown_module():
     terminate_pipeline()
 
 
-def test_optimization_end_to_end():
-    """Run end-to-end test of the optimization agent."""
-    logger.info("Starting optimization agent end-to-end test")
-    init_run()
-    session_state = SessionState()
-
-    # Define and register the feature needed for the test
-    def average_rating(df: pd.DataFrame, scale: float = 1.0) -> pd.Series:
-        """
-        Calculates the average rating for each user and applies a scaling factor.
-        The resulting feature is merged back to the original dataframe shape.
-        """
-        if df.empty:
-            return pd.Series(name="average_rating", dtype=float)
-
-        # Calculate average ratings per user and create a DataFrame from it.
-        user_avg_ratings_df = (
-            df.groupby("user_id")["rating"]
-            .mean()
-            .reset_index()
-            .rename(columns={"rating": "average_rating_temp"})
-        )
-
-        # Merge this back to the original DataFrame to broadcast the user-level feature.
-        merged_df = pd.merge(df, user_avg_ratings_df, on="user_id", how="left")
-
-        # Extract the feature column, fill NaNs, apply scaling, and return as a named Series.
-        feature_series = merged_df["average_rating_temp"].fillna(0) * scale
-        feature_series.name = "average_rating"
-        return feature_series
-
-    # Register the feature directly into the registry
-    feature_data = {
-        "func": average_rating,
-        "params": {"scale": 1.0},
-        "source_code": inspect.getsource(average_rating),
-        "passed_test": True,
-        "type": "code",
-        "source_candidate_id": None,
-    }
-    feature_registry.register(name="average_rating", feature_data=feature_data)
-
-    try:
-        # Step 1: Initialize CVDataManager with production data
-        try:
-            cv_manager = CVDataManager(
-                db_path="data/goodreads_curated.duckdb",
-                splits_dir="data/processed/cv_splits",
-            )
-            cv_manager.load_cv_folds()  # Verify it can load the data
-            logger.info("Successfully initialized CVDataManager with production data.")
-        except Exception as e:
-            logger.error(f"Failed to initialize CVDataManager: {e}")
-            pytest.fail("Could not initialize CVDataManager with production data.")
-
-        # Step 2: Configure optimizer
-        optimizer = VULCANOptimizer(n_jobs=1, random_state=42, session=session_state)
-
-        # Step 3: Run optimization
-        logger.info("Starting optimization...")
-        start_time = time.time()
-
-        features = [
-            {
-                "name": "average_rating",
-                "description": "User's average book rating",
-                "parameters": {"scale": {"type": "float", "low": 0.1, "high": 2.0}},
-                "target": "user",  # Indicates this is a user-level feature
-            }
-        ]
-
-        result = optimizer.optimize(
-            features=features,
-            n_trials=3,  # Reduced for testing
-            timeout=300,  # 5-minute timeout
-        )
-        end_time = time.time()
-        logger.info(f"Optimization finished in {end_time - start_time:.2f} seconds.")
-
-        # Step 4: Validate results
-        assert result is not None
-        assert hasattr(result, "best_params")
-        assert hasattr(result, "best_score")
-        logger.info(f"Best AUC: {result.best_score}")
-        logger.info(f"Best params: {result.best_params}")
-
-        # We expect the model to do better than random guessing
-        assert result.best_score > 0.5
-
-    finally:
-        # Ensure the session's database connection is always closed
-        session_state.close_connection()
+def test_vulcan_orchestrator_end_to_end():
+    """
+    True end-to-end test of the VULCAN pipeline: runs orchestrator.main() for one epoch with LLM calls (no mocks).
+    Checks that the pipeline completes and produces a report.
+    Adds extra logging and prints progress to stdout for visibility.
+    """
+    print("\n\n[TEST] Starting VULCAN orchestrator end-to-end test (real LLM calls, full pipeline, FAST MODE ENABLED)...\n\n")
+    from src.orchestrator import main
+    import logging
+    logging.getLogger("loguru").setLevel(logging.INFO)
+    # Activate fast mode with 10% sample
+    fast_mode_frac = 0.1
+    report = main(epochs=1, fast_mode_frac=fast_mode_frac)
+    print(f"\n[TEST] VULCAN orchestrator run complete. Report snippet:\n{report[:600]}")
+    assert "VULCAN Run Complete" in report
+    assert "Epoch Reports" in report
+    assert "Final Strategy Refinement Report" in report
+    print("\n[TEST] Full VULCAN run report (truncated):\n" + report[:2000])

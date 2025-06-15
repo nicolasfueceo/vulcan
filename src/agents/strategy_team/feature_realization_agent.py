@@ -36,6 +36,7 @@ class FeatureRealizationAgent:
         """
         Main method to realize candidate features from the session state,
         with a self-correction loop for validation failures.
+        Also wires fast_mode_frac/sample_frac from session_state to optimizer.optimize and get_fold_data.
         """
         logger.info("Starting feature realization...")
         candidate_features_data = self.session_state.get_candidate_features()
@@ -55,6 +56,17 @@ class FeatureRealizationAgent:
             code_execution_config=False,  # We execute code in our own sandbox
         )
 
+        # --- Pass fast_mode_frac/sample_frac to optimizer via session_state ---
+        fast_mode_sample_frac = self.session_state.get_state("fast_mode_sample_frac")
+        logger.info(f"[FeatureRealizationAgent] fast_mode_sample_frac before set: {fast_mode_sample_frac}")
+        if fast_mode_sample_frac is not None:
+            logger.info(f"[FeatureRealizationAgent] Using fast_mode_sample_frac={fast_mode_sample_frac} for downstream optimization.")
+        else:
+            logger.info("[FeatureRealizationAgent] No fast_mode_sample_frac set; using full data.")
+        self.session_state.set_state("optimizer_sample_frac", fast_mode_sample_frac)
+        optimizer_sample_frac = self.session_state.get_state("optimizer_sample_frac")
+        logger.info(f"[FeatureRealizationAgent] optimizer_sample_frac after set: {optimizer_sample_frac}")
+
         for candidate in candidate_features:
             logger.info(f"Attempting to realize feature: {candidate.name}")
             
@@ -69,20 +81,7 @@ class FeatureRealizationAgent:
                 else:
                     # Retry attempt: Provide the error context and ask for a fix
                     logger.warning(f"Retrying realization for '{candidate.name}' (Attempt {attempt}/{MAX_RETRIES}). Error: {last_error}")
-                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:
----
-ERROR:
-{last_error}
----
-ORIGINAL CODE:
-```python
-{code_str}
-```
-Please analyze the error and the original spec, then provide a corrected version of the full Python function.
-The function MUST be complete, including all necessary imports and the function signature.
-
-Original Spec: {candidate.spec}
-"""
+                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\nORIGINAL CODE:\n```python\n{code_str}\n```\nPlease analyze the error and the original spec, then provide a corrected version of the full Python function.\nThe function MUST be complete, including all necessary imports and the function signature.\n\nOriginal Spec: {candidate.spec}\n"""
                 # Initiate a chat to generate/fix the code
                 user_proxy.initiate_chat(self.llm_agent, message=message, max_turns=1, silent=True)
                 last_message = user_proxy.last_message(self.llm_agent)
@@ -122,9 +121,44 @@ Original Spec: {candidate.spec}
             if is_realized:
                 self._register_feature(realized)
 
-        self.session_state.set_state("realized_features", [r.model_dump() for r in realized_features])
-        successful_count = len([r for r in realized_features if r.passed_test])
-        logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features.")
+        # --- Correlation-based feature pruning ---
+        import pandas as pd
+        import numpy as np
+        feature_series = {}
+        for r in realized_features:
+            if r.passed_test:
+                try:
+                    # Compile and call the feature function on a small dummy DataFrame
+                    temp_namespace = {}
+                    exec(r.code_str, globals(), temp_namespace)
+                    func = temp_namespace[r.name]
+                    dummy_df = pd.DataFrame({"user_id": [1, 2, 3], "book_id": [10, 20, 30], "rating": [4, 5, 3]})
+                    s = func(dummy_df, **r.params)
+                    if isinstance(s, pd.Series):
+                        feature_series[r.name] = s.reset_index(drop=True)
+                except Exception as e:
+                    logger.warning(f"Could not compute feature '{r.name}' for correlation analysis: {e}")
+        if len(feature_series) > 1:
+            feature_matrix = pd.DataFrame(feature_series)
+            corr = feature_matrix.corr().abs()
+            upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+            to_drop = set()
+            for col in upper.columns:
+                for row in upper.index:
+                    if upper.loc[row, col] > 0.95:
+                        # Drop the feature with lower variance (arbitrary tie-break)
+                        var_row = feature_matrix[row].var()
+                        var_col = feature_matrix[col].var()
+                        drop = row if var_row < var_col else col
+                        to_drop.add(drop)
+            pruned_realized = [r for r in realized_features if r.name not in to_drop]
+            if to_drop:
+                logger.info(f"Pruned highly correlated features: {sorted(list(to_drop))}")
+        else:
+            pruned_realized = realized_features
+        self.session_state.set_state("realized_features", [r.model_dump() for r in pruned_realized])
+        successful_count = len([r for r in pruned_realized if r.passed_test])
+        logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features after correlation pruning.")
 
     def _register_feature(self, feature: RealizedFeature):
         """Registers a validated feature in the feature registry."""

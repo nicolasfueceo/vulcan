@@ -67,6 +67,7 @@ class VULCANOptimizer:
         n_jobs: Optional[int] = None,
         random_state: int = 42,
         session: Optional[SessionState] = None,
+        db_path: Union[str, Path] = "data/goodreads_curated.duckdb",
     ) -> None:
         """Initialize the optimizer.
 
@@ -84,7 +85,7 @@ class VULCANOptimizer:
 
         # Set up data manager
         self.data_manager = CVDataManager(
-            db_path="data/processed/reviews.duckdb",
+            db_path=db_path,
             splits_dir="data/processed/cv_splits",
         )
 
@@ -98,13 +99,9 @@ class VULCANOptimizer:
         try:
             from torch.utils.tensorboard import SummaryWriter  # type: ignore
 
-            self.writer = SummaryWriter(
-                log_dir=str(get_run_tensorboard_dir() / "optimization")
-            )
+            self.writer = SummaryWriter(log_dir=str(get_run_tensorboard_dir() / "optimization"))
         except ImportError as e:
-            logger.warning(
-                "TensorBoard not available, logging will be limited: %s", str(e)
-            )
+            logger.warning("TensorBoard not available, logging will be limited: %s", str(e))
 
     def _objective(
         self,
@@ -131,7 +128,9 @@ class VULCANOptimizer:
 
             # Determine sampling for fast mode
             sample_frac = 0.1 if use_fast_mode else None
-            logger.info(f"Running trial with {n_folds} folds. Fast mode: {use_fast_mode} (sample_frac={sample_frac})")
+            logger.info(
+                f"Running trial with {n_folds} folds. Fast mode: {use_fast_mode} (sample_frac={sample_frac})"
+            )
 
             fold_scores = []
             for fold_idx in range(n_folds):
@@ -154,7 +153,7 @@ class VULCANOptimizer:
                     features=features,
                     params=params,
                 )
-                score = float(fold_metrics['val_score'])
+                score = float(fold_metrics["val_score"])
                 fold_scores.append(score)
 
                 # Report intermediate score after each fold for pruning
@@ -176,11 +175,7 @@ class VULCANOptimizer:
         finally:
             logger.info(f"--- Finished Trial {trial.number} ---")
 
-    def _sample_parameters(
-        self, 
-        trial: Trial, 
-        features: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _sample_parameters(self, trial: Trial, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Sample parameters for a trial.
 
         Args:
@@ -211,28 +206,37 @@ class VULCANOptimizer:
                             full_param_name,
                             low=param_config["low"],
                             high=param_config["high"],
-                            step=param_config.get("step", 1)
+                            step=param_config.get("step", 1),
                         )
                     elif param_type == "float":
                         params[full_param_name] = trial.suggest_float(
                             full_param_name,
                             low=param_config.get("low", 0.0),
                             high=param_config.get("high", 1.0),
-                            log=param_config.get("log", False)
+                            log=param_config.get("log", False),
                         )
                     elif param_type == "categorical":
                         params[full_param_name] = trial.suggest_categorical(
-                            full_param_name,
-                            choices=param_config["choices"]
+                            full_param_name, choices=param_config["choices"]
                         )
                     else:
-                        logger.warning("Unknown parameter type '%s' for %s", param_type, full_param_name)
+                        logger.warning(
+                            "Unknown parameter type '%s' for %s", param_type, full_param_name
+                        )
 
             except KeyError as e:
-                logger.error("Missing required configuration for feature %s: %s", feature.get("name", "unknown"), str(e))
+                logger.error(
+                    "Missing required configuration for feature %s: %s",
+                    feature.get("name", "unknown"),
+                    str(e),
+                )
                 raise
             except Exception as e:  # pylint: disable=broad-except
-                logger.error("Error sampling parameters for feature %s: %s", feature.get("name", "unknown"), str(e))
+                logger.error(
+                    "Error sampling parameters for feature %s: %s",
+                    feature.get("name", "unknown"),
+                    str(e),
+                )
                 raise ValueError(f"Invalid parameter configuration: {str(e)}") from e
 
         return params
@@ -242,41 +246,43 @@ class VULCANOptimizer:
         df: pd.DataFrame,
         features: List[Dict[str, Any]],
         params: Dict[str, Any],
-        user_map: Dict[Any, int]
+        user_map: Dict[Any, int],
     ) -> Optional[csr_matrix]:
         """Generate user features matrix for LightFM.
-        
+
         Args:
             df: DataFrame containing user data
             features: List of feature configurations
             params: Dictionary of parameters for feature generation
             user_map: Dictionary mapping user IDs to indices
-            
+
         Returns:
             Sparse matrix of user features (n_users x n_features) or None if no features
         """
         if not features:
             return None
-        
+
         # Generate features using the existing method
         feature_df = self._generate_feature_matrix(df, features, params)
-        
+
         # Convert to sparse matrix format expected by LightFM
         from scipy.sparse import csr_matrix
-        
+
         # Create mapping from user_id to feature vector
         user_features = {}
-        for user_id, group in df.groupby('user_id'):
+        for user_id, group in df.groupby("user_id"):
             user_idx = user_map[user_id]
-            user_features[user_idx] = feature_df.loc[group.index[0]].values  # Take first row per user
-        
+            user_features[user_idx] = feature_df.loc[
+                group.index[0]
+            ].values  # Take first row per user
+
         # Convert to sparse matrix
         n_users = len(user_map)
         n_features = len(features)
-        
+
         if not user_features:
             return None
-        
+
         # Create COO matrix and convert to CSR for LightFM
         rows, cols, data = [], [], []
         for user_idx, feat_vec in user_features.items():
@@ -284,7 +290,7 @@ class VULCANOptimizer:
                 rows.append(user_idx)
                 cols.append(feat_idx)
                 data.append(float(val))
-        
+
         return csr_matrix((data, (rows, cols)), shape=(n_users, n_features))
 
     def _evaluate_fold(
@@ -308,28 +314,28 @@ class VULCANOptimizer:
             Dictionary containing evaluation metrics and parameters
         """
         # Create user and item mappings
-        user_ids = {user_id: i for i, user_id in enumerate(train_df['user_id'].unique())}
-        item_ids = {item_id: i for i, item_id in enumerate(train_df['item_id'].unique())}
-        
+        user_ids = {user_id: i for i, user_id in enumerate(train_df["user_id"].unique())}
+        item_ids = {item_id: i for i, item_id in enumerate(train_df["item_id"].unique())}
+
         # Create interaction matrices in COO format
         from scipy.sparse import coo_matrix
-        
+
         def create_interaction_matrix(df, user_map, item_map):
             # Map user and item IDs to indices
-            user_indices = df['user_id'].map(user_map).values
-            item_indices = df['item_id'].map(item_map).values
+            user_indices = df["user_id"].map(user_map).values
+            item_indices = df["item_id"].map(item_map).values
             # Create COO matrix (users x items)
             return coo_matrix(
                 (np.ones(len(df)), (user_indices, item_indices)),
-                shape=(len(user_map), len(item_map))
+                shape=(len(user_map), len(item_map)),
             )
-        
+
         # Create interaction matrices
         X_train = create_interaction_matrix(train_df, user_ids, item_ids)
         X_val = create_interaction_matrix(
-            val_df[val_df['item_id'].isin(item_ids)],  # Only include items seen in training
+            val_df[val_df["item_id"].isin(item_ids)],  # Only include items seen in training
             user_ids,
-            item_ids
+            item_ids,
         )
 
         # Train model with parameters from the trial
@@ -346,20 +352,14 @@ class VULCANOptimizer:
             "num_threads": self.n_jobs,
             "verbose": params.get("fit__verbose", False),
         }
-        
+
         # Generate user features if available
         user_features = None
         if features:
-            user_features = self._generate_user_features(
-                train_df, features, params, user_ids
-            )
-        
+            user_features = self._generate_user_features(train_df, features, params, user_ids)
+
         try:
-            model.fit(
-                interactions=X_train,
-                user_features=user_features,
-                **fit_params
-            )
+            model.fit(interactions=X_train, user_features=user_features, **fit_params)
         except Exception as e:
             logger.error(f"Error fitting model: {str(e)}")
             logger.error(f"X_train shape: {X_train.shape if hasattr(X_train, 'shape') else 'N/A'}")
@@ -370,16 +370,14 @@ class VULCANOptimizer:
 
         # Evaluate
         val_score = self._evaluate_model(
-            model, 
+            model,
             X_val,
-            user_features=user_features  # Pass user features for evaluation
+            user_features=user_features,  # Pass user features for evaluation
         )
 
         # Log metrics if writer is available and we have a valid trial number
         trial_number = (
-            getattr(self.current_trial, "number", None)
-            if hasattr(self, "current_trial")
-            else None
+            getattr(self.current_trial, "number", None) if hasattr(self, "current_trial") else None
         )
         if self.writer is not None and trial_number is not None:
             self.writer.add_scalar(f"val/auc_fold_{fold_idx}", val_score, trial_number)
@@ -417,33 +415,31 @@ class VULCANOptimizer:
             try:
                 # Extract feature parameters from the params dict
                 feature_params = {
-                    k.split('__', 1)[1]: v
+                    k.split("__", 1)[1]: v
                     for k, v in params.items()
                     if k.startswith(f"{feature_name}__")
                 }
 
                 # Generate feature using the feature registry
                 from src.utils.feature_registry import feature_registry
-                
+
                 feature_data = feature_registry.get(feature_name)
-                if feature_data and 'func' in feature_data:
-                    feature_func = feature_data['func']
+                if feature_data and "func" in feature_data:
+                    feature_func = feature_data["func"]
                     if not callable(feature_func):
-                        raise TypeError(f"Feature '{feature_name}' in registry is not a callable function.")
-                    
+                        raise TypeError(
+                            f"Feature '{feature_name}' in registry is not a callable function."
+                        )
+
                     feature_values = feature_func(df, **feature_params)
                     feature_matrix[feature_name] = feature_values
                 else:
                     logger.warning(f"Feature '{feature_name}' not found or invalid in registry.")
 
             except (ValueError, KeyError) as e:
-                logger.warning(
-                    "Failed to generate feature %s: %s", feature_name, str(e)
-                )
+                logger.warning("Failed to generate feature %s: %s", feature_name, str(e))
             except RuntimeError as e:
-                logger.error(
-                    "Runtime error generating feature %s: %s", feature_name, str(e)
-                )
+                logger.error("Runtime error generating feature %s: %s", feature_name, str(e))
 
         # If no features were generated, add a dummy feature
         if feature_matrix.empty:
@@ -453,9 +449,9 @@ class VULCANOptimizer:
 
     @staticmethod
     def _evaluate_model(
-        model: LightFM, 
+        model: LightFM,
         X_val: Union[np.ndarray, coo_matrix],
-        user_features: Optional[csr_matrix] = None
+        user_features: Optional[csr_matrix] = None,
     ) -> float:
         """Evaluate model and return validation score.
 
@@ -473,10 +469,10 @@ class VULCANOptimizer:
         try:
             # Calculate AUC score (higher is better)
             auc = auc_score(
-                model, 
-                X_val, 
+                model,
+                X_val,
                 user_features=user_features,
-                num_threads=1  # Avoid OpenMP issues
+                num_threads=1,  # Avoid OpenMP issues
             ).mean()
             return float(auc)
         except (ValueError, RuntimeError) as e:
@@ -511,9 +507,7 @@ class VULCANOptimizer:
 
         # Run optimization
         study.optimize(
-            lambda trial: self._objective(
-                trial, features, use_fast_mode=use_fast_mode
-            ),
+            lambda trial: self._objective(trial, features, use_fast_mode=use_fast_mode),
             n_trials=n_trials,
             timeout=timeout,
             n_jobs=self.n_jobs,

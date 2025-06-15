@@ -378,19 +378,49 @@ class CVDataManager:
         val_users = fold["validation"]
         test_users = fold.get("test", [])
 
-        # Apply sampling if requested
-        def sample_users(users: List[str], frac: float) -> List[str]:
+        # --- Stratified sampling by user activity ---
+        def stratified_sample_users(users: List[str], frac: float, user_activity: Dict[str, int]) -> List[str]:
+            """
+            Stratified sampling of users by activity level.
+            Args:
+                users: List of user IDs to sample from.
+                frac: Fraction to sample.
+                user_activity: Dict mapping user_id to number of interactions.
+            Returns:
+                List of sampled users preserving activity distribution.
+            """
             if frac is None or frac >= 1.0 or not users:
                 return users
+            activity_counts = np.array([user_activity.get(u, 0) for u in users])
+            if len(set(activity_counts)) <= 1:
+                rng = np.random.default_rng(random_state)
+                sample_size = max(1, int(len(users) * frac))
+                return rng.choice(users, size=sample_size, replace=False).tolist()
+            bins = np.quantile(activity_counts, np.linspace(0, 1, 6))
+            bins[0] = min(activity_counts) - 1
+            sampled_users = []
             rng = np.random.default_rng(random_state)
-            sample_size = max(1, int(len(users) * frac))
-            return rng.choice(users, size=sample_size, replace=False).tolist()
+            for i in range(5):
+                in_bin = [u for u, c in zip(users, activity_counts) if bins[i] < c <= bins[i+1]]
+                n_bin = max(1, int(len(in_bin) * frac)) if in_bin else 0
+                if in_bin and n_bin > 0:
+                    sampled_users.extend(rng.choice(in_bin, size=n_bin, replace=False).tolist())
+            return sampled_users if sampled_users else users
 
+        # Only compute user_activity if needed
+        user_activity = {}
         if sample_frac is not None and sample_frac < 1.0:
-            train_users = sample_users(train_users, sample_frac)
-            val_users = sample_users(val_users, sample_frac)
-            test_users = sample_users(test_users, sample_frac)
+            conn = self._get_connection()
+            try:
+                query = "SELECT user_id, COUNT(*) as n FROM interactions GROUP BY user_id"
+                df_activity = conn.execute(query).fetchdf()
+                user_activity = dict(zip(df_activity['user_id'], df_activity['n']))
+            finally:
+                self._return_connection(conn)
 
+            train_users = stratified_sample_users(train_users, sample_frac, user_activity)
+            val_users = stratified_sample_users(val_users, sample_frac, user_activity)
+            test_users = stratified_sample_users(test_users, sample_frac, user_activity)
         # Get column list for query
         if columns:
             column_list = ", ".join([f"r.{c}" for c in columns])

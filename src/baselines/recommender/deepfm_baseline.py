@@ -7,7 +7,7 @@ from deepctr_torch.models import DeepFM
 from loguru import logger
 from sklearn.preprocessing import LabelEncoder
 
-from src.baselines.ranking_utils import calculate_ndcg, get_top_n_recommendations
+from .ranking_utils import calculate_ndcg, get_top_n_recommendations
 
 
 def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
@@ -97,13 +97,15 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
 
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
-    eval_result = model.evaluate(test_model_input, test_labels, batch_size=256)
-    logger.info(f"DeepFM evaluation results: {eval_result}")
-
-    # 7. Return Metrics
+    predictions = model.predict(test_model_input, batch_size=256)
+    mse = np.mean((test_labels - predictions) ** 2)
+    rmse = np.sqrt(mse)
+    logger.info(f"DeepFM baseline RMSE: {rmse:.4f}")
     metrics = {
-        "mse": eval_result.get("val_mse", eval_result.get("mse", -1)),
+        "mse": mse,
+        "rmse": rmse,
         "ndcg@10": ndcg_score,
     }
+    logger.info(f"DeepFM metrics: {metrics}")
     logger.success("DeepFM baseline finished successfully.")
     return metrics

@@ -3,9 +3,13 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.baselines.deepfm_baseline import run_deepfm_baseline
-from src.baselines.featuretools_baseline import run_featuretools_baseline
-from src.baselines.svd_baseline import run_svd_baseline
+from src.baselines.recommender.deepfm_baseline import run_deepfm_baseline
+from src.baselines.feature_engineer.featuretools_baseline import run_featuretools_baseline
+from src.baselines.recommender.svd_baseline import run_svd_baseline
+from torch.utils.tensorboard import SummaryWriter
+
+# ... (other imports remain unchanged)
+
 from src.data.cv_data_manager import CVDataManager
 
 
@@ -47,18 +51,23 @@ def main():
     # Dictionary to store results from all baselines
     all_results = {}
 
-    # 2. Run Featuretools baseline
-    logger.info("--- Running Featuretools Baseline ---")
+    # 2. Run Featuretools baseline (now uses LightFM for evaluation)
+    logger.info("--- Running Featuretools Baseline (LightFM evaluation) ---")
+    writer = SummaryWriter("reports/tensorboard_baselines")
     try:
-        featuretools_results = run_featuretools_baseline(train_df, books_df, users_df)
-        all_results["featuretools"] = {
+        featuretools_metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
+        all_results["featuretools_lightfm"] = {
             "status": "success",
-            "feature_matrix_shape": list(featuretools_results.shape),
+            "metrics": featuretools_metrics,
         }
-        logger.success("Featuretools baseline completed.")
+        logger.success(f"Featuretools+LightFM baseline completed. Metrics: {featuretools_metrics}")
+        if "precision_at_10" in featuretools_metrics:
+            writer.add_scalar("featuretools_lightfm/precision_at_10", featuretools_metrics["precision_at_10"])
+        if "n_clusters" in featuretools_metrics:
+            writer.add_scalar("featuretools_lightfm/n_clusters", featuretools_metrics["n_clusters"])
     except Exception as e:
-        logger.error(f"Featuretools baseline failed: {e}")
-        all_results["featuretools"] = {"status": "failure", "error": str(e)}
+        logger.error(f"Featuretools+LightFM baseline failed: {e}")
+        all_results["featuretools_lightfm"] = {"status": "failure", "error": str(e)}
 
     # 3. Run SVD baseline (full dataset)
     logger.info("--- Running SVD Baseline ---")
@@ -66,6 +75,8 @@ def main():
         svd_results = run_svd_baseline(train_df, test_df)
         all_results["svd"] = {"status": "success", "metrics": svd_results}
         logger.success(f"SVD baseline completed. Metrics: {svd_results}")
+        if "rmse" in svd_results:
+            writer.add_scalar("svd/RMSE", svd_results["rmse"])
     except Exception as e:
         logger.error(f"SVD baseline failed: {e}")
         all_results["svd"] = {"status": "failure", "error": str(e)}
@@ -73,7 +84,7 @@ def main():
     # 5. Run Popularity baseline (to be implemented)
     logger.info("--- Running Popularity Baseline ---")
     try:
-        from src.baselines.popularity_baseline import run_popularity_baseline
+        from src.baselines.recommender.popularity_baseline import run_popularity_baseline
         popularity_results = run_popularity_baseline(train_df, test_df)
         all_results["popularity"] = {"status": "success", "metrics": popularity_results}
         logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
