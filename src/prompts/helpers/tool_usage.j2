@@ -1,10 +1,26 @@
 ### Tool Usage Guide
 
-You have one primary tool: `execute_python`. This tool runs Python code in a sandboxed environment that has access to the database and a set of powerful helper functions.
+You have one primary tool: `execute_python`. This tool runs Python code in a sandboxed, stateless environment with access to the database and a set of powerful helper functions.
 
 **ALL actions you take MUST be performed by calling `execute_python` with the appropriate Python code.**
 
-**Available Python Helper Functions:**
+**Critical Guidance for All Agents:**
+- **Stateless Execution:** Every `execute_python` call is completely independent. No variables or data persist between calls. You MUST reload or redefine all data (such as DataFrames) you need at the start of each code block—even if you defined them in a previous block.
+- **Plotting Best Practices:** Always plot the full data distribution unless there is a strong analytical reason to subsample or restrict axes. Avoid setting axis limits (e.g., `plt.xlim`, `plt.ylim`) unless needed for clarity or to highlight a specific feature. Do not hide important data.
+- **Helper Functions:** The following helpers are always available in the local scope of your code block: `save_plot`, `get_table_sample`, `conn`, `add_insight_to_report`, `add_to_central_memory`.
+- **Plot Saving:** You must call `save_plot(filename)` to save any visualization. Plots are saved to the current run's output directory.
+
+**View Creation Approaches:**
+- For exploratory or temporary analysis, you may create SQL views directly using `run_sql_query` or by calling `conn.execute("CREATE VIEW ...")` inside `execute_python`. This is fast and flexible for prototyping.
+- For persistent, documented, and tracked views, always use `create_analysis_view(view_name, sql_query, rationale)`.
+- Both approaches are valid; use the one that fits your workflow. If a view should be shared and re-used, document it with `create_analysis_view`.
+
+**Common Mistakes to Avoid:**
+- Assuming variables or DataFrames defined in one `execute_python` call will be available in another—they will not.
+- Forgetting to reload data at the start of a code block.
+- Not calling `save_plot` after generating a plot (plots will not be saved automatically).
+- Setting axis limits that hide important data without justification.
+- Not including summary statistics or supporting evidence for findings.
 
 These functions are available for you to use *inside the code* you pass to `execute_python`.
 

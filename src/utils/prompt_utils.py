@@ -82,5 +82,3 @@ def load_prompt(template_name: str, **kwargs) -> str:
         raise
 
 
-# Initialize the database schema on module load
-_refresh_database_schema()

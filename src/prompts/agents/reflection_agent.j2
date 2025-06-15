@@ -25,6 +25,9 @@ You are an expert data scientist and strategist. Your goal is to analyze the res
 - Are there any obvious patterns or relationships that haven't been investigated?
 - Would additional exploration likely lead to significant improvements?
 
+**Central Memory Note:**
+If you discover a lesson, warning, or insight that is important for future runs (e.g., a recurring data issue, a key finding that should not be forgotten, or a mistake to avoid), you MUST call `add_to_central_memory(note, reasoning, agent, metadata)` via `execute_python` before you finish your response. See the Tool Usage Guide for details and an example.
+
 **Your Response:**
 You must respond with a JSON object containing:
 ```json

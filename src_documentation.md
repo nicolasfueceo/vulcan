@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-14 20:50:32
+Generated on: 2025-06-15 07:55:24
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -43,6 +43,10 @@ This document contains the complete source code structure and contents of the `s
 │   │   ├── 9394952767601150040
 │   │   └── 9713079930055746817
 │   └── CACHEDIR.TAG
+├── .windsurf/
+│   └── rules/
+│       ├── thesis-audience.md
+│       └── writing-thesis.md
 ├── README.md
 ├── config/
 │   └── OAI_CONFIG_LIST.json
@@ -57,6 +61,8 @@ This document contains the complete source code structure and contents of the `s
 │   │   └── cv_splits/
 │   │       ├── cv_folds.json
 │   │       └── cv_summary.json
+│   ├── root/
+│   │   └── fuegoRecommender/
 │   ├── splits/
 │   │   ├── cold_start_users.json
 │   │   ├── cv_folds.json
@@ -76,22 +82,52 @@ This document contains the complete source code structure and contents of the `s
 │       ├── get_curated_schema.py
 │       ├── inspect_raw_dates.py
 │       └── verify_curated_dates.py
-├── debug_user_counts.py
 ├── docs/
 │   └── code_mindmap.mermaid
 ├── generate_src_docs.py
 ├── pyproject.toml
 ├── report/
 │   ├── .DS_Store
-│   └── plan/
-│       ├── context.md
-│       ├── intro.md
-│       └── overall.md
+│   ├── latex/
+│   │   ├── IC_New_Logo.pdf
+│   │   ├── chapters/
+│   │   │   ├── Abstract.tex
+│   │   │   ├── Acknowledgement.tex
+│   │   │   ├── AppendixA.tex
+│   │   │   ├── Chapter1.tex
+│   │   │   ├── Chapter1_final_rewrite.tex
+│   │   │   ├── Chapter1_rewrite.tex
+│   │   │   ├── Chapter2.tex
+│   │   │   ├── Conclusions.tex
+│   │   │   ├── LastChapter.tex
+│   │   │   ├── ListAcronyms.tex
+│   │   │   └── OrigSta_Copyright.tex
+│   │   ├── ic_eee_thesis.cls
+│   │   ├── imgs/
+│   │   │   └── buildmagnitude.pdf
+│   │   ├── main.tex
+│   │   └── references.bib
+│   ├── plan/
+│   │   ├── chapter1_crossref_map.md
+│   │   ├── context.md
+│   │   ├── intro.md
+│   │   ├── introduction_plan.md
+│   │   └── overall.md
+│   └── scaffolds/
+│       ├── Planning_Report.pdf
+│       ├── Planning_Report.txt
+│       ├── Report and Presentation Tips v7.pdf
+│       ├── Report_and_Presentation_Tips_v7.txt
+│       └── litterature_review.md
 ├── requirements.txt
 ├── scripts/
 │   ├── __pycache__/
 │   ├── check_lightfm_openmp.py
-│   └── inspect_cv_splits.py
+│   ├── create_interactions_view.sql
+│   ├── inspect_cv_splits.py
+│   ├── setup_views.py
+│   ├── test_finalize_hypotheses.py
+│   └── test_strategy_team.py
 ├── src/
 │   ├── __pycache__/
 │   ├── agents/
@@ -103,6 +139,7 @@ This document contains the complete source code structure and contents of the `s
 │   │   └── strategy_team/
 │   │       ├── __pycache__/
 │   │       ├── evaluation_agent.py
+│   │       ├── feature_auditor_agent.py
 │   │       ├── feature_realization_agent.py
 │   │       ├── hypothesis_agents.py
 │   │       ├── optimization_agent_v2.py
@@ -110,12 +147,14 @@ This document contains the complete source code structure and contents of the `s
 │   │       └── strategy_team_agents.py
 │   ├── baselines/
 │   │   ├── __pycache__/
-│   │   ├── deepfm_baseline.py
-│   │   ├── featuretools_baseline.py
-│   │   ├── popularity_baseline.py
-│   │   ├── ranking_utils.py
-│   │   ├── run_all_baselines.py
-│   │   └── svd_baseline.py
+│   │   ├── feature_engineer/
+│   │   │   └── featuretools_baseline.py
+│   │   ├── recommender/
+│   │   │   ├── deepfm_baseline.py
+│   │   │   ├── popularity_baseline.py
+│   │   │   ├── ranking_utils.py
+│   │   │   └── svd_baseline.py
+│   │   └── run_all_baselines.py
 │   ├── config/
 │   │   ├── __pycache__/
 │   │   ├── log_config.py
@@ -199,6 +238,8 @@ This document contains the complete source code structure and contents of the `s
     │   ├── __pycache__/
     │   ├── test_beyond_accuracy.py
     │   └── test_clustering.py
+    ├── test_central_memory.py
+    ├── test_insight_discovery.py
     ├── test_optimization_agent.py
     ├── test_optimization_end_to_end.py
     └── test_orchestrator_e2e.py
@@ -263,7 +304,7 @@ def get_insight_discovery_agents(
 
 ### `agents/strategy_team/evaluation_agent.py`
 
-**File size:** 7,500 bytes
+**File size:** 8,519 bytes
 
 ```python
 # src/agents/evaluation_agent.py
@@ -341,7 +382,27 @@ class EvaluationAgent:
             global_metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
             global_metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
         # --- 4. Clustering and Intra-Cluster Models ---
-        cluster_labels = cluster_users_kmeans(X_train, n_clusters=5, random_state=42)
+        from sklearn.metrics import silhouette_score
+        from sklearn.cluster import KMeans
+        def select_optimal_clusters(X, min_k=2, max_k=10):
+            best_k = min_k
+            best_score = -1
+            for k in range(min_k, min(max_k, len(X)) + 1):
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(X.values)
+                if len(set(labels)) < 2:
+                    continue
+                score = silhouette_score(X.values, labels)
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+            return best_k
+        n_clusters = select_optimal_clusters(X_train, min_k=2, max_k=10)
+        cluster_labels = cluster_users_kmeans(X_train, n_clusters=n_clusters, random_state=42)
+        logger.info(f"Selected n_clusters={n_clusters} for user clustering.")
+        # Log the number of clusters to TensorBoard and metrics
+        global_metrics["n_clusters"] = n_clusters
+        self.writer.add_scalar("clustering/n_clusters", n_clusters, self.run_count)
         clusters = {}
         cluster_metrics = {}
         for label in set(cluster_labels.values()):
@@ -415,9 +476,70 @@ class EvaluationAgent:
         self.writer.close()
 ```
 
+### `agents/strategy_team/feature_auditor_agent.py`
+
+**File size:** 2,495 bytes
+
+```python
+import logging
+from src.utils.tools import compute_summary_stats, create_plot
+from src.utils.tools import run_sql_query  # for data preview if needed
+from src.utils.run_utils import get_run_dir
+
+logger = logging.getLogger(__name__)
+
+class FeatureAuditorAgent:
+    """
+    Audits realized features for informativeness using comprehensive statistics, plots, and vision analysis.
+    """
+    def __init__(self, db_path, vision_tool):
+        self.db_path = db_path
+        self.vision_tool = vision_tool  # Callable: vision_tool(plot_path) -> str
+        self.plots_dir = get_run_dir() / "plots"
+        self.plots_dir.mkdir(exist_ok=True)
+
+    def audit_feature(self, feature_name: str) -> dict:
+        """
+        For a given feature (column in a realized features view/table):
+        - Compute summary stats
+        - Generate and save plot
+        - Use vision tool to interpret plot
+        - Log structured insight
+        Returns a dict with stats, plot_path, vision_summary, and a boolean 'informative'.
+        """
+        try:
+            stats_md = compute_summary_stats(feature_name)
+            # Generate histogram plot for the feature
+            plot_path = create_plot(f'SELECT "{feature_name}" FROM realized_features', plot_type="hist", x=feature_name, file_name=f"{feature_name}_hist.png")
+            vision_summary = self.vision_tool(plot_path) if not plot_path.startswith("ERROR") else "Plot could not be generated."
+            # Simple informativeness filter: feature is informative if not constant and not mostly missing
+            informative = ("No data" not in stats_md and "ERROR" not in stats_md and "Missing: 0" not in stats_md)
+            insight = {
+                "feature": feature_name,
+                "stats": stats_md,
+                "plot_path": plot_path,
+                "vision_summary": vision_summary,
+                "informative": informative
+            }
+            logger.info(f"Audited feature {feature_name}: informative={informative}")
+            return insight
+        except Exception as e:
+            logger.error(f"Failed to audit feature {feature_name}: {e}")
+            return {"feature": feature_name, "error": str(e), "informative": False}
+
+    def audit_features(self, feature_names: list) -> list:
+        """
+        Audits a list of features and returns a list of insight dicts.
+        """
+        results = []
+        for feat in feature_names:
+            results.append(self.audit_feature(feat))
+        return results
+```
+
 ### `agents/strategy_team/feature_realization_agent.py`
 
-**File size:** 12,270 bytes
+**File size:** 15,108 bytes
 
 ```python
 # src/agents/strategy_team/feature_realization_agent.py
@@ -458,6 +580,7 @@ class FeatureRealizationAgent:
         """
         Main method to realize candidate features from the session state,
         with a self-correction loop for validation failures.
+        Also wires fast_mode_frac/sample_frac from session_state to optimizer.optimize and get_fold_data.
         """
         logger.info("Starting feature realization...")
         candidate_features_data = self.session_state.get_candidate_features()
@@ -477,6 +600,17 @@ class FeatureRealizationAgent:
             code_execution_config=False,  # We execute code in our own sandbox
         )
 
+        # --- Pass fast_mode_frac/sample_frac to optimizer via session_state ---
+        fast_mode_sample_frac = self.session_state.get_state("fast_mode_sample_frac")
+        logger.info(f"[FeatureRealizationAgent] fast_mode_sample_frac before set: {fast_mode_sample_frac}")
+        if fast_mode_sample_frac is not None:
+            logger.info(f"[FeatureRealizationAgent] Using fast_mode_sample_frac={fast_mode_sample_frac} for downstream optimization.")
+        else:
+            logger.info("[FeatureRealizationAgent] No fast_mode_sample_frac set; using full data.")
+        self.session_state.set_state("optimizer_sample_frac", fast_mode_sample_frac)
+        optimizer_sample_frac = self.session_state.get_state("optimizer_sample_frac")
+        logger.info(f"[FeatureRealizationAgent] optimizer_sample_frac after set: {optimizer_sample_frac}")
+
         for candidate in candidate_features:
             logger.info(f"Attempting to realize feature: {candidate.name}")
             
@@ -491,20 +625,7 @@ class FeatureRealizationAgent:
                 else:
                     # Retry attempt: Provide the error context and ask for a fix
                     logger.warning(f"Retrying realization for '{candidate.name}' (Attempt {attempt}/{MAX_RETRIES}). Error: {last_error}")
-                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:
----
-ERROR:
-{last_error}
----
-ORIGINAL CODE:
-```python
-{code_str}
-```
-Please analyze the error and the original spec, then provide a corrected version of the full Python function.
-The function MUST be complete, including all necessary imports and the function signature.
-
-Original Spec: {candidate.spec}
-"""
+                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\nORIGINAL CODE:\n```python\n{code_str}\n```\nPlease analyze the error and the original spec, then provide a corrected version of the full Python function.\nThe function MUST be complete, including all necessary imports and the function signature.\n\nOriginal Spec: {candidate.spec}\n"""
                 # Initiate a chat to generate/fix the code
                 user_proxy.initiate_chat(self.llm_agent, message=message, max_turns=1, silent=True)
                 last_message = user_proxy.last_message(self.llm_agent)
@@ -544,9 +665,44 @@ Original Spec: {candidate.spec}
             if is_realized:
                 self._register_feature(realized)
 
-        self.session_state.set_state("realized_features", [r.model_dump() for r in realized_features])
-        successful_count = len([r for r in realized_features if r.passed_test])
-        logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features.")
+        # --- Correlation-based feature pruning ---
+        import pandas as pd
+        import numpy as np
+        feature_series = {}
+        for r in realized_features:
+            if r.passed_test:
+                try:
+                    # Compile and call the feature function on a small dummy DataFrame
+                    temp_namespace = {}
+                    exec(r.code_str, globals(), temp_namespace)
+                    func = temp_namespace[r.name]
+                    dummy_df = pd.DataFrame({"user_id": [1, 2, 3], "book_id": [10, 20, 30], "rating": [4, 5, 3]})
+                    s = func(dummy_df, **r.params)
+                    if isinstance(s, pd.Series):
+                        feature_series[r.name] = s.reset_index(drop=True)
+                except Exception as e:
+                    logger.warning(f"Could not compute feature '{r.name}' for correlation analysis: {e}")
+        if len(feature_series) > 1:
+            feature_matrix = pd.DataFrame(feature_series)
+            corr = feature_matrix.corr().abs()
+            upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+            to_drop = set()
+            for col in upper.columns:
+                for row in upper.index:
+                    if upper.loc[row, col] > 0.95:
+                        # Drop the feature with lower variance (arbitrary tie-break)
+                        var_row = feature_matrix[row].var()
+                        var_col = feature_matrix[col].var()
+                        drop = row if var_row < var_col else col
+                        to_drop.add(drop)
+            pruned_realized = [r for r in realized_features if r.name not in to_drop]
+            if to_drop:
+                logger.info(f"Pruned highly correlated features: {sorted(list(to_drop))}")
+        else:
+            pruned_realized = realized_features
+        self.session_state.set_state("realized_features", [r.model_dump() for r in pruned_realized])
+        successful_count = len([r for r in pruned_realized if r.passed_test])
+        logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features after correlation pruning.")
 
     def _register_feature(self, feature: RealizedFeature):
         """Registers a validated feature in the feature registry."""
@@ -770,7 +926,7 @@ def get_hypothesis_agents(
 
 ### `agents/strategy_team/optimization_agent_v2.py`
 
-**File size:** 23,182 bytes
+**File size:** 23,063 bytes
 
 ```python
 """
@@ -842,6 +998,7 @@ class VULCANOptimizer:
         n_jobs: Optional[int] = None,
         random_state: int = 42,
         session: Optional[SessionState] = None,
+        db_path: Union[str, Path] = "data/goodreads_curated.duckdb",
     ) -> None:
         """Initialize the optimizer.
 
@@ -859,7 +1016,7 @@ class VULCANOptimizer:
 
         # Set up data manager
         self.data_manager = CVDataManager(
-            db_path="data/processed/reviews.duckdb",
+            db_path=db_path,
             splits_dir="data/processed/cv_splits",
         )
 
@@ -873,13 +1030,9 @@ class VULCANOptimizer:
         try:
             from torch.utils.tensorboard import SummaryWriter  # type: ignore
 
-            self.writer = SummaryWriter(
-                log_dir=str(get_run_tensorboard_dir() / "optimization")
-            )
+            self.writer = SummaryWriter(log_dir=str(get_run_tensorboard_dir() / "optimization"))
         except ImportError as e:
-            logger.warning(
-                "TensorBoard not available, logging will be limited: %s", str(e)
-            )
+            logger.warning("TensorBoard not available, logging will be limited: %s", str(e))
 
     def _objective(
         self,
@@ -906,7 +1059,9 @@ class VULCANOptimizer:
 
             # Determine sampling for fast mode
             sample_frac = 0.1 if use_fast_mode else None
-            logger.info(f"Running trial with {n_folds} folds. Fast mode: {use_fast_mode} (sample_frac={sample_frac})")
+            logger.info(
+                f"Running trial with {n_folds} folds. Fast mode: {use_fast_mode} (sample_frac={sample_frac})"
+            )
 
             fold_scores = []
             for fold_idx in range(n_folds):
@@ -929,7 +1084,7 @@ class VULCANOptimizer:
                     features=features,
                     params=params,
                 )
-                score = float(fold_metrics['val_score'])
+                score = float(fold_metrics["val_score"])
                 fold_scores.append(score)
 
                 # Report intermediate score after each fold for pruning
@@ -951,11 +1106,7 @@ class VULCANOptimizer:
         finally:
             logger.info(f"--- Finished Trial {trial.number} ---")
 
-    def _sample_parameters(
-        self, 
-        trial: Trial, 
-        features: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _sample_parameters(self, trial: Trial, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Sample parameters for a trial.
 
         Args:
@@ -986,28 +1137,37 @@ class VULCANOptimizer:
                             full_param_name,
                             low=param_config["low"],
                             high=param_config["high"],
-                            step=param_config.get("step", 1)
+                            step=param_config.get("step", 1),
                         )
                     elif param_type == "float":
                         params[full_param_name] = trial.suggest_float(
                             full_param_name,
                             low=param_config.get("low", 0.0),
                             high=param_config.get("high", 1.0),
-                            log=param_config.get("log", False)
+                            log=param_config.get("log", False),
                         )
                     elif param_type == "categorical":
                         params[full_param_name] = trial.suggest_categorical(
-                            full_param_name,
-                            choices=param_config["choices"]
+                            full_param_name, choices=param_config["choices"]
                         )
                     else:
-                        logger.warning("Unknown parameter type '%s' for %s", param_type, full_param_name)
+                        logger.warning(
+                            "Unknown parameter type '%s' for %s", param_type, full_param_name
+                        )
 
             except KeyError as e:
-                logger.error("Missing required configuration for feature %s: %s", feature.get("name", "unknown"), str(e))
+                logger.error(
+                    "Missing required configuration for feature %s: %s",
+                    feature.get("name", "unknown"),
+                    str(e),
+                )
                 raise
             except Exception as e:  # pylint: disable=broad-except
-                logger.error("Error sampling parameters for feature %s: %s", feature.get("name", "unknown"), str(e))
+                logger.error(
+                    "Error sampling parameters for feature %s: %s",
+                    feature.get("name", "unknown"),
+                    str(e),
+                )
                 raise ValueError(f"Invalid parameter configuration: {str(e)}") from e
 
         return params
@@ -1017,41 +1177,43 @@ class VULCANOptimizer:
         df: pd.DataFrame,
         features: List[Dict[str, Any]],
         params: Dict[str, Any],
-        user_map: Dict[Any, int]
+        user_map: Dict[Any, int],
     ) -> Optional[csr_matrix]:
         """Generate user features matrix for LightFM.
-        
+
         Args:
             df: DataFrame containing user data
             features: List of feature configurations
             params: Dictionary of parameters for feature generation
             user_map: Dictionary mapping user IDs to indices
-            
+
         Returns:
             Sparse matrix of user features (n_users x n_features) or None if no features
         """
         if not features:
             return None
-        
+
         # Generate features using the existing method
         feature_df = self._generate_feature_matrix(df, features, params)
-        
+
         # Convert to sparse matrix format expected by LightFM
         from scipy.sparse import csr_matrix
-        
+
         # Create mapping from user_id to feature vector
         user_features = {}
-        for user_id, group in df.groupby('user_id'):
+        for user_id, group in df.groupby("user_id"):
             user_idx = user_map[user_id]
-            user_features[user_idx] = feature_df.loc[group.index[0]].values  # Take first row per user
-        
+            user_features[user_idx] = feature_df.loc[
+                group.index[0]
+            ].values  # Take first row per user
+
         # Convert to sparse matrix
         n_users = len(user_map)
         n_features = len(features)
-        
+
         if not user_features:
             return None
-        
+
         # Create COO matrix and convert to CSR for LightFM
         rows, cols, data = [], [], []
         for user_idx, feat_vec in user_features.items():
@@ -1059,7 +1221,7 @@ class VULCANOptimizer:
                 rows.append(user_idx)
                 cols.append(feat_idx)
                 data.append(float(val))
-        
+
         return csr_matrix((data, (rows, cols)), shape=(n_users, n_features))
 
     def _evaluate_fold(
@@ -1083,28 +1245,28 @@ class VULCANOptimizer:
             Dictionary containing evaluation metrics and parameters
         """
         # Create user and item mappings
-        user_ids = {user_id: i for i, user_id in enumerate(train_df['user_id'].unique())}
-        item_ids = {item_id: i for i, item_id in enumerate(train_df['item_id'].unique())}
-        
+        user_ids = {user_id: i for i, user_id in enumerate(train_df["user_id"].unique())}
+        item_ids = {item_id: i for i, item_id in enumerate(train_df["item_id"].unique())}
+
         # Create interaction matrices in COO format
         from scipy.sparse import coo_matrix
-        
+
         def create_interaction_matrix(df, user_map, item_map):
             # Map user and item IDs to indices
-            user_indices = df['user_id'].map(user_map).values
-            item_indices = df['item_id'].map(item_map).values
+            user_indices = df["user_id"].map(user_map).values
+            item_indices = df["item_id"].map(item_map).values
             # Create COO matrix (users x items)
             return coo_matrix(
                 (np.ones(len(df)), (user_indices, item_indices)),
-                shape=(len(user_map), len(item_map))
+                shape=(len(user_map), len(item_map)),
             )
-        
+
         # Create interaction matrices
         X_train = create_interaction_matrix(train_df, user_ids, item_ids)
         X_val = create_interaction_matrix(
-            val_df[val_df['item_id'].isin(item_ids)],  # Only include items seen in training
+            val_df[val_df["item_id"].isin(item_ids)],  # Only include items seen in training
             user_ids,
-            item_ids
+            item_ids,
         )
 
         # Train model with parameters from the trial
@@ -1121,20 +1283,14 @@ class VULCANOptimizer:
             "num_threads": self.n_jobs,
             "verbose": params.get("fit__verbose", False),
         }
-        
+
         # Generate user features if available
         user_features = None
         if features:
-            user_features = self._generate_user_features(
-                train_df, features, params, user_ids
-            )
-        
+            user_features = self._generate_user_features(train_df, features, params, user_ids)
+
         try:
-            model.fit(
-                interactions=X_train,
-                user_features=user_features,
-                **fit_params
-            )
+            model.fit(interactions=X_train, user_features=user_features, **fit_params)
         except Exception as e:
             logger.error(f"Error fitting model: {str(e)}")
             logger.error(f"X_train shape: {X_train.shape if hasattr(X_train, 'shape') else 'N/A'}")
@@ -1145,16 +1301,14 @@ class VULCANOptimizer:
 
         # Evaluate
         val_score = self._evaluate_model(
-            model, 
+            model,
             X_val,
-            user_features=user_features  # Pass user features for evaluation
+            user_features=user_features,  # Pass user features for evaluation
         )
 
         # Log metrics if writer is available and we have a valid trial number
         trial_number = (
-            getattr(self.current_trial, "number", None)
-            if hasattr(self, "current_trial")
-            else None
+            getattr(self.current_trial, "number", None) if hasattr(self, "current_trial") else None
         )
         if self.writer is not None and trial_number is not None:
             self.writer.add_scalar(f"val/auc_fold_{fold_idx}", val_score, trial_number)
@@ -1192,33 +1346,31 @@ class VULCANOptimizer:
             try:
                 # Extract feature parameters from the params dict
                 feature_params = {
-                    k.split('__', 1)[1]: v
+                    k.split("__", 1)[1]: v
                     for k, v in params.items()
                     if k.startswith(f"{feature_name}__")
                 }
 
                 # Generate feature using the feature registry
                 from src.utils.feature_registry import feature_registry
-                
+
                 feature_data = feature_registry.get(feature_name)
-                if feature_data and 'func' in feature_data:
-                    feature_func = feature_data['func']
+                if feature_data and "func" in feature_data:
+                    feature_func = feature_data["func"]
                     if not callable(feature_func):
-                        raise TypeError(f"Feature '{feature_name}' in registry is not a callable function.")
-                    
+                        raise TypeError(
+                            f"Feature '{feature_name}' in registry is not a callable function."
+                        )
+
                     feature_values = feature_func(df, **feature_params)
                     feature_matrix[feature_name] = feature_values
                 else:
                     logger.warning(f"Feature '{feature_name}' not found or invalid in registry.")
 
             except (ValueError, KeyError) as e:
-                logger.warning(
-                    "Failed to generate feature %s: %s", feature_name, str(e)
-                )
+                logger.warning("Failed to generate feature %s: %s", feature_name, str(e))
             except RuntimeError as e:
-                logger.error(
-                    "Runtime error generating feature %s: %s", feature_name, str(e)
-                )
+                logger.error("Runtime error generating feature %s: %s", feature_name, str(e))
 
         # If no features were generated, add a dummy feature
         if feature_matrix.empty:
@@ -1228,9 +1380,9 @@ class VULCANOptimizer:
 
     @staticmethod
     def _evaluate_model(
-        model: LightFM, 
+        model: LightFM,
         X_val: Union[np.ndarray, coo_matrix],
-        user_features: Optional[csr_matrix] = None
+        user_features: Optional[csr_matrix] = None,
     ) -> float:
         """Evaluate model and return validation score.
 
@@ -1248,10 +1400,10 @@ class VULCANOptimizer:
         try:
             # Calculate AUC score (higher is better)
             auc = auc_score(
-                model, 
-                X_val, 
+                model,
+                X_val,
                 user_features=user_features,
-                num_threads=1  # Avoid OpenMP issues
+                num_threads=1,  # Avoid OpenMP issues
             ).mean()
             return float(auc)
         except (ValueError, RuntimeError) as e:
@@ -1286,9 +1438,7 @@ class VULCANOptimizer:
 
         # Run optimization
         study.optimize(
-            lambda trial: self._objective(
-                trial, features, use_fast_mode=use_fast_mode
-            ),
+            lambda trial: self._objective(trial, features, use_fast_mode=use_fast_mode),
             n_trials=n_trials,
             timeout=timeout,
             n_jobs=self.n_jobs,
@@ -1580,9 +1730,150 @@ def get_strategy_team_agents(
     return agents
 ```
 
-### `baselines/deepfm_baseline.py`
+### `baselines/feature_engineer/featuretools_baseline.py`
 
-**File size:** 4,140 bytes
+**File size:** 6,015 bytes
+
+```python
+import featuretools as ft
+import pandas as pd
+
+
+def run_featuretools_baseline(
+    train_df: pd.DataFrame, books_df: pd.DataFrame, users_df: pd.DataFrame, test_df: pd.DataFrame = None
+) -> dict:
+    # Featuretools requires nanosecond precision for datetime columns.
+    # Convert all relevant columns to ensure compatibility.
+    import logging
+    logger = logging.getLogger("featuretools_baseline")
+    def clean_datetime_columns(df):
+        for col in ["date_added", "date_updated", "read_at", "started_at"]:
+            if col in df.columns and str(df[col].dtype).startswith("datetime64"):
+                if hasattr(df[col].dt, "tz") and df[col].dt.tz is not None:
+                    df[col] = df[col].dt.tz_localize(None)
+                df[col] = df[col].astype("datetime64[ns]")
+        return df
+
+    train_df = clean_datetime_columns(train_df)
+    books_df = clean_datetime_columns(books_df)
+    users_df = clean_datetime_columns(users_df)
+    """
+    Runs the Featuretools baseline to generate features for the recommender system.
+
+    This function takes the raw training dataframes, creates a Featuretools EntitySet,
+    defines the relationships between them, and then runs Deep Feature Synthesis (DFS)
+    to automatically generate a feature matrix.
+
+    Args:
+        train_df: DataFrame containing the training interactions (e.g., ratings).
+                  Expected columns: ['user_id', 'book_id', 'rating', 'rating_id'].
+        books_df: DataFrame containing book metadata.
+                  Expected columns: ['book_id', ...].
+        users_df: DataFrame containing user metadata.
+                  Expected columns: ['user_id', ...].
+
+    Returns:
+        A pandas DataFrame containing the generated feature matrix. The matrix will
+        have the same index as the input `train_df`.
+    """
+    logger.info("Starting Featuretools baseline...")
+
+    # 1. Create an EntitySet
+    logger.info("Creating EntitySet and adding dataframes...")
+    es = ft.EntitySet(id="goodreads_recsys")
+
+    es = es.add_dataframe(
+        dataframe_name="ratings",
+        dataframe=train_df,
+        index="rating_id",
+        make_index=True,
+        time_index="date_added",
+    )
+
+    es = es.add_dataframe(
+        dataframe_name="users", dataframe=users_df, index="user_id"
+    )
+
+    es = es.add_dataframe(
+        dataframe_name="books", dataframe=books_df, index="book_id"
+    )
+
+    # 2. Define Relationships
+    logger.info("Defining relationships between entities...")
+    es = es.add_relationship("users", "user_id", "ratings", "user_id")
+    es = es.add_relationship("books", "book_id", "ratings", "book_id")
+
+    # 3. Run Deep Feature Synthesis (DFS)
+    logger.info("Running Deep Feature Synthesis (DFS)...")
+    feature_matrix, feature_defs = ft.dfs(
+        entityset=es,
+        target_dataframe_name="ratings",
+        agg_primitives=["mean", "sum", "count", "std", "max", "min", "mode"],
+        trans_primitives=["month", "weekday", "time_since_previous"],
+        max_depth=2,
+        verbose=True,
+        n_jobs=-1,  # Use all available cores
+    )
+
+    logger.info(f"Featuretools generated {feature_matrix.shape[1]} features.")
+    logger.info(f"Shape of the resulting feature matrix: {feature_matrix.shape}")
+
+    # 4. Evaluate with LightFM (if test_df is provided)
+    if test_df is not None:
+        from lightfm.data import Dataset
+        import numpy as np
+        from src.evaluation.scoring import _train_and_evaluate_lightfm
+        from src.evaluation.beyond_accuracy import compute_novelty, compute_diversity, compute_catalog_coverage
+        # Build LightFM dataset
+        dataset = Dataset()
+        all_users = pd.concat([train_df["user_id"], test_df["user_id"]]).unique()
+        all_items = pd.concat([train_df["book_id"], test_df["book_id"]]).unique()
+        dataset.fit(users=all_users, items=all_items)
+        (test_interactions, _) = dataset.build_interactions(
+            [(row["user_id"], row["book_id"]) for _, row in test_df.iterrows()]
+        )
+        user_features_train = dataset.build_user_features(
+            (user_id, {col: feature_matrix.loc[user_id, col] for col in feature_matrix.columns})
+            for user_id in feature_matrix.index
+        )
+        metrics = {}
+        for k in [5, 10, 20]:
+            scores = _train_and_evaluate_lightfm(
+                dataset, train_df, test_interactions, user_features=user_features_train, k=k
+            )
+            metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
+            metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
+            metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
+        # Beyond-accuracy metrics
+        from lightfm import LightFM
+        model = LightFM(loss="warp", random_state=42)
+        (train_interactions, _) = dataset.build_interactions(
+            [(row["user_id"], row["book_id"]) for _, row in train_df.iterrows()]
+        )
+        model.fit(train_interactions, user_features=user_features_train, epochs=5, num_threads=4)
+        def get_recommendations(model, dataset, user_ids, k):
+            recs = {}
+            for i, user_id in enumerate(user_ids):
+                scores = model.predict(i, np.arange(len(all_items)), user_features=None)
+                top_items = np.argsort(-scores)[:k]
+                rec_items = [all_items[j] for j in top_items]
+                recs[user_id] = rec_items
+            return recs
+        global_recs = get_recommendations(model, dataset, list(feature_matrix.index), k=10)
+        novelty = compute_novelty(global_recs, train_df)
+        diversity = compute_diversity(global_recs)
+        catalog = set(all_items)
+        coverage = compute_catalog_coverage(global_recs, catalog)
+        metrics.update({"novelty": novelty, "diversity": diversity, "catalog_coverage": coverage})
+        logger.success(f"Featuretools+LightFM metrics: {metrics}")
+        return metrics
+    logger.success("Featuretools baseline finished successfully.")
+    return feature_matrix
+```
+
+### `baselines/recommender/deepfm_baseline.py`
+
+**File size:** 4,173 bytes
 
 ```python
 import itertools
@@ -1594,7 +1885,7 @@ from deepctr_torch.models import DeepFM
 from loguru import logger
 from sklearn.preprocessing import LabelEncoder
 
-from src.baselines.ranking_utils import calculate_ndcg, get_top_n_recommendations
+from .ranking_utils import calculate_ndcg, get_top_n_recommendations
 
 
 def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
@@ -1684,118 +1975,27 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
 
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
-    eval_result = model.evaluate(test_model_input, test_labels, batch_size=256)
-    logger.info(f"DeepFM evaluation results: {eval_result}")
-
-    # 7. Return Metrics
+    predictions = model.predict(test_model_input, batch_size=256)
+    mse = np.mean((test_labels - predictions) ** 2)
+    rmse = np.sqrt(mse)
+    logger.info(f"DeepFM baseline RMSE: {rmse:.4f}")
     metrics = {
-        "mse": eval_result.get("val_mse", eval_result.get("mse", -1)),
+        "mse": mse,
+        "rmse": rmse,
         "ndcg@10": ndcg_score,
     }
+    logger.info(f"DeepFM metrics: {metrics}")
     logger.success("DeepFM baseline finished successfully.")
     return metrics
 ```
 
-### `baselines/featuretools_baseline.py`
+### `baselines/recommender/popularity_baseline.py`
 
-**File size:** 3,337 bytes
-
-```python
-import featuretools as ft
-import pandas as pd
-
-
-def run_featuretools_baseline(
-    train_df: pd.DataFrame, books_df: pd.DataFrame, users_df: pd.DataFrame
-) -> pd.DataFrame:
-    # Featuretools requires nanosecond precision for datetime columns.
-    # Convert all relevant columns to ensure compatibility.
-    import logging
-    logger = logging.getLogger("featuretools_baseline")
-    def clean_datetime_columns(df):
-        for col in ["date_added", "date_updated", "read_at", "started_at"]:
-            if col in df.columns and str(df[col].dtype).startswith("datetime64"):
-                if hasattr(df[col].dt, "tz") and df[col].dt.tz is not None:
-                    df[col] = df[col].dt.tz_localize(None)
-                df[col] = df[col].astype("datetime64[ns]")
-        return df
-
-    train_df = clean_datetime_columns(train_df)
-    books_df = clean_datetime_columns(books_df)
-    users_df = clean_datetime_columns(users_df)
-    """
-    Runs the Featuretools baseline to generate features for the recommender system.
-
-    This function takes the raw training dataframes, creates a Featuretools EntitySet,
-    defines the relationships between them, and then runs Deep Feature Synthesis (DFS)
-    to automatically generate a feature matrix.
-
-    Args:
-        train_df: DataFrame containing the training interactions (e.g., ratings).
-                  Expected columns: ['user_id', 'book_id', 'rating', 'rating_id'].
-        books_df: DataFrame containing book metadata.
-                  Expected columns: ['book_id', ...].
-        users_df: DataFrame containing user metadata.
-                  Expected columns: ['user_id', ...].
-
-    Returns:
-        A pandas DataFrame containing the generated feature matrix. The matrix will
-        have the same index as the input `train_df`.
-    """
-    logger.info("Starting Featuretools baseline...")
-
-    # 1. Create an EntitySet
-    logger.info("Creating EntitySet and adding dataframes...")
-    es = ft.EntitySet(id="goodreads_recsys")
-
-    es = es.add_dataframe(
-        dataframe_name="ratings",
-        dataframe=train_df,
-        index="rating_id",
-        make_index=True,
-        time_index="date_added",
-    )
-
-    es = es.add_dataframe(
-        dataframe_name="users", dataframe=users_df, index="user_id"
-    )
-
-    es = es.add_dataframe(
-        dataframe_name="books", dataframe=books_df, index="book_id"
-    )
-
-    # 2. Define Relationships
-    logger.info("Defining relationships between entities...")
-    es = es.add_relationship("users", "user_id", "ratings", "user_id")
-    es = es.add_relationship("books", "book_id", "ratings", "book_id")
-
-    # 3. Run Deep Feature Synthesis (DFS)
-    logger.info("Running Deep Feature Synthesis (DFS)...")
-    feature_matrix, feature_defs = ft.dfs(
-        entityset=es,
-        target_dataframe_name="ratings",
-        agg_primitives=["mean", "sum", "count", "std", "max", "min", "mode"],
-        trans_primitives=["month", "weekday", "time_since_previous"],
-        max_depth=2,
-        verbose=True,
-        n_jobs=-1,  # Use all available cores
-    )
-
-    logger.info(f"Featuretools generated {feature_matrix.shape[1]} features.")
-    logger.info(f"Shape of the resulting feature matrix: {feature_matrix.shape}")
-
-    # 4. Return & Save
-    logger.success("Featuretools baseline finished successfully.")
-    return feature_matrix
-```
-
-### `baselines/popularity_baseline.py`
-
-**File size:** 1,028 bytes
+**File size:** 1,015 bytes
 
 ```python
 import pandas as pd
-from src.baselines.ranking_utils import calculate_ndcg
+from .ranking_utils import calculate_ndcg
 
 def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
     """
@@ -1824,7 +2024,7 @@ def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n
     }
 ```
 
-### `baselines/ranking_utils.py`
+### `baselines/recommender/ranking_utils.py`
 
 **File size:** 2,169 bytes
 
@@ -1895,129 +2095,9 @@ def calculate_ndcg(
     return float(np.mean(ndcgs)) if ndcgs else 0.0
 ```
 
-### `baselines/run_all_baselines.py`
+### `baselines/recommender/svd_baseline.py`
 
-**File size:** 4,708 bytes
-
-```python
-import json
-from pathlib import Path
-
-from loguru import logger
-
-from src.baselines.deepfm_baseline import run_deepfm_baseline
-from src.baselines.featuretools_baseline import run_featuretools_baseline
-from src.baselines.svd_baseline import run_svd_baseline
-from src.data.cv_data_manager import CVDataManager
-
-
-def main():
-    """
-    Main function to run all baseline models and save their results.
-
-    This script orchestrates the following steps:
-    1. Initializes the CVDataManager to load the dataset.
-    2. Retrieves the data for the first cross-validation fold.
-    3. Runs three baseline models in sequence:
-        - Featuretools for automated feature engineering.
-        - SVD for classic collaborative filtering.
-        - DeepFM for a deep learning-based recommendation.
-    4. Aggregates the performance metrics (e.g., RMSE, MAE, MSE, NDCG@10) from each baseline.
-    5. Saves the aggregated results to a JSON file in the 'reports' directory.
-    """
-    logger.info("Starting the execution of all baseline models...")
-
-    # 1. Initialize DataManager and load data
-    logger.info("Initializing CVDataManager...")
-    db_path = "data/goodreads_curated.duckdb"
-    splits_dir = "data/splits"
-    data_manager = CVDataManager(db_path=db_path, splits_dir=splits_dir)
-
-    logger.info("Loading users and books metadata...")
-    conn = data_manager.db_connection
-    try:
-        users_df = conn.execute("SELECT * FROM users").fetchdf()
-        books_df = conn.execute("SELECT * FROM book_series").fetchdf()
-    finally:
-        data_manager._return_connection(conn)
-    logger.success("Metadata loaded.")
-
-    logger.info("Loading train/test data for fold 0...")
-    # Use 'full_train' to get combined training and validation data against the test set.
-    train_df, test_df = data_manager.get_fold_data(fold_idx=0, split_type="full_train")
-
-    # Dictionary to store results from all baselines
-    all_results = {}
-
-    # 2. Run Featuretools baseline
-    logger.info("--- Running Featuretools Baseline ---")
-    try:
-        featuretools_results = run_featuretools_baseline(train_df, books_df, users_df)
-        all_results["featuretools"] = {
-            "status": "success",
-            "feature_matrix_shape": list(featuretools_results.shape),
-        }
-        logger.success("Featuretools baseline completed.")
-    except Exception as e:
-        logger.error(f"Featuretools baseline failed: {e}")
-        all_results["featuretools"] = {"status": "failure", "error": str(e)}
-
-    # 3. Run SVD baseline (full dataset)
-    logger.info("--- Running SVD Baseline ---")
-    try:
-        svd_results = run_svd_baseline(train_df, test_df)
-        all_results["svd"] = {"status": "success", "metrics": svd_results}
-        logger.success(f"SVD baseline completed. Metrics: {svd_results}")
-    except Exception as e:
-        logger.error(f"SVD baseline failed: {e}")
-        all_results["svd"] = {"status": "failure", "error": str(e)}
-
-    # 5. Run Popularity baseline (to be implemented)
-    logger.info("--- Running Popularity Baseline ---")
-    try:
-        from src.baselines.popularity_baseline import run_popularity_baseline
-        popularity_results = run_popularity_baseline(train_df, test_df)
-        all_results["popularity"] = {"status": "success", "metrics": popularity_results}
-        logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
-    except Exception as e:
-        logger.error(f"Popularity baseline failed: {e}")
-        all_results["popularity"] = {"status": "failure", "error": str(e)}
-
-    # 4. Run DeepFM baseline
-    logger.info("--- Running DeepFM Baseline ---")
-    try:
-        deepfm_results = run_deepfm_baseline(train_df, test_df)
-        all_results["deepfm"] = {"status": "success", "metrics": deepfm_results}
-        logger.success(f"DeepFM baseline completed. Metrics: {deepfm_results}")
-    except Exception as e:
-        logger.error(f"DeepFM baseline failed: {e}")
-        all_results["deepfm"] = {"status": "failure", "error": str(e)}
-
-    # 5. Save results to a JSON file
-    try:
-        reports_dir = Path("reports")
-        reports_dir.mkdir(exist_ok=True)
-        results_path = reports_dir / "baseline_results.json"
-
-        logger.info(f"Saving aggregated baseline results to {results_path}")
-        with open(results_path, "w") as f:
-            json.dump(all_results, f, indent=4)
-
-        logger.success(f"Results successfully saved to {results_path}")
-    except (IOError, OSError) as e:
-        logger.error(f"Failed to save results to file: {e}")
-        logger.error(f"Current Working Directory: {Path.cwd()}")
-
-    logger.success("All baseline models have been executed.")
-
-
-if __name__ == "__main__":
-    main()
-```
-
-### `baselines/svd_baseline.py`
-
-**File size:** 2,096 bytes
+**File size:** 2,155 bytes
 
 ```python
 import pandas as pd
@@ -2025,7 +2105,7 @@ from loguru import logger
 from surprise import SVD, Dataset, Reader
 from surprise.accuracy import mae, rmse
 
-from src.baselines.ranking_utils import (
+from .ranking_utils import (
     calculate_ndcg,
     get_top_n_recommendations,
 )
@@ -2073,9 +2153,145 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
 
     # 5. Return Metrics
-    metrics = {"rmse": rmse_score, "mae": mae_score, "ndcg@10": ndcg_score}
+    metrics = {
+        "rmse": test_rmse,
+        "mae": test_mae,
+        "ndcg@10": ndcg_score,
+    }
+    logger.info(f"SVD metrics: {metrics}")
     logger.success("SVD baseline finished successfully.")
     return metrics
+```
+
+### `baselines/run_all_baselines.py`
+
+**File size:** 5,428 bytes
+
+```python
+import json
+from pathlib import Path
+
+from loguru import logger
+
+from src.baselines.recommender.deepfm_baseline import run_deepfm_baseline
+from src.baselines.feature_engineer.featuretools_baseline import run_featuretools_baseline
+from src.baselines.recommender.svd_baseline import run_svd_baseline
+from torch.utils.tensorboard import SummaryWriter
+
+# ... (other imports remain unchanged)
+
+from src.data.cv_data_manager import CVDataManager
+
+
+def main():
+    """
+    Main function to run all baseline models and save their results.
+
+    This script orchestrates the following steps:
+    1. Initializes the CVDataManager to load the dataset.
+    2. Retrieves the data for the first cross-validation fold.
+    3. Runs three baseline models in sequence:
+        - Featuretools for automated feature engineering.
+        - SVD for classic collaborative filtering.
+        - DeepFM for a deep learning-based recommendation.
+    4. Aggregates the performance metrics (e.g., RMSE, MAE, MSE, NDCG@10) from each baseline.
+    5. Saves the aggregated results to a JSON file in the 'reports' directory.
+    """
+    logger.info("Starting the execution of all baseline models...")
+
+    # 1. Initialize DataManager and load data
+    logger.info("Initializing CVDataManager...")
+    db_path = "data/goodreads_curated.duckdb"
+    splits_dir = "data/splits"
+    data_manager = CVDataManager(db_path=db_path, splits_dir=splits_dir)
+
+    logger.info("Loading users and books metadata...")
+    conn = data_manager.db_connection
+    try:
+        users_df = conn.execute("SELECT * FROM users").fetchdf()
+        books_df = conn.execute("SELECT * FROM book_series").fetchdf()
+    finally:
+        data_manager._return_connection(conn)
+    logger.success("Metadata loaded.")
+
+    logger.info("Loading train/test data for fold 0...")
+    # Use 'full_train' to get combined training and validation data against the test set.
+    train_df, test_df = data_manager.get_fold_data(fold_idx=0, split_type="full_train")
+
+    # Dictionary to store results from all baselines
+    all_results = {}
+
+    # 2. Run Featuretools baseline (now uses LightFM for evaluation)
+    logger.info("--- Running Featuretools Baseline (LightFM evaluation) ---")
+    writer = SummaryWriter("reports/tensorboard_baselines")
+    try:
+        featuretools_metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
+        all_results["featuretools_lightfm"] = {
+            "status": "success",
+            "metrics": featuretools_metrics,
+        }
+        logger.success(f"Featuretools+LightFM baseline completed. Metrics: {featuretools_metrics}")
+        if "precision_at_10" in featuretools_metrics:
+            writer.add_scalar("featuretools_lightfm/precision_at_10", featuretools_metrics["precision_at_10"])
+        if "n_clusters" in featuretools_metrics:
+            writer.add_scalar("featuretools_lightfm/n_clusters", featuretools_metrics["n_clusters"])
+    except Exception as e:
+        logger.error(f"Featuretools+LightFM baseline failed: {e}")
+        all_results["featuretools_lightfm"] = {"status": "failure", "error": str(e)}
+
+    # 3. Run SVD baseline (full dataset)
+    logger.info("--- Running SVD Baseline ---")
+    try:
+        svd_results = run_svd_baseline(train_df, test_df)
+        all_results["svd"] = {"status": "success", "metrics": svd_results}
+        logger.success(f"SVD baseline completed. Metrics: {svd_results}")
+        if "rmse" in svd_results:
+            writer.add_scalar("svd/RMSE", svd_results["rmse"])
+    except Exception as e:
+        logger.error(f"SVD baseline failed: {e}")
+        all_results["svd"] = {"status": "failure", "error": str(e)}
+
+    # 5. Run Popularity baseline (to be implemented)
+    logger.info("--- Running Popularity Baseline ---")
+    try:
+        from src.baselines.recommender.popularity_baseline import run_popularity_baseline
+        popularity_results = run_popularity_baseline(train_df, test_df)
+        all_results["popularity"] = {"status": "success", "metrics": popularity_results}
+        logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
+    except Exception as e:
+        logger.error(f"Popularity baseline failed: {e}")
+        all_results["popularity"] = {"status": "failure", "error": str(e)}
+
+    # 4. Run DeepFM baseline
+    logger.info("--- Running DeepFM Baseline ---")
+    try:
+        deepfm_results = run_deepfm_baseline(train_df, test_df)
+        all_results["deepfm"] = {"status": "success", "metrics": deepfm_results}
+        logger.success(f"DeepFM baseline completed. Metrics: {deepfm_results}")
+    except Exception as e:
+        logger.error(f"DeepFM baseline failed: {e}")
+        all_results["deepfm"] = {"status": "failure", "error": str(e)}
+
+    # 5. Save results to a JSON file
+    try:
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        results_path = reports_dir / "baseline_results.json"
+
+        logger.info(f"Saving aggregated baseline results to {results_path}")
+        with open(results_path, "w") as f:
+            json.dump(all_results, f, indent=4)
+
+        logger.success(f"Results successfully saved to {results_path}")
+    except (IOError, OSError) as e:
+        logger.error(f"Failed to save results to file: {e}")
+        logger.error(f"Current Working Directory: {Path.cwd()}")
+
+    logger.success("All baseline models have been executed.")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### `config/log_config.py`
@@ -2550,7 +2766,7 @@ def call_llm_batch(prompts: List[str]) -> List[float]:
 
 ### `core/tools.py`
 
-**File size:** 2,049 bytes
+**File size:** 2,650 bytes
 
 ```python
 from dataclasses import dataclass
@@ -2621,13 +2837,28 @@ class ToolRegistry:
         return tool.func(**filtered_kwargs)
 
 
+# Register add_to_central_memory tool
+
+def register_add_to_central_memory_tool(session_state):
+    try:
+        from src.utils.tools import get_add_to_central_memory_tool
+        registry.register(
+            name="add_to_central_memory",
+            description="Add a structured note and reasoning to the session's central memory for cross-epoch sharing.",
+            required_args=["note", "reasoning", "agent"],
+            optional_args=["metadata"],
+        )(get_add_to_central_memory_tool(session_state))
+    except ImportError:
+        # Tool not yet implemented or available
+        pass
+
 # Create global registry instance
 registry = ToolRegistry()
 ```
 
 ### `data/cv_data_manager.py`
 
-**File size:** 22,822 bytes
+**File size:** 24,516 bytes
 
 ```python
 """
@@ -3010,19 +3241,49 @@ class CVDataManager:
         val_users = fold["validation"]
         test_users = fold.get("test", [])
 
-        # Apply sampling if requested
-        def sample_users(users: List[str], frac: float) -> List[str]:
+        # --- Stratified sampling by user activity ---
+        def stratified_sample_users(users: List[str], frac: float, user_activity: Dict[str, int]) -> List[str]:
+            """
+            Stratified sampling of users by activity level.
+            Args:
+                users: List of user IDs to sample from.
+                frac: Fraction to sample.
+                user_activity: Dict mapping user_id to number of interactions.
+            Returns:
+                List of sampled users preserving activity distribution.
+            """
             if frac is None or frac >= 1.0 or not users:
                 return users
+            activity_counts = np.array([user_activity.get(u, 0) for u in users])
+            if len(set(activity_counts)) <= 1:
+                rng = np.random.default_rng(random_state)
+                sample_size = max(1, int(len(users) * frac))
+                return rng.choice(users, size=sample_size, replace=False).tolist()
+            bins = np.quantile(activity_counts, np.linspace(0, 1, 6))
+            bins[0] = min(activity_counts) - 1
+            sampled_users = []
             rng = np.random.default_rng(random_state)
-            sample_size = max(1, int(len(users) * frac))
-            return rng.choice(users, size=sample_size, replace=False).tolist()
+            for i in range(5):
+                in_bin = [u for u, c in zip(users, activity_counts) if bins[i] < c <= bins[i+1]]
+                n_bin = max(1, int(len(in_bin) * frac)) if in_bin else 0
+                if in_bin and n_bin > 0:
+                    sampled_users.extend(rng.choice(in_bin, size=n_bin, replace=False).tolist())
+            return sampled_users if sampled_users else users
 
+        # Only compute user_activity if needed
+        user_activity = {}
         if sample_frac is not None and sample_frac < 1.0:
-            train_users = sample_users(train_users, sample_frac)
-            val_users = sample_users(val_users, sample_frac)
-            test_users = sample_users(test_users, sample_frac)
+            conn = self._get_connection()
+            try:
+                query = "SELECT user_id, COUNT(*) as n FROM interactions GROUP BY user_id"
+                df_activity = conn.execute(query).fetchdf()
+                user_activity = dict(zip(df_activity['user_id'], df_activity['n']))
+            finally:
+                self._return_connection(conn)
 
+            train_users = stratified_sample_users(train_users, sample_frac, user_activity)
+            val_users = stratified_sample_users(val_users, sample_frac, user_activity)
+            test_users = stratified_sample_users(test_users, sample_frac, user_activity)
         # Get column list for query
         if columns:
             column_list = ", ".join([f"r.{c}" for c in columns])
@@ -3476,7 +3737,7 @@ def cluster_users_kmeans(X: pd.DataFrame, n_clusters: int = 5, random_state: int
 
 ### `evaluation/scoring.py`
 
-**File size:** 3,391 bytes
+**File size:** 3,684 bytes
 
 ```python
 import logging
@@ -3586,10 +3847,14 @@ def score_trial(
     )
 
     # 4. Calculate final objective
+    # Optionally incorporate n_clusters into the reward (encourage meaningful segmentation)
+    n_clusters = scores.get("n_clusters", 1)
+    cluster_weight = weights.get("clusters", 0.05)  # configurable
     final_objective = -(
         weights["auc"] * scores.get("auc", 0)
         + weights["precision"] * scores.get("precision_at_10", 0)
         + weights["recall"] * scores.get("recall_at_10", 0)
+        + cluster_weight * n_clusters  # Encourage more/fewer clusters depending on sign
     )
 
     logger.info(f"Trial scores: {scores} -> Final objective: {final_objective:.4f}")
@@ -4005,30 +4270,29 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 19,599 bytes
+**File size:** 22,985 bytes
 
 ```python
 import json
 import os
 import sys
+
+# Ensure DB views are set up for pipeline compatibility
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+import scripts.setup_views
 import autogen
 from autogen import Agent
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.agents.discovery_team.insight_discovery_agents import (
-    get_insight_discovery_agents,
-)
-from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
-from src.agents.strategy_team.reflection_agent import ReflectionAgent
+from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.session_state import SessionState
+from src.utils.session_state import SessionState, CoverageTracker
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
@@ -4037,7 +4301,11 @@ from src.utils.tools import (
     get_table_sample,
     run_sql_query,
     vision_tool,
+    execute_python,  # FIX: Import execute_python for agent registration
 )
+
+# Ensure DB views are set up for pipeline compatibility
+scripts.setup_views.setup_views()
 
 # Load environment variables from .env file at the beginning.
 load_dotenv()
@@ -4050,7 +4318,8 @@ def should_continue_exploration(session_state: SessionState, round_count: int) -
     """Determines if exploration should continue based on insights and coverage."""
     insights = session_state.insights
     if not insights:
-        return True  # Must find at least one insight
+        logger.info("Cannot terminate: No insights found yet. Forcing continuation.")
+        return True  # Never terminate with zero insights
 
     high_quality_insights = [
         i for i in insights if i.quality_score is not None and i.quality_score >= 8
@@ -4064,9 +4333,7 @@ def should_continue_exploration(session_state: SessionState, round_count: int) -
         return False
 
     if round_count > 50:
-        last_insight_round = max(
-            (i.metadata.get("round_added", 0) for i in insights), default=0
-        )
+        last_insight_round = max((i.metadata.get("round_added", 0) for i in insights), default=0)
         if round_count - last_insight_round > 20:
             logger.info("Termination condition: No new insights in the last 20 rounds.")
             return False
@@ -4125,24 +4392,18 @@ def _fallback_compression(messages: List[Dict], keep_recent: int = 20) -> List[D
     return compressed_messages + messages[-keep_recent:]
 
 
-def compress_conversation_context(
-    messages: List[Dict], keep_recent: int = 20
-) -> List[Dict]:
+def compress_conversation_context(messages: List[Dict], keep_recent: int = 20) -> List[Dict]:
     """Intelligently compress conversation context using LLM summarization."""
     if len(messages) <= keep_recent:
         return messages
 
-    logger.info(
-        f"Compressing conversation context, keeping last {keep_recent} messages."
-    )
+    logger.info(f"Compressing conversation context, keeping last {keep_recent} messages.")
     try:
         config_file_path = os.getenv("OAI_CONFIG_LIST")
         if not config_file_path:
             raise ValueError("OAI_CONFIG_LIST environment variable not set.")
         config_list_all = config_list_from_json(config_file_path)
-        config_list = [
-            config for config in config_list_all if config.get("model") == "gpt-4o"
-        ]
+        config_list = [config for config in config_list_all if config.get("model") == "gpt-4o"]
         if not config_list:
             raise ValueError("No config found for summarization model.")
 
@@ -4151,18 +4412,14 @@ def compress_conversation_context(
             "cache_seed": None,
             "temperature": 0.2,
         }
-        summarizer_client = autogen.AssistantAgent(
-            "summarizer", llm_config=summarizer_llm_config
-        )
+        summarizer_client = autogen.AssistantAgent("summarizer", llm_config=summarizer_llm_config)
 
         conversation_to_summarize = "\n".join(
             [f"{m.get('role')}: {m.get('content')}" for m in messages[:-keep_recent]]
         )
         prompt = f"Please summarize the key findings, decisions, and unresolved questions from the following conversation history. Be concise, but do not lose critical information. The summary will be used as context for an ongoing AI agent discussion.\n\n---\n{conversation_to_summarize}\n---"
 
-        response = summarizer_client.generate_reply(
-            messages=[{"role": "user", "content": prompt}]
-        )
+        response = summarizer_client.generate_reply(messages=[{"role": "user", "content": prompt}])
         summary_message = {
             "role": "system",
             "content": f"## Conversation Summary ##\n{response}",
@@ -4249,26 +4506,24 @@ class SmartGroupChatManager(autogen.GroupChatManager):
 
         if self.round_count % 25 == 0:
             try:
-                self.groupchat.messages = compress_conversation_context(
-                    self.groupchat.messages
-                )
-                logger.info(
-                    "Applied LLM context compression at round {}", self.round_count
-                )
+                self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
+                logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        if self.round_count > 15 and not should_continue_exploration(
-            session_state, self.round_count
-        ):
-            logger.info("Exploration criteria met, terminating conversation")
-            self.groupchat.messages.append(
-                {
-                    "role": "assistant",
-                    "content": "TERMINATE",
-                    "name": "SystemCoordinator",
-                }
-            )
+        # Only allow termination if there is at least one insight
+        if self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
+            if len(session_state.insights) == 0:
+                logger.info("Termination criteria met, but no insights found. Forcing continuation.")
+            else:
+                logger.info("Exploration criteria met and at least one insight found, terminating conversation")
+                self.groupchat.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "TERMINATE",
+                        "name": "SystemCoordinator",
+                    }
+                )
         if self.round_count > 0 and self.round_count % 20 == 0:
             logger.warning("Potential loop detected. Resetting agents.")
             for agent in self.groupchat.agents:
@@ -4296,9 +4551,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     logger.info("--- Running Insight Discovery Loop ---")
     llm_config = get_llm_config_list()
     if not llm_config:
-        raise RuntimeError(
-            "Failed to get LLM configuration, cannot proceed with discovery."
-        )
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with discovery.")
 
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
@@ -4349,6 +4602,14 @@ def run_discovery_loop(session_state: SessionState) -> str:
             name="add_insight_to_report",
             description="Saves insights to the report.",
         )
+        # Register execute_python for all discovery agents
+        autogen.register_function(
+            execute_python,
+            caller=agent,
+            executor=user_proxy,
+            name="execute_python",
+            description="Execute arbitrary Python code for analysis, stats, or plotting.",
+        )
 
     agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic]
     group_chat = autogen.GroupChat(
@@ -4360,9 +4621,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     session_state.close_connection()
     try:
         initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
-        user_proxy.initiate_chat(
-            manager, message=initial_message, session_state=session_state
-        )
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
         logger.info(
             "Exploration completed after {} rounds with {} insights",
@@ -4391,25 +4650,19 @@ def run_discovery_loop(session_state: SessionState) -> str:
 def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
     """Orchestrates the Strategy Team to refine insights and generate features."""
     logger.info("--- Running Strategy Loop ---")
-    insights_report = session_state.get_final_insight_report()
     if not session_state.insights:
         logger.warning("No insights found, skipping strategy loop.")
         return None
 
     run_dir = get_run_dir()
     views_file = run_dir / "generated_views.json"
-    view_descriptions = "No views created yet."
     if views_file.exists():
         with open(views_file, "r", encoding="utf-8") as f:
-            views_data = json.load(f)
-        if views_data.get("views"):
-            view_descriptions = json.dumps(views_data, indent=2)
+            json.load(f)
 
     llm_config = get_llm_config_list()
     if not llm_config:
-        raise RuntimeError(
-            "Failed to get LLM configuration, cannot proceed with strategy."
-        )
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with strategy.")
 
     agents = get_strategy_team_agents(llm_config)
     user_proxy = agents.pop("user_proxy")
@@ -4420,70 +4673,116 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         }
     )
 
-    strategy_agents: Sequence[Agent] = [user_proxy] + list(agents.values())
+    # --- STRATEGY TEAM GROUP CHAT EXECUTION ---
+    strategy_agents = list(agents.values())
     group_chat = autogen.GroupChat(
-        agents=strategy_agents, messages=[], max_round=50, allow_repeat_speaker=True
+        agents=strategy_agents + [user_proxy],
+        messages=[],
+        max_round=30,
+        allow_repeat_speaker=False
     )
-
-    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
     logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
     try:
-        user_proxy.initiate_chat(
-            manager,
-            message=f"Welcome strategists. Your task is to:\n1. Refine insights into hypotheses\n2. Convert hypotheses to features\n3. Implement and optimize features\n4. Reflect on results.\nUse `run_sql_query` to verify findings. Call `finalize_hypotheses` when done.\n\n--- INSIGHTS REPORT ---\n{insights_report}\n\n--- AVAILABLE VIEWS ---\n{view_descriptions}",
-            session_state=session_state,
-        )
+        initial_message = "Strategy team, please review the insights and hypotheses, and generate a strategy report."
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
-        logger.info("--- Running Feature Realization ---")
-        FeatureRealizationAgent(
-            llm_config=llm_config, session_state=session_state
-        ).run()
-        logger.info("--- Feature Realization Complete ---")
-
-        reflection_results = ReflectionAgent(llm_config).run(session_state)
+        # Attempt to get a strategy report from session_state or fallback to hypotheses
+        if hasattr(session_state, 'get_final_strategy_report'):
+            report = session_state.get_final_strategy_report()
+        elif hasattr(session_state, 'get_final_hypotheses'):
+            report = session_state.get_final_hypotheses()
+        else:
+            report = "No strategy report or hypotheses available."
+        return report
     finally:
+        logger.info("Reopening database connection after strategy loop...")
         session_state.reconnect()
 
-    logger.info("--- Strategy Loop Complete ---")
-    return reflection_results
 
+def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+    """
+    Main function to run the VULCAN agent orchestration.
+    Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
+    After all epochs, a final full-data optimization and evaluation is performed.
+    """
 
-def main() -> str:
-    """Main function to run the VULCAN agent orchestration."""
     run_id, run_dir = init_run()
     logger.info(f"Starting VULCAN Run ID: {run_id}")
     setup_logging()
     session_state = SessionState(run_dir)
+    session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
-    discovery_report = "Discovery loop did not generate a report."
-    strategy_report = "Strategy loop was not run or did not generate a report."
+    all_epoch_reports = []
+    coverage_tracker = CoverageTracker()
 
     try:
-        should_continue = True
-        while should_continue:
+        for epoch in range(epochs):
+            logger.info(f"=== Starting Epoch {epoch + 1} / {epochs} (fast_mode) ===")
+            session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
             discovery_report = run_discovery_loop(session_state)
-            report = session_state.get_final_insight_report()
-            logger.info(report)
+            logger.info(session_state.get_final_insight_report())
+
+            # --- MANDATORY HYPOTHESIS GENERATION ---
+            # --- MANDATORY HYPOTHESIS GENERATION ---
+            # If there are insights but no hypotheses, invoke the HypothesisAgent to generate hypotheses before strategy.
+            if session_state.insights and not session_state.get_final_hypotheses():
+                logger.info("No hypotheses found after discovery, invoking HypothesisAgent to generate hypotheses from insights.")
+                from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
+                llm_config = get_llm_config_list()
+                hypothesis_agents = get_hypothesis_agents(llm_config, system_prompt="")
+                hypo_agent = hypothesis_agents["HypothesisAgent"]
+                # Compose a message with the insight report for the agent
+                insights_report = session_state.get_final_insight_report()
+                message = f"Here is the insight report. Please generate a list of initial hypotheses based on these findings.\n\n{insights_report}"
+                user_proxy = hypothesis_agents["user_proxy"]
+                # Register finalize_hypotheses tool
+                import autogen
+                from src.utils.tools import get_finalize_hypotheses_tool
+                autogen.register_function(
+                    get_finalize_hypotheses_tool(session_state),
+                    caller=hypo_agent,
+                    executor=user_proxy,
+                    name="finalize_hypotheses",
+                    description="Finalize and save hypotheses to the session state.",
+                )
+                # Run a single chat round to generate hypotheses
+                group_chat = autogen.GroupChat(agents=[user_proxy, hypo_agent], messages=[], max_round=5)
+                # Properly instantiate GroupChatManager and use it for chat initiation
+                if llm_config is None:
+                    raise ValueError("LLM config is None; please check your OpenAI API key and config setup.")
+                group_manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+                user_proxy.initiate_chat(group_manager, message=message, session_state=session_state)
 
             if not session_state.get_final_hypotheses():
                 logger.info("No hypotheses found, skipping strategy loop.")
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
-                break
+            else:
+                reflection_results = run_strategy_loop(session_state)
+                if reflection_results:
+                    strategy_report = json.dumps(reflection_results, indent=2)
+                else:
+                    strategy_report = "Strategy loop did not return results."
 
-            reflection_results = run_strategy_loop(session_state)
+            summary = session_state.summarise_central_memory()
+            session_state.epoch_summary = summary
+            session_state.save_to_disk()
+            session_state.clear_central_memory()
 
-            if reflection_results:
-                strategy_report = json.dumps(reflection_results, indent=2)
-
-            should_continue = (
-                reflection_results.get("should_continue", False)
-                if reflection_results
-                else False
+            coverage_tracker.update_coverage(session_state)
+            all_epoch_reports.append(
+                {
+                    "epoch": epoch + 1,
+                    "discovery_report": discovery_report,
+                    "strategy_report": strategy_report,
+                    "epoch_summary": summary,
+                    "coverage": coverage_tracker.get_coverage(),
+                }
             )
-            if not should_continue:
-                logger.info("Pipeline completion criteria met. Ending pipeline.")
+        # from src.agents.strategy_team.evaluation_agent import EvaluationAgent
+        # EvaluationAgent().run(session_state)
 
     except Exception as e:
         logger.error(
@@ -4499,10 +4798,11 @@ def main() -> str:
 
     final_report = (
         f"# VULCAN Run Complete: {run_id}\n\n"
-        f"## Discovery Loop Report\n{discovery_report}\n\n"
-        f"## Strategy Refinement Report\n{strategy_report}\n"
+        f"## Epoch Reports\n{json.dumps(all_epoch_reports, indent=2)}\n\n"
+        f"## Final Strategy Refinement Report\n{strategy_report}\n"
     )
     logger.info("VULCAN has completed its run.")
+    print(final_report)
     return final_report
 
 
@@ -4571,11 +4871,12 @@ if __name__ == "__main__":
 
 ### `schemas/models.py`
 
-**File size:** 6,555 bytes
+**File size:** 6,268 bytes
 
 ```python
 # src/utils/schemas.py
 import ast
+import uuid
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, validator
@@ -4610,37 +4911,25 @@ class Insight(BaseModel):
         default_factory=list,
         description="List of table names used to generate the insight.",
     )
+    reasoning_trace: List[str] = Field(
+        default_factory=list,
+        description="Step-by-step reasoning chain or trace of how this insight was derived. Each entry should represent a reasoning step, tool call, or reflection.",
+    )
 
 
 class Hypothesis(BaseModel):
+    """
+    Represents a simple hypothesis with only an id, summary, and rationale.
+    """
     id: str = Field(
-        ...,
-        description="A unique, sequential identifier for the hypothesis, e.g., 'H-01'.",
+        default_factory=lambda: str(uuid.uuid4()),
+        description="A unique identifier for the hypothesis, e.g., a UUID."
     )
     summary: str = Field(
         ..., description="A concise, one-sentence statement of the hypothesis."
     )
     rationale: str = Field(
-        ...,
-        description="A clear explanation of why this hypothesis is useful and worth testing.",
-    )
-    source_insight: Optional[str] = Field(
-        None,
-        description="The title of the insight from the report that inspired this hypothesis.",
-    )
-    estimated_gain: float = Field(
-        ...,
-        ge=0,
-        le=10,
-        description="A subjective estimate of the potential value (0-10) if the hypothesis is true.",
-    )
-    difficulty: Literal["low", "medium", "high"] = Field(
-        ...,
-        description="The estimated difficulty to implement and test this hypothesis.",
-    )
-    tags: List[str] = Field(
-        ...,
-        description="A list of relevant tags, e.g., ['per-user', 'temporal', 'text-based'].",
+        ..., description="A clear explanation of why this hypothesis is useful and worth testing."
     )
 
     @validator("rationale")
@@ -4985,7 +5274,7 @@ plot_manager = PlotManager()
 
 ### `utils/prompt_utils.py`
 
-**File size:** 2,884 bytes
+**File size:** 2,809 bytes
 
 ```python
 import logging
@@ -5072,8 +5361,6 @@ def load_prompt(template_name: str, **kwargs) -> str:
         raise
 
 
-# Initialize the database schema on module load
-_refresh_database_schema()
 ```
 
 ### `utils/run_utils.py`
@@ -5315,7 +5602,7 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 14,114 bytes
+**File size:** 17,495 bytes
 
 ```python
 import json
@@ -5328,6 +5615,62 @@ from loguru import logger
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
 
+
+class CoverageTracker:
+    """
+    Tracks which tables, columns, and relationships have been explored.
+    """
+    def __init__(self):
+        self.tables_explored = set()
+        self.columns_explored = set()
+        self.relationships_explored = set()
+
+    def log_table(self, table: str):
+        self.tables_explored.add(table)
+
+    def log_column(self, table: str, column: str):
+        self.columns_explored.add((table, column))
+
+    def log_relationship(self, rel: str):
+        self.relationships_explored.add(rel)
+
+    def is_table_explored(self, table: str) -> bool:
+        return table in self.tables_explored
+
+    def is_column_explored(self, table: str, column: str) -> bool:
+        return (table, column) in self.columns_explored
+
+    def is_relationship_explored(self, rel: str) -> bool:
+        return rel in self.relationships_explored
+
+    def summary(self) -> dict:
+        return {
+            "tables_explored": list(self.tables_explored),
+            "columns_explored": list(self.columns_explored),
+            "relationships_explored": list(self.relationships_explored),
+        }
+
+    def update_coverage(self, session_state):
+        # Log all tables/columns/relationships from insights and hypotheses
+        for insight in getattr(session_state, 'insights', []):
+            for t in getattr(insight, 'tables_used', []):
+                self.log_table(t)
+            for col in getattr(insight, 'columns_used', []):
+                if isinstance(col, (list, tuple)) and len(col) == 2:
+                    self.log_column(col[0], col[1])
+            for rel in getattr(insight, 'relationships_used', []):
+                self.log_relationship(rel)
+        for hypo in getattr(session_state, 'hypotheses', []):
+            for t in getattr(hypo, 'tables_used', []):
+                self.log_table(t)
+            for col in getattr(hypo, 'columns_used', []):
+                if isinstance(col, (list, tuple)) and len(col) == 2:
+                    self.log_column(col[0], col[1])
+            for rel in getattr(hypo, 'relationships_used', []):
+                self.log_relationship(rel)
+
+    def get_coverage(self):
+        return self.summary()
 
 class SessionState:
     """Manages the state and artifacts of a single pipeline run."""
@@ -5347,6 +5690,13 @@ class SessionState:
         self.best_rmse: Optional[float] = None
         self.bo_history: Dict = {}
         self.reflections: List[Dict] = []
+
+        # Coverage tracker for systematic exploration
+        self.coverage_tracker = CoverageTracker()
+
+        # Central memory for cross-epoch and intra-epoch notes
+        self.central_memory: List[Dict] = []  # Each note: {"agent": str, "note": str, "reasoning": str, ...}
+        self.epoch_summary: str = ""  # Summary string for the epoch
 
         # Run counters for agents
         self.ideation_run_count: int = 0
@@ -5382,6 +5732,9 @@ class SessionState:
                 self.best_params = data.get("best_params", {})
                 self.best_rmse = data.get("best_rmse")
                 self.bo_history = data.get("bo_history", {})
+                # Load central memory and epoch summary if present
+                self.central_memory = data.get("central_memory", [])
+                self.epoch_summary = data.get("epoch_summary", "")
                 self.reflections = data.get("reflections", [])
                 self.set_state("features", data.get("features", {}))
                 self.set_state("metrics", data.get("metrics", {}))
@@ -5618,6 +5971,18 @@ class SessionState:
             return str(state_file)
         return None
 
+    def summarise_central_memory(self, max_entries: int = 10) -> str:
+        """Return a concise markdown bullet-list summary of recent central-memory notes."""
+        if not self.central_memory:
+            return "(No central memory notes this epoch.)"
+        recent = self.central_memory[-max_entries:]
+        lines = [f"- **{e['agent']}**: {e['note']} _(reason: {e['reasoning']})_" for e in recent]
+        return "\n".join(lines)
+
+    def clear_central_memory(self):
+        """Empties central memory list."""
+        self.central_memory.clear()
+
     def save_to_disk(self):
         """Saves the current session state to disk."""
         output = {
@@ -5628,6 +5993,8 @@ class SessionState:
             "best_params": self.best_params,
             "best_rmse": self.best_rmse,
             "bo_history": self.bo_history,
+            "central_memory": self.central_memory,
+            "epoch_summary": self.epoch_summary,
             "reflections": self.reflections,
             "features": self.get_state("features", {}),
             "metrics": self.get_state("metrics", {}),
@@ -5737,17 +6104,16 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 12,576 bytes
+**File size:** 23,383 bytes
 
 ```python
 # -*- coding: utf-8 -*-
 import json
 import logging
 import os
-import subprocess
-import sys
+
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -5760,6 +6126,69 @@ from src.utils.run_utils import get_run_dir
 logger = logging.getLogger(__name__)
 
 
+def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
+    """
+    Computes comprehensive summary statistics for all columns in a DuckDB table or view.
+    - Numerical: mean, median, mode, std, min, max, skewness, kurtosis, percentiles, missing count/ratio.
+    - Categorical: unique count, top frequencies, mode, missing count/ratio.
+    Returns a markdown-formatted report.
+    """
+    import pandas as pd
+    import numpy as np
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            # Sample up to limit rows for efficiency
+            df = conn.execute(f'SELECT * FROM "{table_or_view}" LIMIT {limit}').fetchdf()
+        if df.empty:
+            return f"No data in {table_or_view}."
+        report = f"# Summary Statistics for `{table_or_view}`\n"
+        for col in df.columns:
+            report += f"\n## Column: `{col}`\n"
+            series = df[col]
+            n_missing = series.isnull().sum()
+            missing_ratio = n_missing / len(series)
+            report += f"- Missing: {n_missing} ({missing_ratio:.2%})\n"
+            if pd.api.types.is_numeric_dtype(series):
+                desc = series.describe(percentiles=[.05, .25, .5, .75, .95])
+                report += f"- Type: Numerical\n"
+                report += f"- Count: {desc['count']}\n"
+                report += f"- Mean: {desc['mean']:.4f}\n"
+                report += f"- Std: {desc['std']:.4f}\n"
+                report += f"- Min: {desc['min']}\n"
+                report += f"- 5th pct: {desc.get('5%', np.nan)}\n"
+                report += f"- 25th pct: {desc.get('25%', np.nan)}\n"
+                report += f"- Median: {desc['50%']}\n"
+                report += f"- 75th pct: {desc.get('75%', np.nan)}\n"
+                report += f"- 95th pct: {desc.get('95%', np.nan)}\n"
+                report += f"- Max: {desc['max']}\n"
+                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                report += f"- Mode: {mode}\n"
+            else:
+                report += "- Type: Categorical\n"
+                report += "- # Unique: {}\n".format(series.nunique())
+                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                report += "- Mode: {}\n".format(mode)
+                top_freq = series.value_counts().head(5)
+                report += "- Top Values:\n"
+                for idx, val in enumerate(top_freq.index):
+                    report += "    - {}: {}\n".format(val, top_freq.iloc[idx])
+            report += "---\n"
+        return truncate_output_to_word_limit(report, 1000)
+    except duckdb.Error as e:
+        logger.error("Failed to compute summary stats for %s: %s", table_or_view, e)
+        return "ERROR: Could not compute summary stats for {}: {}".format(table_or_view, e)
+
+def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
+    """
+    Truncate the output to a maximum number of words, appending a message if truncation occurred.
+    """
+    words = text.split()
+    if len(words) > word_limit:
+        truncated = ' '.join(words[:word_limit])
+        return (truncated +
+                f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]")
+    return text
+
 def run_sql_query(query: str) -> str:
     """
     Executes a read-only SQL query against the database and returns the result as a markdown string.
@@ -5770,9 +6199,9 @@ def run_sql_query(query: str) -> str:
             df = conn.execute(query).fetchdf()
             if df.empty:
                 return "Query executed successfully, but returned no results."
-            return df.to_markdown(index=False)
-    except Exception as e:
-        logger.error(f"SQL query failed: {query} | Error: {e}")
+            return truncate_output_to_word_limit(df.to_markdown(index=False), 1000)
+    except duckdb.Error as e:
+        logger.error("SQL query failed: %s | Error: %s", query, e)
         return f"ERROR: SQL query failed: {e}"
 
 
@@ -5795,6 +6224,59 @@ def save_plot(filename: str):
     abs_path = path.resolve()
     print(f"PLOT_SAVED:{abs_path}")
     return str(abs_path)
+
+
+def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png", analysis_prompt: str = None) -> dict:
+    """
+    Executes a SQL query, generates a matplotlib plot, saves it, and analyzes it using vision_tool.
+    Args:
+        query: SQL SELECT query. Must return a DataFrame with named columns.
+        plot_type: One of ['scatter', 'bar', 'hist']
+        x: Name of the column for x-axis (required for scatter/bar)
+        y: Name of the column for y-axis (required for scatter/bar)
+        file_name: Desired file name for the output plot (should end with .png)
+        analysis_prompt: Prompt for vision_tool analysis (optional)
+    Returns:
+        Dict with keys: 'plot_path', 'vision_analysis', and 'error' if any.
+    """
+    try:
+        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+            df = conn.execute(query).fetchdf()
+        if df.empty:
+            return {"error": "Query returned no data to plot."}
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(8, 5))
+        if plot_type == "scatter":
+            if x is None or y is None:
+                return {"error": "'x' and 'y' must be specified for scatter plots."}
+            plt.scatter(df[x], df[y], alpha=0.7)
+            plt.xlabel(x)
+            plt.ylabel(y)
+        elif plot_type == "bar":
+            if x is None or y is None:
+                return {"error": "'x' and 'y' must be specified for bar plots."}
+            plt.bar(df[x], df[y])
+            plt.xlabel(x)
+            plt.ylabel(y)
+        elif plot_type == "hist":
+            if x is None:
+                return {"error": "'x' must be specified for histogram plots."}
+            plt.hist(df[x], bins=20, alpha=0.7)
+            plt.xlabel(x)
+            plt.ylabel("Frequency")
+        else:
+            return {"error": f"Unknown plot_type '{plot_type}'. Use 'scatter', 'bar', or 'hist'."}
+        plt.title(f"{plot_type.title()} plot of {y if y else x}")
+        abs_path = save_plot(file_name)
+        # Automatically call vision_tool
+        from src.utils.tools import vision_tool
+        if analysis_prompt is None:
+            analysis_prompt = "Analyze this plot and summarize key trends and anomalies."
+        vision_result = vision_tool(abs_path, analysis_prompt)
+        return {"plot_path": abs_path, "vision_analysis": vision_result}
+    except Exception as e:
+        logger.error(f"Failed to create plot: {e}")
+        return {"error": f"Could not create plot. {e}"}
 
 
 def create_analysis_view(view_name: str, sql_query: str, rationale: str):
@@ -5861,8 +6343,13 @@ def cleanup_analysis_views(run_dir: Path):
                     logger.warning("Could not drop view %s: %s", view_name, e)
         # Optionally remove the tracking file after cleanup
         # views_file.unlink()
+    except duckdb.Error as e:
+        logger.error("DuckDB error during view cleanup: %s", e)
+    except OSError as e:
+        logger.error("OS error during view cleanup: %s", e)
     except Exception as e:
-        logger.error("Error during view cleanup: %s", e)
+        # This is intentionally broad to ensure all unexpected errors during cleanup are logged and do not crash the orchestrator.
+        logger.error("Unexpected error during view cleanup: %s", e)
 
 
 def get_add_insight_tool(session_state):
@@ -5872,6 +6359,7 @@ def get_add_insight_tool(session_state):
         title: str,
         finding: str,
         source_representation: str,
+        reasoning_trace: List[str],
         supporting_code: str = None,
         plot_path: str = None,
         plot_interpretation: str = None,
@@ -5888,6 +6376,7 @@ def get_add_insight_tool(session_state):
             plot_path: The path to the plot that visualizes the finding
             plot_interpretation: LLM-generated analysis of what the plot shows
             quality_score: The quality score of the insight
+            reasoning_trace: Step-by-step reasoning chain for this insight (required)
         Returns:
             Confirmation message
         """
@@ -5900,6 +6389,7 @@ def get_add_insight_tool(session_state):
                 plot_path=plot_path,
                 plot_interpretation=plot_interpretation,
                 quality_score=quality_score,
+                reasoning_trace=reasoning_trace,
             )
 
             session_state.add_insight(insight)
@@ -5921,6 +6411,40 @@ def get_add_insight_tool(session_state):
     return add_insight_to_report
 
 
+def get_add_to_central_memory_tool(session_state):
+    """Returns a function that agents can call to add notes to the shared central memory."""
+    from datetime import datetime
+
+    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None) -> str:
+        """Appends a structured entry to ``session_state.central_memory`` and persists it.
+
+        Args:
+            note: The core note or finding.
+            reasoning: Short rationale explaining the significance of the note.
+            agent: Name or identifier of the calling agent.
+            metadata: Optional dict with extra context (e.g., related tables, feature names).
+        Returns:
+            Confirmation string on success.
+        """
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "agent": agent,
+            "note": note,
+            "reasoning": reasoning,
+        }
+        if metadata:
+            # Ensure all metadata values are strings for serialization
+            entry["metadata"] = {str(k): str(v) for k, v in metadata.items()}
+
+        session_state.central_memory.append(entry)
+        # Persist session state
+        session_state.save_to_disk()
+        logger.info("Central memory updated by %s", agent)
+        return f"Note added to central memory by {agent}."
+
+    return add_to_central_memory
+
+
 def get_finalize_hypotheses_tool(session_state):
     """Returns a function that can be used as an AutoGen tool to finalize hypotheses."""
 
@@ -5928,17 +6452,26 @@ def get_finalize_hypotheses_tool(session_state):
         """
         Finalizes the list of vetted hypotheses after validation.
         """
-        # First, validate the hypotheses
-        insight_report = session_state.get_final_insight_report()
-        is_valid, error_message = validate_hypotheses(hypotheses_data, insight_report)
-
-        if not is_valid:
-            logger.error(f"Hypothesis validation failed: {error_message}")
-            return f"ERROR: Hypothesis validation failed. {error_message}"
-
-        # If valid, proceed to create models and save
+        # Step 1: Instantiate Hypothesis models (assigns IDs, validates fields)
         try:
             hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+        except Exception as e:
+            logger.error(f"Failed to instantiate Hypothesis models: {e}")
+            return f"ERROR: Failed to instantiate Hypothesis models. Reason: {e}"
+
+        # Step 2: Validate for duplicate IDs and empty rationales
+        ids = set()
+        for h in hyp_models:
+            if h.id in ids:
+                logger.error(f"Duplicate hypothesis ID found: {h.id}")
+                return f"ERROR: Hypothesis validation failed. Duplicate hypothesis ID found: {h.id}"
+            ids.add(h.id)
+            if not h.rationale:
+                logger.error(f"Hypothesis {h.id} has an empty rationale.")
+                return f"ERROR: Hypothesis validation failed. Hypothesis {h.id} has an empty rationale."
+
+        # Step 3: Save to session state
+        try:
             session_state.finalize_hypotheses(hyp_models)
             logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
             return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
@@ -5949,9 +6482,10 @@ def get_finalize_hypotheses_tool(session_state):
     return finalize_hypotheses
 
 
+
 def validate_hypotheses(
     hypotheses_data: List[Dict], insight_report: str
-) -> (bool, str):
+) -> Tuple[bool, str]:
     """
     Validates a list of hypothesis data against the insight report and internal consistency.
     """
@@ -5984,19 +6518,27 @@ def vision_tool(image_path: str, prompt: str) -> str:
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
     import base64
     from pathlib import Path
+    import os
 
     from openai import OpenAI
 
     try:
-        # Try to resolve path relative to current working directory
+        # Robust path resolution
         full_path = Path(image_path)
+        logger.info(f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})")
+        if not full_path.is_absolute():
+            # Try CWD first
+            if not full_path.exists():
+                # Try run_dir/plots/image_path
+                run_dir = get_run_dir()
+                candidate = run_dir / "plots" / image_path
+                logger.info(f"vision_tool: Trying run_dir/plots: '{candidate}'")
+                if candidate.exists():
+                    full_path = candidate
         if not full_path.exists():
-            # Try relative to run directory if available
-            run_dir = get_run_dir()
-            full_path = run_dir / image_path
-
-        if not full_path.exists():
+            logger.error(f"vision_tool: File not found at '{full_path}' (original: '{image_path}')")
             return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
+        logger.info(f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})")
 
         # Initialize OpenAI client
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -6040,46 +6582,99 @@ def vision_tool(image_path: str, prompt: str) -> str:
     except ImportError:
         return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
     except Exception as e:
+        logger.error("Unexpected error during image analysis: %s", e)
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+
+def _execute_python_run_code(pipe, code, run_dir):
+    # Headless plotting
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import duckdb
+    from pathlib import Path
+    from src.config.settings import DB_PATH
+    from src.utils.tools import get_table_sample
+    # Save plot helper using provided run_dir
+    def save_plot(filename: str):
+        try:
+            plots_dir = Path(run_dir) / "plots"
+            plots_dir.mkdir(exist_ok=True)
+            basename = Path(filename).name
+            if not basename.lower().endswith(".png"):
+                basename += ".png"
+            path = plots_dir / basename
+            plt.tight_layout()
+            plt.savefig(path, dpi=300, bbox_inches="tight")
+            plt.close()
+            abs_path = path.resolve()
+            print(f"PLOT_SAVED:{abs_path}")
+            return str(abs_path)
+        except Exception as e:
+            print(f"ERROR: Could not save plot: {e}")
+            return None
+    # Dummy add_insight_to_report for now
+    def add_insight_to_report(title, finding, supporting_evidence, confidence):
+        print(f"INSIGHT_ADDED: {{'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}}")
+    # Provide a real DuckDB connection for the code
+    conn = duckdb.connect(database=str(DB_PATH), read_only=False)
+    # If in future you want to expose CV folds or other context, load and inject here.
+    local_ns = {
+        'save_plot': save_plot,
+        'get_table_sample': get_table_sample,
+        'conn': conn,
+        'add_insight_to_report': add_insight_to_report,
+        '__builtins__': __builtins__,
+    }
+    import io
+    import contextlib
+    import traceback
+    stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout):
+            exec(code, local_ns, local_ns)
+        conn.close()
+        pipe.send(stdout.getvalue().strip())
+    except Exception as e:
+        tb = traceback.format_exc()
+        pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
+
+from src.utils.run_utils import get_run_dir
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
-    Executes a string of Python code in a sandboxed subprocess.
-
+    Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
+    Injected helpers: save_plot, get_table_sample, conn (DuckDB connection), add_insight_to_report, etc.
+    - Plots are always generated in headless mode (matplotlib 'Agg').
+    - Each call is stateless: agents must reload data in each code block.
+    - If code execution exceeds the timeout, it is forcibly terminated.
     Args:
         code: The Python code to execute.
         timeout: The timeout in seconds for the subprocess.
-
     Returns:
         The stdout of the executed code, or an error message if it fails.
     """
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=True,  # This will raise CalledProcessError for non-zero exit codes
-        )
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        logger.error(f"Code execution timed out after {timeout} seconds.")
+    import multiprocessing
+
+    run_dir = str(get_run_dir())
+    parent_conn, child_conn = multiprocessing.Pipe()
+    p = multiprocessing.Process(target=_execute_python_run_code, args=(child_conn, code, run_dir))
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join()
         return f"ERROR: Code execution timed out after {timeout} seconds."
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Code execution failed with exit code {e.returncode}.")
-        logger.error(f"STDOUT: {e.stdout.strip()}")
-        logger.error(f"STDERR: {e.stderr.strip()}")
-        return f"ERROR: Code execution failed.\n---STDERR---\n{e.stderr.strip()}"
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during code execution: {e}")
-        return f"ERROR: An unexpected error occurred: {e}"
+    if parent_conn.poll():
+        return parent_conn.recv()
+    return "ERROR: No output returned from code execution."
+
 ```
 
 ## 📊 Summary
 
-- **Total files processed:** 42
+- **Total files processed:** 43
 - **Directory:** `src`
-- **Generated:** 2025-06-14 20:50:32
+- **Generated:** 2025-06-15 07:55:24
 
 ---
 

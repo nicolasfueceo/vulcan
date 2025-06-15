@@ -2,10 +2,9 @@
 import json
 import logging
 import os
-import subprocess
-import sys
+
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -55,23 +54,31 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
                 report += f"- Max: {desc['max']}\n"
                 mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
                 report += f"- Mode: {mode}\n"
-                report += f"- Skewness: {series.skew():.4f}\n"
-                report += f"- Kurtosis: {series.kurtosis():.4f}\n"
-                report += f"- # Unique: {series.nunique()}\n"
             else:
-                report += f"- Type: Categorical\n"
-                report += f"- # Unique: {series.nunique()}\n"
+                report += "- Type: Categorical\n"
+                report += "- # Unique: {}\n".format(series.nunique())
                 mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
-                report += f"- Mode: {mode}\n"
+                report += "- Mode: {}\n".format(mode)
                 top_freq = series.value_counts().head(5)
-                report += f"- Top Values:\n"
+                report += "- Top Values:\n"
                 for idx, val in enumerate(top_freq.index):
-                    report += f"    - {val}: {top_freq.iloc[idx]}\n"
+                    report += "    - {}: {}\n".format(val, top_freq.iloc[idx])
             report += "---\n"
-        return report
-    except Exception as e:
-        logger.error(f"Failed to compute summary stats for {table_or_view}: {e}")
-        return f"ERROR: Could not compute summary stats for {table_or_view}: {e}"
+        return truncate_output_to_word_limit(report, 1000)
+    except duckdb.Error as e:
+        logger.error("Failed to compute summary stats for %s: %s", table_or_view, e)
+        return "ERROR: Could not compute summary stats for {}: {}".format(table_or_view, e)
+
+def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
+    """
+    Truncate the output to a maximum number of words, appending a message if truncation occurred.
+    """
+    words = text.split()
+    if len(words) > word_limit:
+        truncated = ' '.join(words[:word_limit])
+        return (truncated +
+                f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]")
+    return text
 
 def run_sql_query(query: str) -> str:
     """
@@ -83,9 +90,9 @@ def run_sql_query(query: str) -> str:
             df = conn.execute(query).fetchdf()
             if df.empty:
                 return "Query executed successfully, but returned no results."
-            return df.to_markdown(index=False)
-    except Exception as e:
-        logger.error(f"SQL query failed: {query} | Error: {e}")
+            return truncate_output_to_word_limit(df.to_markdown(index=False), 1000)
+    except duckdb.Error as e:
+        logger.error("SQL query failed: %s | Error: %s", query, e)
         return f"ERROR: SQL query failed: {e}"
 
 
@@ -110,51 +117,57 @@ def save_plot(filename: str):
     return str(abs_path)
 
 
-def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png") -> str:
+def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png", analysis_prompt: str = None) -> dict:
     """
-    Executes a SQL query, generates a matplotlib plot, and saves it to the run-local 'plots' directory.
+    Executes a SQL query, generates a matplotlib plot, saves it, and analyzes it using vision_tool.
     Args:
         query: SQL SELECT query. Must return a DataFrame with named columns.
         plot_type: One of ['scatter', 'bar', 'hist']
         x: Name of the column for x-axis (required for scatter/bar)
         y: Name of the column for y-axis (required for scatter/bar)
         file_name: Desired file name for the output plot (should end with .png)
+        analysis_prompt: Prompt for vision_tool analysis (optional)
     Returns:
-        Absolute path to the saved plot file, or error string.
+        Dict with keys: 'plot_path', 'vision_analysis', and 'error' if any.
     """
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
             df = conn.execute(query).fetchdf()
         if df.empty:
-            return "ERROR: Query returned no data to plot."
+            return {"error": "Query returned no data to plot."}
         import matplotlib.pyplot as plt
         plt.figure(figsize=(8, 5))
         if plot_type == "scatter":
             if x is None or y is None:
-                return "ERROR: 'x' and 'y' must be specified for scatter plots."
+                return {"error": "'x' and 'y' must be specified for scatter plots."}
             plt.scatter(df[x], df[y], alpha=0.7)
             plt.xlabel(x)
             plt.ylabel(y)
         elif plot_type == "bar":
             if x is None or y is None:
-                return "ERROR: 'x' and 'y' must be specified for bar plots."
+                return {"error": "'x' and 'y' must be specified for bar plots."}
             plt.bar(df[x], df[y])
             plt.xlabel(x)
             plt.ylabel(y)
         elif plot_type == "hist":
             if x is None:
-                return "ERROR: 'x' must be specified for histogram plots."
+                return {"error": "'x' must be specified for histogram plots."}
             plt.hist(df[x], bins=20, alpha=0.7)
             plt.xlabel(x)
             plt.ylabel("Frequency")
         else:
-            return f"ERROR: Unknown plot_type '{plot_type}'. Use 'scatter', 'bar', or 'hist'."
+            return {"error": f"Unknown plot_type '{plot_type}'. Use 'scatter', 'bar', or 'hist'."}
         plt.title(f"{plot_type.title()} plot of {y if y else x}")
         abs_path = save_plot(file_name)
-        return abs_path
+        # Automatically call vision_tool
+        from src.utils.tools import vision_tool
+        if analysis_prompt is None:
+            analysis_prompt = "Analyze this plot and summarize key trends and anomalies."
+        vision_result = vision_tool(abs_path, analysis_prompt)
+        return {"plot_path": abs_path, "vision_analysis": vision_result}
     except Exception as e:
         logger.error(f"Failed to create plot: {e}")
-        return f"ERROR: Could not create plot. {e}"
+        return {"error": f"Could not create plot. {e}"}
 
 
 def create_analysis_view(view_name: str, sql_query: str, rationale: str):
@@ -221,8 +234,13 @@ def cleanup_analysis_views(run_dir: Path):
                     logger.warning("Could not drop view %s: %s", view_name, e)
         # Optionally remove the tracking file after cleanup
         # views_file.unlink()
+    except duckdb.Error as e:
+        logger.error("DuckDB error during view cleanup: %s", e)
+    except OSError as e:
+        logger.error("OS error during view cleanup: %s", e)
     except Exception as e:
-        logger.error("Error during view cleanup: %s", e)
+        # This is intentionally broad to ensure all unexpected errors during cleanup are logged and do not crash the orchestrator.
+        logger.error("Unexpected error during view cleanup: %s", e)
 
 
 def get_add_insight_tool(session_state):
@@ -288,7 +306,7 @@ def get_add_to_central_memory_tool(session_state):
     """Returns a function that agents can call to add notes to the shared central memory."""
     from datetime import datetime
 
-    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict] = None) -> str:
+    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None) -> str:
         """Appends a structured entry to ``session_state.central_memory`` and persists it.
 
         Args:
@@ -306,7 +324,8 @@ def get_add_to_central_memory_tool(session_state):
             "reasoning": reasoning,
         }
         if metadata:
-            entry["metadata"] = metadata
+            # Ensure all metadata values are strings for serialization
+            entry["metadata"] = {str(k): str(v) for k, v in metadata.items()}
 
         session_state.central_memory.append(entry)
         # Persist session state
@@ -324,17 +343,26 @@ def get_finalize_hypotheses_tool(session_state):
         """
         Finalizes the list of vetted hypotheses after validation.
         """
-        # First, validate the hypotheses
-        insight_report = session_state.get_final_insight_report()
-        is_valid, error_message = validate_hypotheses(hypotheses_data, insight_report)
-
-        if not is_valid:
-            logger.error(f"Hypothesis validation failed: {error_message}")
-            return f"ERROR: Hypothesis validation failed. {error_message}"
-
-        # If valid, proceed to create models and save
+        # Step 1: Instantiate Hypothesis models (assigns IDs, validates fields)
         try:
             hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+        except Exception as e:
+            logger.error(f"Failed to instantiate Hypothesis models: {e}")
+            return f"ERROR: Failed to instantiate Hypothesis models. Reason: {e}"
+
+        # Step 2: Validate for duplicate IDs and empty rationales
+        ids = set()
+        for h in hyp_models:
+            if h.id in ids:
+                logger.error(f"Duplicate hypothesis ID found: {h.id}")
+                return f"ERROR: Hypothesis validation failed. Duplicate hypothesis ID found: {h.id}"
+            ids.add(h.id)
+            if not h.rationale:
+                logger.error(f"Hypothesis {h.id} has an empty rationale.")
+                return f"ERROR: Hypothesis validation failed. Hypothesis {h.id} has an empty rationale."
+
+        # Step 3: Save to session state
+        try:
             session_state.finalize_hypotheses(hyp_models)
             logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
             return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
@@ -345,9 +373,10 @@ def get_finalize_hypotheses_tool(session_state):
     return finalize_hypotheses
 
 
+
 def validate_hypotheses(
     hypotheses_data: List[Dict], insight_report: str
-) -> (bool, str):
+) -> Tuple[bool, str]:
     """
     Validates a list of hypothesis data against the insight report and internal consistency.
     """
@@ -380,19 +409,27 @@ def vision_tool(image_path: str, prompt: str) -> str:
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
     import base64
     from pathlib import Path
+    import os
 
     from openai import OpenAI
 
     try:
-        # Try to resolve path relative to current working directory
+        # Robust path resolution
         full_path = Path(image_path)
+        logger.info(f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})")
+        if not full_path.is_absolute():
+            # Try CWD first
+            if not full_path.exists():
+                # Try run_dir/plots/image_path
+                run_dir = get_run_dir()
+                candidate = run_dir / "plots" / image_path
+                logger.info(f"vision_tool: Trying run_dir/plots: '{candidate}'")
+                if candidate.exists():
+                    full_path = candidate
         if not full_path.exists():
-            # Try relative to run directory if available
-            run_dir = get_run_dir()
-            full_path = run_dir / image_path
-
-        if not full_path.exists():
+            logger.error(f"vision_tool: File not found at '{full_path}' (original: '{image_path}')")
             return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
+        logger.info(f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})")
 
         # Initialize OpenAI client
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -436,36 +473,89 @@ def vision_tool(image_path: str, prompt: str) -> str:
     except ImportError:
         return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
     except Exception as e:
+        logger.error("Unexpected error during image analysis: %s", e)
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+
+def _execute_python_run_code(pipe, code, run_dir):
+    # Headless plotting
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import duckdb
+    from pathlib import Path
+    from src.config.settings import DB_PATH
+    from src.utils.tools import get_table_sample
+    # Save plot helper using provided run_dir
+    def save_plot(filename: str):
+        try:
+            plots_dir = Path(run_dir) / "plots"
+            plots_dir.mkdir(exist_ok=True)
+            basename = Path(filename).name
+            if not basename.lower().endswith(".png"):
+                basename += ".png"
+            path = plots_dir / basename
+            plt.tight_layout()
+            plt.savefig(path, dpi=300, bbox_inches="tight")
+            plt.close()
+            abs_path = path.resolve()
+            print(f"PLOT_SAVED:{abs_path}")
+            return str(abs_path)
+        except Exception as e:
+            print(f"ERROR: Could not save plot: {e}")
+            return None
+    # Dummy add_insight_to_report for now
+    def add_insight_to_report(title, finding, supporting_evidence, confidence):
+        print(f"INSIGHT_ADDED: {{'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}}")
+    # Provide a real DuckDB connection for the code
+    conn = duckdb.connect(database=str(DB_PATH), read_only=False)
+    # If in future you want to expose CV folds or other context, load and inject here.
+    local_ns = {
+        'save_plot': save_plot,
+        'get_table_sample': get_table_sample,
+        'conn': conn,
+        'add_insight_to_report': add_insight_to_report,
+        '__builtins__': __builtins__,
+    }
+    import io
+    import contextlib
+    import traceback
+    stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout):
+            exec(code, local_ns, local_ns)
+        conn.close()
+        pipe.send(stdout.getvalue().strip())
+    except Exception as e:
+        tb = traceback.format_exc()
+        pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
+
+from src.utils.run_utils import get_run_dir
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
-    Executes a string of Python code in a sandboxed subprocess.
-
+    Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
+    Injected helpers: save_plot, get_table_sample, conn (DuckDB connection), add_insight_to_report, etc.
+    - Plots are always generated in headless mode (matplotlib 'Agg').
+    - Each call is stateless: agents must reload data in each code block.
+    - If code execution exceeds the timeout, it is forcibly terminated.
     Args:
         code: The Python code to execute.
         timeout: The timeout in seconds for the subprocess.
-
     Returns:
         The stdout of the executed code, or an error message if it fails.
     """
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=True,  # This will raise CalledProcessError for non-zero exit codes
-        )
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        logger.error(f"Code execution timed out after {timeout} seconds.")
+    import multiprocessing
+
+    run_dir = str(get_run_dir())
+    parent_conn, child_conn = multiprocessing.Pipe()
+    p = multiprocessing.Process(target=_execute_python_run_code, args=(child_conn, code, run_dir))
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join()
         return f"ERROR: Code execution timed out after {timeout} seconds."
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Code execution failed with exit code {e.returncode}.")
-        logger.error(f"STDOUT: {e.stdout.strip()}")
-        logger.error(f"STDERR: {e.stderr.strip()}")
-        return f"ERROR: Code execution failed.\n---STDERR---\n{e.stderr.strip()}"
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during code execution: {e}")
-        return f"ERROR: An unexpected error occurred: {e}"
+    if parent_conn.poll():
+        return parent_conn.recv()
+    return "ERROR: No output returned from code execution."
+

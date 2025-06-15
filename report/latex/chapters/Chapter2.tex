@@ -1,52 +1,34 @@
 \doublespacing % Do not change - required
 
-\chapter{Title chapter 2}
+\chapter{Methodology}
 \label{ch2}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % IMPORTANT
-\begin{spacing}{1} %THESE FOUR
-\minitoc % LINES MUST APPEAR IN
-\end{spacing} % EVERY
-\thesisspacing % CHAPTER
-% COPY THEM IN ANY NEW CHAPTER
+\begin{spacing}{1}
+\minitoc
+\end{spacing}
+\thesisspacing
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\section{The VULCAN Framework: An Overview}
+VULCAN is a modular, agentic framework for automated feature engineering in recommender systems. The system decomposes the data science workflow into three principal, interacting loops—Discovery, Strategy, and Implementation—each managed by specialised LLM-powered agents. This design enables hypothesis-driven exploration, iterative refinement, and robust evaluation, addressing the limitations of both manual and automated single-agent approaches. Figure~\ref{fig:vulcan_architecture} (not shown) illustrates the high-level architecture, highlighting the flow of information and control between agent teams and the orchestrator.
 
-\kant[1]
+\section{Orchestrator and State Management}
+At the core of VULCAN is the \texttt{Orchestrator}, which governs the execution of agent teams and manages the \texttt{SessionState}. The orchestrator is responsible for initialising each experimental run, invoking the discovery and strategy loops, and tracking the progression of the session. The \texttt{SessionState} object maintains a persistent record of insights, hypotheses, and coverage metrics, ensuring reproducibility and enabling detailed post-hoc analysis. Termination of the discovery loop is governed by the \texttt{should\_continue\_exploration} function, which enforces a strict policy: exploration cannot terminate until at least one high-quality insight has been generated. This prevents premature convergence and guarantees substantive agent output.
 
-\section{Title section 2.1}
+\section{The Discovery Loop: From Data to Insights}
+The discovery loop is managed by a team of three agents—Analyst, Researcher, and Critic—each instantiated with distinct prompting strategies and tool access. The Analyst is tasked with initial data exploration and hypothesis generation, leveraging \texttt{execute\_python} to perform statistical analyses and visualisation. The Researcher synthesises findings from the Analyst, contextualises them with literature, and proposes candidate insights. The Critic evaluates the quality and novelty of these insights, ensuring only robust findings are retained. Insights are formalised and persisted via the \texttt{add\_insight\_to\_report} tool. The loop iterates until the orchestrator's termination criteria are met, with agent interactions mediated by a group chat protocol that supports collaborative reasoning and adversarial critique.
 
-\kant[1-2]
+\section{The Strategy Loop: From Insights to Hypotheses}
+Upon completion of the discovery loop, the system invokes a mandatory hypothesis generation phase. If no hypotheses are present, the orchestrator activates the \texttt{HypothesisAgent}, which synthesises formal hypotheses from the final set of insights. This process is facilitated by a user proxy agent and the \texttt{finalize\_hypotheses} tool, ensuring that all hypotheses are explicitly recorded in the session state. The group chat is configured for focused, multi-turn dialogue, allowing the agent to clarify, refine, and validate each hypothesis before proceeding.
 
-\subsection{If needed}
+\section{The Implementation Loop: From Hypotheses to Features}
+The implementation loop translates validated hypotheses into executable feature engineering code. Agents are equipped with tools for code synthesis, execution, and self-correction, enabling them to iteratively improve feature quality. The loop incorporates ablation studies and validation checks, leveraging both synthetic and real data to assess the impact of each feature on downstream model performance. The process is tightly integrated with the orchestrator, which manages code execution, error handling, and the aggregation of results for subsequent analysis.
 
-\kant[1]
-
-\subsection{If needed}
-
-\kant[1]
-
-\section{Title section 2.2}
-
-\kant[1-2]
-
-\subsection{If needed}
-
-\kant[1]
-
-\subsection{If needed}
-
-\kant[1]
-
-\section{Title section 2.3}
-
-\kant[1-2]
-
-\subsection{If needed}
-
-\kant[1]
-
-\subsection{If needed}
-
-\kant[1]
+\section{Bilevel Optimisation Objective}
+VULCAN formalises the feature engineering task as a bilevel optimisation problem. The inner loop seeks the optimal parameters for the recommender model $M$ given a set of engineered features, minimising the validation loss $L(M(D_{train}, \theta))$. The outer loop optimises the feature generation process itself, seeking to minimise a composite objective $J$ that incorporates accuracy, feature complexity, and interpretability:
+\begin{equation}
+    \theta^* = \arg\min_{\theta} J(L(M(D_{train}, \theta)))
+\end{equation}
+This formulation enables principled comparison of feature engineering strategies and supports rigorous ablation studies. The VULCAN system operationalises this objective through agentic search, empirical benchmarking, and transparent reporting.

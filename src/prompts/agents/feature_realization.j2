@@ -25,15 +25,17 @@ Your task is to write a single, complete Python function based on the provided s
 import pandas as pd
 import numpy as np
 
-def {{ name }}(df: pd.DataFrame, {% for param, config in params.items() %}{{ param }}: {{ 'int' if config.type == 'int' else 'float' }} = {{ config.default | default(1.0) }}{% if not loop.last %}, {% endif %}{% endfor %}) -> pd.Series:
+def {{ name }}(df: pd.DataFrame{% if params is defined and params %}{% for param, config in params.items() %}, {{ param }}: {{ 'int' if config.type == 'int' else 'float' }} = {{ config.default | default(1.0) }}{% endfor %}{% endif %}) -> pd.Series:
     """
     (Your detailed docstring here explaining the feature's purpose)
 
     Args:
         df (pd.DataFrame): The input dataframe, containing columns like 'user_id', 'book_id', 'rating'.
+        {% if params is defined and params %}
         {% for param, config in params.items() %}
         {{ param }} ({{ 'int' if config.type == 'int' else 'float' }}): (Your description of this parameter).
         {% endfor %}
+        {% endif %}
 
     Returns:
         pd.Series: A Series containing the calculated feature values, indexed by the original df index.

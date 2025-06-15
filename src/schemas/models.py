@@ -1,5 +1,6 @@
 # src/utils/schemas.py
 import ast
+import uuid
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, validator
@@ -41,34 +42,18 @@ class Insight(BaseModel):
 
 
 class Hypothesis(BaseModel):
+    """
+    Represents a simple hypothesis with only an id, summary, and rationale.
+    """
     id: str = Field(
-        ...,
-        description="A unique, sequential identifier for the hypothesis, e.g., 'H-01'.",
+        default_factory=lambda: str(uuid.uuid4()),
+        description="A unique identifier for the hypothesis, e.g., a UUID."
     )
     summary: str = Field(
         ..., description="A concise, one-sentence statement of the hypothesis."
     )
     rationale: str = Field(
-        ...,
-        description="A clear explanation of why this hypothesis is useful and worth testing.",
-    )
-    source_insight: Optional[str] = Field(
-        None,
-        description="The title of the insight from the report that inspired this hypothesis.",
-    )
-    estimated_gain: float = Field(
-        ...,
-        ge=0,
-        le=10,
-        description="A subjective estimate of the potential value (0-10) if the hypothesis is true.",
-    )
-    difficulty: Literal["low", "medium", "high"] = Field(
-        ...,
-        description="The estimated difficulty to implement and test this hypothesis.",
-    )
-    tags: List[str] = Field(
-        ...,
-        description="A list of relevant tags, e.g., ['per-user', 'temporal', 'text-based'].",
+        ..., description="A clear explanation of why this hypothesis is useful and worth testing."
     )
 
     @validator("rationale")
