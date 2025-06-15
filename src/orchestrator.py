@@ -5,28 +5,30 @@ import sys
 # Ensure DB views are set up for pipeline compatibility
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 
-import scripts.setup_views
 import autogen
 from autogen import Agent
 from dotenv import load_dotenv
 from loguru import logger
 
+import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
+from src.core.database import get_db_schema_string
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.session_state import SessionState, CoverageTracker
+from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
+    execute_python,  # FIX: Import execute_python for agent registration
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    execute_python,  # FIX: Import execute_python for agent registration
+    get_save_features_tool,  # Register save_features tool for agents
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -37,6 +39,25 @@ load_dotenv()
 
 
 # --- Helper Functions for SmartGroupChatManager ---
+
+def get_insight_context(session_state: SessionState) -> str:
+    """Generate a context message based on available insights."""
+    if not session_state.insights:
+        return ""
+        
+    # Format the top insights for context
+    insights = session_state.insights[:5]  # Limit to top 5 insights
+    insights_text = "\n\n".join([f"**{i.title}**: {i.finding[:150]}..." for i in insights])
+    
+    return f"""
+## Context from Discovery Team
+
+These insights were discovered by the previous team:
+
+{insights_text}
+
+Please reference these insights when building your features.
+"""
 
 
 def should_continue_exploration(session_state: SessionState, round_count: int) -> bool:
@@ -212,36 +233,40 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         super().__init__(groupchat=groupchat, llm_config=llm_config)
         self.round_count = 0  # Reset round count for each new chat
 
-    def run_chat(self, messages, sender, config):
-        """Override the main chat runner to add smart features."""
-        session_state = config.get("session_state")
-        if not session_state:
-            logger.error("SessionState not found in config for SmartGroupChatManager.")
-            return super().run_chat(messages, sender, config)
-
+    def run_chat(
+        self, messages: List[Dict[str, Any]], sender: autogen.Agent, config: Optional[Dict[str, Any]] = None
+    ) -> Union[str, Dict[str, Any], None]:
+        """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
+        session_state = globals().get("session_state")
 
-        if self.round_count % 10 == 0:
-            insights_count = len(session_state.insights)
-            logger.info(
-                "Exploration progress: Round {}, {} insights captured",
-                self.round_count,
-                insights_count,
-            )
+        # If we're at round 1, attach insights/discovery context
+        if self.round_count == 1:
+            if session_state and hasattr(session_state, "insights"):
+                context_message = get_insight_context(session_state)
+                if context_message:
+                    self.groupchat.messages.append(
+                        {
+                            "role": "user",
+                            "content": context_message,
+                            "name": "SystemCoordinator",
+                        }
+                    )
 
-        if self.round_count % 25 == 0:
+        # Try to compress context if it's getting too long
+        if self.round_count > 10 and self.round_count % 10 == 0:
             try:
                 self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
                 logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        # Only allow termination if there is at least one insight
-        if self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
-            if len(session_state.insights) == 0:
-                logger.info("Termination criteria met, but no insights found. Forcing continuation.")
-            else:
-                logger.info("Exploration criteria met and at least one insight found, terminating conversation")
+        # Check if we should terminate based on discovery criteria
+        if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
+            if len(session_state.insights) > 0:
+                logger.info(
+                    "Exploration criteria met and insights found, terminating conversation"
+                )
                 self.groupchat.messages.append(
                     {
                         "role": "assistant",
@@ -249,23 +274,44 @@ class SmartGroupChatManager(autogen.GroupChatManager):
                         "name": "SystemCoordinator",
                     }
                 )
+            else:
+                logger.info(
+                    "Termination criteria met, but no insights found. Forcing continuation."
+                )
+
+        # Reset agents if potential loop detected
         if self.round_count > 0 and self.round_count % 20 == 0:
             logger.warning("Potential loop detected. Resetting agents.")
+            # Reset all agents to clear their memory
             for agent in self.groupchat.agents:
-                agent.reset()
+                # Use getattr for safer access to reset method
+                reset_method = getattr(agent, "reset", None)
+                if reset_method and callable(reset_method):
+                    reset_method()
 
-        if self.round_count > 5 and self.round_count % 15 == 0:
-            if progress_prompt := get_progress_prompt(session_state, self.round_count):
+        # Add progress prompts to guide agents periodically
+        if session_state and self.round_count > 5 and self.round_count % 15 == 0:
+            progress_guidance = get_progress_prompt(session_state, self.round_count)
+            if progress_guidance:
                 logger.info("Adding progress guidance at round {}", self.round_count)
                 self.groupchat.messages.append(
                     {
                         "role": "user",
-                        "content": progress_prompt,
+                        "content": progress_guidance,
                         "name": "SystemCoordinator",
                     }
                 )
 
-        return super().run_chat(messages, sender, config)
+        # Let the parent class handle the actual chat execution
+        # Pass the GroupChat object as config for correct typing
+        result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
+        # Handle possible tuple return value from parent class
+        if isinstance(result, tuple) and len(result) == 2:
+            success, response = result
+            if success and response:
+                return response
+            return None
+        return result
 
 
 # --- Orchestration Loops ---
@@ -372,8 +418,20 @@ def run_discovery_loop(session_state: SessionState) -> str:
     return session_state.get_final_insight_report()
 
 
-def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
-    """Orchestrates the Strategy Team to refine insights and generate features."""
+def run_strategy_loop(
+    session_state: SessionState,
+    strategy_agents_with_proxy: Dict[str, autogen.ConversableAgent],
+    llm_config: Dict,
+) -> Optional[Dict[str, Any]]:
+    """
+    Runs the streamlined strategy team loop with the following agents:
+    - StrategistAgent: Validates features from a business/strategy perspective
+    - EngineerAgent: Validates features from a technical perspective
+    - FeatureEngineer: Designs and implements features based on pre-generated hypotheses
+    - UserProxy_Strategy: Handles tool execution and stores features
+
+    The session_state should already contain hypotheses generated by the discovery team.
+    """
     logger.info("--- Running Strategy Loop ---")
     if not session_state.insights:
         logger.warning("No insights found, skipping strategy loop.")
@@ -385,12 +443,11 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         with open(views_file, "r", encoding="utf-8") as f:
             json.load(f)
 
-    llm_config = get_llm_config_list()
-    if not llm_config:
-        raise RuntimeError("Failed to get LLM configuration, cannot proceed with strategy.")
+    # Extract agents from pre-initialized dictionary
+    agents = {k: v for k, v in strategy_agents_with_proxy.items() if k != "user_proxy"}
+    user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    agents = get_strategy_team_agents(llm_config)
-    user_proxy = agents.pop("user_proxy")
+    # Register strategy team tools with the user proxy
     user_proxy.register_function(
         function_map={
             "run_sql_query": run_sql_query,
@@ -398,29 +455,77 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         }
     )
 
-    # --- STRATEGY TEAM GROUP CHAT EXECUTION ---
-    strategy_agents = list(agents.values())
+    # Initialize group chat with all discovery agents
+    discovery_agents = list(agents.values())
+    # Using Sequence instead of List[Agent] for better type compatibility
+    agent_sequence: Sequence[autogen.ConversableAgent] = discovery_agents + [user_proxy]
     group_chat = autogen.GroupChat(
-        agents=strategy_agents + [user_proxy],
+        agents=agent_sequence,  # type: ignore # We're handling type compatibility with Sequence
         messages=[],
-        max_round=30,
-        allow_repeat_speaker=False
+        max_round=25,
+        allow_repeat_speaker=False,
     )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    manager = autogen.GroupChatManager(
+        groupchat=group_chat, llm_config=llm_config
+    )  # Using standard GroupChatManager
 
     logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
+
+    # Format the hypotheses data
+    hypotheses = session_state.get_final_hypotheses()
+    hypothesis_str = (
+        "\n".join([f"- {getattr(h, 'summary', str(h))}" for h in hypotheses])
+        if hypotheses
+        else "No hypotheses available."
+    )
+
+    # DB schema is now in agent system messages, no need to repeat it here
+    initial_message = f"""
+# Strategy Team Task: Turn Hypotheses into Features
+
+## Available Hypotheses
+{hypothesis_str}
+
+## Task
+Analyze these hypotheses and create features that can be used by the optimization team.
+Start by having the FeatureEngineer create specifications and implementations for each feature.
+The team will validate the features before finalizing them.
+
+Ready to begin?
+
+IMPORTANT INSTRUCTIONS:
+1. There is NO HypothesisAgent in this conversation - the hypotheses are already provided above.
+2. FeatureEngineer should take the lead with concrete implementation.
+3. To run tools, you MUST prefix your request with '@UserProxy_Strategy please run'
+4. To finalize hypotheses, use: '@UserProxy_Strategy please run finalize_hypotheses([{{"summary": "...", "rationale": "..."}}])'
+5. For SQL queries, use: '@UserProxy_Strategy please run run_sql_query("SELECT * FROM table")'
+6. Focus on producing production-ready code with detailed explanations.
+7. Feature implementations will be automatically stored in session_state.features
+8. End with FINAL_FEATURES when complete.
+
+YOUR GOAL: Efficiently translate the pre-generated hypotheses into implemented features, with the FeatureEngineer driving the creation process while StrategistAgent and EngineerAgent provide critical feedback."""
+
     try:
-        initial_message = "Strategy team, please review the insights and hypotheses, and generate a strategy report."
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
-        # Attempt to get a strategy report from session_state or fallback to hypotheses
-        if hasattr(session_state, 'get_final_strategy_report'):
+        # Check for realized features in session_state
+        features = getattr(session_state, "features", None)
+
+        # Attempt to get a strategy report from session_state or fallback to features/hypotheses
+        if hasattr(session_state, "get_final_strategy_report"):
             report = session_state.get_final_strategy_report()
-        elif hasattr(session_state, 'get_final_hypotheses'):
-            report = session_state.get_final_hypotheses()
+        elif features:
+            report = {
+                "features_count": len(features),
+                "hypotheses_count": len(session_state.hypotheses),
+            }
+        elif hasattr(session_state, "get_final_hypotheses"):
+            hypotheses = session_state.get_final_hypotheses()
+            # Convert List[Hypothesis] to Dict[str, Any]
+            report = {"hypotheses": [h.__dict__ for h in hypotheses] if hypotheses else []}
         else:
-            report = "No strategy report or hypotheses available."
+            report = {"message": "No strategy report, features, or hypotheses available."}
         return report
     finally:
         logger.info("Reopening database connection after strategy loop...")
@@ -440,6 +545,22 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     session_state = SessionState(run_dir)
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
+    # Get the database schema once to be reused by agents
+    try:
+        db_schema = get_db_schema_string()
+        logger.info("Successfully retrieved database schema for agents")
+    except Exception as e:
+        logger.warning(f"Could not get database schema: {e}")
+        db_schema = "[Error retrieving schema]"
+
+    # Initialize LLM configuration once to reuse
+    llm_config = get_llm_config_list()
+    if not llm_config:
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with orchestration.")
+
+    # Initialize strategy agents once with the schema
+    strategy_agents = get_strategy_team_agents(llm_config=llm_config, db_schema=db_schema)
+
     all_epoch_reports = []
     coverage_tracker = CoverageTracker()
 
@@ -452,40 +573,19 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
 
             # --- MANDATORY HYPOTHESIS GENERATION ---
             # --- MANDATORY HYPOTHESIS GENERATION ---
-            # If there are insights but no hypotheses, invoke the HypothesisAgent to generate hypotheses before strategy.
+            # Note: Discovery team should handle hypothesis generation now
+            # If no hypotheses are found, log the issue but don't attempt to generate them ourselves
             if session_state.insights and not session_state.get_final_hypotheses():
-                logger.info("No hypotheses found after discovery, invoking HypothesisAgent to generate hypotheses from insights.")
-                from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
-                llm_config = get_llm_config_list()
-                hypothesis_agents = get_hypothesis_agents(llm_config, system_prompt="")
-                hypo_agent = hypothesis_agents["HypothesisAgent"]
-                # Compose a message with the insight report for the agent
-                insights_report = session_state.get_final_insight_report()
-                message = f"Here is the insight report. Please generate a list of initial hypotheses based on these findings.\n\n{insights_report}"
-                user_proxy = hypothesis_agents["user_proxy"]
-                # Register finalize_hypotheses tool
-                import autogen
-                from src.utils.tools import get_finalize_hypotheses_tool
-                autogen.register_function(
-                    get_finalize_hypotheses_tool(session_state),
-                    caller=hypo_agent,
-                    executor=user_proxy,
-                    name="finalize_hypotheses",
-                    description="Finalize and save hypotheses to the session state.",
+                logger.warning(
+                    "No hypotheses found after discovery. Continuing with strategy without hypotheses."
                 )
-                # Run a single chat round to generate hypotheses
-                group_chat = autogen.GroupChat(agents=[user_proxy, hypo_agent], messages=[], max_round=5)
-                # Properly instantiate GroupChatManager and use it for chat initiation
-                if llm_config is None:
-                    raise ValueError("LLM config is None; please check your OpenAI API key and config setup.")
-                group_manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
-                user_proxy.initiate_chat(group_manager, message=message, session_state=session_state)
 
             if not session_state.get_final_hypotheses():
                 logger.info("No hypotheses found, skipping strategy loop.")
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
             else:
-                reflection_results = run_strategy_loop(session_state)
+                # Pass the pre-initialized strategy agents to the strategy loop
+                reflection_results = run_strategy_loop(session_state, strategy_agents, llm_config)
                 if reflection_results:
                     strategy_report = json.dumps(reflection_results, indent=2)
                 else:

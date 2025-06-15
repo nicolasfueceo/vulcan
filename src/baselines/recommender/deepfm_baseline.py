@@ -98,6 +98,7 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
     predictions = model.predict(test_model_input, batch_size=256)
+    import numpy as np
     mse = np.mean((test_labels - predictions) ** 2)
     rmse = np.sqrt(mse)
     logger.info(f"DeepFM baseline RMSE: {rmse:.4f}")

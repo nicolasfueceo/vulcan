@@ -51,6 +51,9 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
 
     # 5. Return Metrics
+    # TODO: Replace the following placeholders with actual computed values
+    test_rmse = None  # Replace with actual RMSE computation
+    test_mae = None   # Replace with actual MAE computation
     metrics = {
         "rmse": test_rmse,
         "mae": test_mae,

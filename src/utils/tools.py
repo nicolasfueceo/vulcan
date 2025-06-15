@@ -2,9 +2,8 @@
 import json
 import logging
 import os
-
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -24,8 +23,9 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
     - Categorical: unique count, top frequencies, mode, missing count/ratio.
     Returns a markdown-formatted report.
     """
-    import pandas as pd
     import numpy as np
+    import pandas as pd
+
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
             # Sample up to limit rows for efficiency
@@ -40,8 +40,8 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
             missing_ratio = n_missing / len(series)
             report += f"- Missing: {n_missing} ({missing_ratio:.2%})\n"
             if pd.api.types.is_numeric_dtype(series):
-                desc = series.describe(percentiles=[.05, .25, .5, .75, .95])
-                report += f"- Type: Numerical\n"
+                desc = series.describe(percentiles=[0.05, 0.25, 0.5, 0.75, 0.95])
+                report += "- Type: Numerical\n"
                 report += f"- Count: {desc['count']}\n"
                 report += f"- Mean: {desc['mean']:.4f}\n"
                 report += f"- Std: {desc['std']:.4f}\n"
@@ -52,12 +52,12 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
                 report += f"- 75th pct: {desc.get('75%', np.nan)}\n"
                 report += f"- 95th pct: {desc.get('95%', np.nan)}\n"
                 report += f"- Max: {desc['max']}\n"
-                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                mode = series.mode().iloc[0] if not series.mode().empty else "N/A"
                 report += f"- Mode: {mode}\n"
             else:
                 report += "- Type: Categorical\n"
                 report += "- # Unique: {}\n".format(series.nunique())
-                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                mode = series.mode().iloc[0] if not series.mode().empty else "N/A"
                 report += "- Mode: {}\n".format(mode)
                 top_freq = series.value_counts().head(5)
                 report += "- Top Values:\n"
@@ -69,16 +69,20 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
         logger.error("Failed to compute summary stats for %s: %s", table_or_view, e)
         return "ERROR: Could not compute summary stats for {}: {}".format(table_or_view, e)
 
+
 def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
     """
     Truncate the output to a maximum number of words, appending a message if truncation occurred.
     """
     words = text.split()
     if len(words) > word_limit:
-        truncated = ' '.join(words[:word_limit])
-        return (truncated +
-                f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]")
+        truncated = " ".join(words[:word_limit])
+        return (
+            truncated
+            + f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]"
+        )
     return text
+
 
 def run_sql_query(query: str) -> str:
     """
@@ -117,7 +121,14 @@ def save_plot(filename: str):
     return str(abs_path)
 
 
-def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png", analysis_prompt: str = None) -> dict:
+def create_plot(
+    query: str,
+    plot_type: str = "scatter",
+    x: Union[str, None] = None,
+    y: Union[str, None] = None,
+    file_name: str = "plot.png",
+    analysis_prompt: Union[str, None] = None,
+) -> dict:
     """
     Executes a SQL query, generates a matplotlib plot, saves it, and analyzes it using vision_tool.
     Args:
@@ -136,6 +147,7 @@ def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = 
         if df.empty:
             return {"error": "Query returned no data to plot."}
         import matplotlib.pyplot as plt
+
         plt.figure(figsize=(8, 5))
         if plot_type == "scatter":
             if x is None or y is None:
@@ -161,6 +173,7 @@ def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = 
         abs_path = save_plot(file_name)
         # Automatically call vision_tool
         from src.utils.tools import vision_tool
+
         if analysis_prompt is None:
             analysis_prompt = "Analyze this plot and summarize key trends and anomalies."
         vision_result = vision_tool(abs_path, analysis_prompt)
@@ -178,9 +191,7 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str):
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
             # Check if view exists to handle versioning
-            existing_views = [
-                v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()
-            ]
+            existing_views = [v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()]
 
             actual_name = view_name
             version = 2
@@ -251,9 +262,9 @@ def get_add_insight_tool(session_state):
         finding: str,
         source_representation: str,
         reasoning_trace: List[str],
-        supporting_code: str = None,
-        plot_path: str = None,
-        plot_interpretation: str = None,
+        supporting_code: Union[None, str] = None,
+        plot_path: Union[None, str] = None,
+        plot_interpretation: Union[None, str] = None,
         quality_score: Optional[float] = None,
     ) -> str:
         """
@@ -306,7 +317,9 @@ def get_add_to_central_memory_tool(session_state):
     """Returns a function that agents can call to add notes to the shared central memory."""
     from datetime import datetime
 
-    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None) -> str:
+    def add_to_central_memory(
+        note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None
+    ) -> str:
         """Appends a structured entry to ``session_state.central_memory`` and persists it.
 
         Args:
@@ -373,10 +386,7 @@ def get_finalize_hypotheses_tool(session_state):
     return finalize_hypotheses
 
 
-
-def validate_hypotheses(
-    hypotheses_data: List[Dict], insight_report: str
-) -> Tuple[bool, str]:
+def validate_hypotheses(hypotheses_data: List[Dict], insight_report: str) -> Tuple[bool, str]:
     """
     Validates a list of hypothesis data against the insight report and internal consistency.
     """
@@ -408,15 +418,33 @@ def validate_hypotheses(
 def vision_tool(image_path: str, prompt: str) -> str:
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
     import base64
+
+
+def get_save_features_tool(session_state):
+    """Returns a function that can be used as an AutoGen tool to save features to the session state."""
+    def save_features(features_data: list) -> str:
+        """
+        Saves a list of features (as dicts) to session_state.features.
+        """
+        try:
+            features_dict = {f.get('name', f'feature_{i}'): f for i, f in enumerate(features_data)}
+            session_state.set_state("features", features_dict)
+            logger.info(f"Saved {len(features_dict)} features to session state.")
+            return f"SUCCESS: Successfully saved {len(features_dict)} features to session state."
+        except Exception as e:
+            logger.error(f"Failed to save features: {e}")
+            return f"ERROR: Failed to save features. Reason: {e}"
+    return save_features
     from pathlib import Path
-    import os
 
     from openai import OpenAI
 
     try:
         # Robust path resolution
         full_path = Path(image_path)
-        logger.info(f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})")
+        logger.info(
+            f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})"
+        )
         if not full_path.is_absolute():
             # Try CWD first
             if not full_path.exists():
@@ -429,7 +457,9 @@ def vision_tool(image_path: str, prompt: str) -> str:
         if not full_path.exists():
             logger.error(f"vision_tool: File not found at '{full_path}' (original: '{image_path}')")
             return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
-        logger.info(f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})")
+        logger.info(
+            f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})"
+        )
 
         # Initialize OpenAI client
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -448,9 +478,7 @@ def vision_tool(image_path: str, prompt: str) -> str:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                },
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
                             },
                         ],
                     }
@@ -471,20 +499,27 @@ def vision_tool(image_path: str, prompt: str) -> str:
                 return error_msg
             raise
     except ImportError:
-        return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
+        return (
+            "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
+        )
     except Exception as e:
         logger.error("Unexpected error during image analysis: %s", e)
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
 
+
 def _execute_python_run_code(pipe, code, run_dir):
     # Headless plotting
     import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import duckdb
+
+    matplotlib.use("Agg")
     from pathlib import Path
+
+    import duckdb
+    import matplotlib.pyplot as plt
+
     from src.config.settings import DB_PATH
     from src.utils.tools import get_table_sample
+
     # Save plot helper using provided run_dir
     def save_plot(filename: str):
         try:
@@ -503,22 +538,27 @@ def _execute_python_run_code(pipe, code, run_dir):
         except Exception as e:
             print(f"ERROR: Could not save plot: {e}")
             return None
+
     # Dummy add_insight_to_report for now
     def add_insight_to_report(title, finding, supporting_evidence, confidence):
-        print(f"INSIGHT_ADDED: {{'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}}")
+        print(
+            "INSIGHT_ADDED: {'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}"
+        )
+
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
     # If in future you want to expose CV folds or other context, load and inject here.
     local_ns = {
-        'save_plot': save_plot,
-        'get_table_sample': get_table_sample,
-        'conn': conn,
-        'add_insight_to_report': add_insight_to_report,
-        '__builtins__': __builtins__,
+        "save_plot": save_plot,
+        "get_table_sample": get_table_sample,
+        "conn": conn,
+        "add_insight_to_report": add_insight_to_report,
+        "__builtins__": __builtins__,
     }
-    import io
     import contextlib
+    import io
     import traceback
+
     stdout = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout):
@@ -529,7 +569,6 @@ def _execute_python_run_code(pipe, code, run_dir):
         tb = traceback.format_exc()
         pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
 
-from src.utils.run_utils import get_run_dir
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
@@ -558,4 +597,3 @@ def execute_python(code: str, timeout: int = 60) -> str:
     if parent_conn.poll():
         return parent_conn.recv()
     return "ERROR: No output returned from code execution."
-

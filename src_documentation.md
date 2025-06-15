@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-15 07:55:24
+Generated on: 2025-06-15 15:45:02
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -22,6 +22,7 @@ This document contains the complete source code structure and contents of the `s
 │   │   ├── 14130817377459621375
 │   │   ├── 14195369555485797494
 │   │   ├── 14303290313017948516
+│   │   ├── 15715095191921689679
 │   │   ├── 1639093997070980232
 │   │   ├── 16701771181186239481
 │   │   ├── 16789539735357863146
@@ -31,6 +32,7 @@ This document contains the complete source code structure and contents of the `s
 │   │   ├── 2172303405870675659
 │   │   ├── 3096963027186623868
 │   │   ├── 3102837809023614707
+│   │   ├── 3427590981331677085
 │   │   ├── 3495669085465520408
 │   │   ├── 450221922813433944
 │   │   ├── 5320217578922298852
@@ -141,7 +143,6 @@ This document contains the complete source code structure and contents of the `s
 │   │       ├── evaluation_agent.py
 │   │       ├── feature_auditor_agent.py
 │   │       ├── feature_realization_agent.py
-│   │       ├── hypothesis_agents.py
 │   │       ├── optimization_agent_v2.py
 │   │       ├── reflection_agent.py
 │   │       └── strategy_team_agents.py
@@ -188,12 +189,11 @@ This document contains the complete source code structure and contents of the `s
 │   │   │   │   ├── data_representer.j2
 │   │   │   │   ├── pattern_seeker.j2
 │   │   │   │   └── quantitative_analyst.j2
-│   │   │   ├── feature_ideator.j2
-│   │   │   ├── feature_realization.j2
+│   │   │   ├── optimization_agent.j2
 │   │   │   ├── reflection_agent.j2
 │   │   │   └── strategy_team/
 │   │   │       ├── engineer_agent.j2
-│   │   │       ├── hypothesis_agent.j2
+│   │   │       ├── feature_engineer.j2
 │   │   │       └── strategist_agent.j2
 │   │   ├── globals/
 │   │   │   ├── base_agent.j2
@@ -478,12 +478,12 @@ class EvaluationAgent:
 
 ### `agents/strategy_team/feature_auditor_agent.py`
 
-**File size:** 2,495 bytes
+**File size:** 2,424 bytes
 
 ```python
 import logging
 from src.utils.tools import compute_summary_stats, create_plot
-from src.utils.tools import run_sql_query  # for data preview if needed
+
 from src.utils.run_utils import get_run_dir
 
 logger = logging.getLogger(__name__)
@@ -870,58 +870,6 @@ def {candidate.name}(df: pd.DataFrame, {", ".join(all_params.keys())}):
             error_message = f"Exception during validation for {name}: {e}"
             logger.error(error_message, exc_info=True)
             return False, str(e)
-```
-
-### `agents/strategy_team/hypothesis_agents.py`
-
-**File size:** 1,587 bytes
-
-```python
-"""
-Hypothesis & Strategy Team agents for refining insights into concrete hypotheses.
-This team is responsible for strategic analysis and hypothesis generation.
-"""
-
-from typing import Dict
-
-import autogen
-
-
-def get_hypothesis_agents(
-    llm_config: Dict, system_prompt: str
-) -> Dict[str, autogen.ConversableAgent]:
-    """
-    Initializes and returns the agents for the hypothesis and strategy loop.
-    All agents will share the same system prompt to ensure a shared context.
-    Individual roles are defined in separate, more concise prompts.
-    """
-    # Define agent roles
-    agent_roles = {
-        "HypothesisAgent": "Your role is to propose initial hypotheses based on the insight report.",
-        "StrategistAgent": "Your role is to critique hypotheses for business and scientific value.",
-        "EngineerAgent": "Your role is to critique hypotheses for technical feasibility and finalize the list.",
-    }
-
-    # Create agents with a shared system prompt and specific roles
-    agents = {
-        name: autogen.AssistantAgent(
-            name=name,
-            system_message=system_prompt + "\n\n**YOUR SPECIFIC ROLE:**\n" + role,
-            llm_config=llm_config,
-        )
-        for name, role in agent_roles.items()
-    }
-
-    user_proxy = autogen.UserProxyAgent(
-        name="UserProxy_Hypothesis",
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
-        is_termination_msg=lambda x: "SUCCESS" in x.get("content", ""),
-        code_execution_config={"use_docker": False},
-    )
-
-    agents["user_proxy"] = user_proxy
-    return agents
 ```
 
 ### `agents/strategy_team/optimization_agent_v2.py`
@@ -1674,12 +1622,12 @@ class ReflectionAgent:
 
 ### `agents/strategy_team/strategy_team_agents.py`
 
-**File size:** 1,700 bytes
+**File size:** 2,002 bytes
 
 ```python
 """
-Strategy Team agents for hypothesis generation, feature ideation, and optimization.
-This team is responsible for turning insights into concrete features and optimizing them.
+Strategy Team agents for feature engineering and optimization.
+This team is responsible for turning hypotheses into concrete features and optimizing them.
 """
 
 from typing import Dict
@@ -1691,20 +1639,24 @@ from src.utils.prompt_utils import load_prompt
 
 def get_strategy_team_agents(
     llm_config: Dict,
+    db_schema: str = "",
 ) -> Dict[str, autogen.ConversableAgent]:
     """
-    Initializes and returns the agents for the strategy team group chat.
+    Initializes and returns the agents for the streamlined strategy team group chat.
     Uses Jinja2 templates from src/prompts/agents/strategy_team/
+    
+    Args:
+        llm_config: Configuration for the language model
+        db_schema: Current database schema string to provide to agents
     """
 
-    # Load agent prompts from Jinja2 templates
+    # Load agent prompts from Jinja2 templates - removed HypothesisAgent and
+    # replaced FeatureIdeator & FeatureRealizer with a single FeatureEngineer
+    # Pass the database schema to each agent's prompt template
     agent_prompts = {
-        "HypothesisAgent": load_prompt("agents/strategy_team/hypothesis_agent.j2"),
-        "StrategistAgent": load_prompt("agents/strategy_team/strategist_agent.j2"),
-        "EngineerAgent": load_prompt("agents/strategy_team/engineer_agent.j2"),
-        "FeatureIdeator": load_prompt("agents/feature_ideator.j2"),
-        "FeatureRealizer": load_prompt("agents/feature_realization.j2"),
-        "OptimizationAgent": load_prompt("agents/optimization_agent.j2"),
+        "StrategistAgent": load_prompt("agents/strategy_team/strategist_agent.j2", db_schema=db_schema),
+        "EngineerAgent": load_prompt("agents/strategy_team/engineer_agent.j2", db_schema=db_schema),
+        "FeatureEngineer": load_prompt("agents/strategy_team/feature_engineer.j2", db_schema=db_schema),
     }
 
     # Create agents with loaded prompts
@@ -1717,12 +1669,12 @@ def get_strategy_team_agents(
         for name, prompt in agent_prompts.items()
     }
 
-    # Add user proxy for code execution
+    # Add user proxy for code execution with faster termination condition
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_Strategy",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
-        is_termination_msg=lambda x: "FINAL_HYPOTHESES" in x.get("content", ""),
+        max_consecutive_auto_reply=15,  # Increased to allow more iterations within a single chat
+        is_termination_msg=lambda x: "FINAL_FEATURES" in x.get("content", ""),  # Updated termination message
         code_execution_config={"use_docker": False},
     )
 
@@ -1873,7 +1825,7 @@ def run_featuretools_baseline(
 
 ### `baselines/recommender/deepfm_baseline.py`
 
-**File size:** 4,173 bytes
+**File size:** 4,196 bytes
 
 ```python
 import itertools
@@ -1976,6 +1928,7 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
     predictions = model.predict(test_model_input, batch_size=256)
+    import numpy as np
     mse = np.mean((test_labels - predictions) ** 2)
     rmse = np.sqrt(mse)
     logger.info(f"DeepFM baseline RMSE: {rmse:.4f}")
@@ -2097,7 +2050,7 @@ def calculate_ndcg(
 
 ### `baselines/recommender/svd_baseline.py`
 
-**File size:** 2,155 bytes
+**File size:** 2,351 bytes
 
 ```python
 import pandas as pd
@@ -2153,6 +2106,9 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
 
     # 5. Return Metrics
+    # TODO: Replace the following placeholders with actual computed values
+    test_rmse = None  # Replace with actual RMSE computation
+    test_mae = None   # Replace with actual MAE computation
     metrics = {
         "rmse": test_rmse,
         "mae": test_mae,
@@ -4270,7 +4226,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 22,985 bytes
+**File size:** 26,800 bytes
 
 ```python
 import json
@@ -4280,28 +4236,30 @@ import sys
 # Ensure DB views are set up for pipeline compatibility
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 
-import scripts.setup_views
 import autogen
 from autogen import Agent
 from dotenv import load_dotenv
 from loguru import logger
 
+import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
+from src.core.database import get_db_schema_string
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.session_state import SessionState, CoverageTracker
+from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
+    execute_python,  # FIX: Import execute_python for agent registration
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    execute_python,  # FIX: Import execute_python for agent registration
+    get_save_features_tool,  # Register save_features tool for agents
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -4312,6 +4270,25 @@ load_dotenv()
 
 
 # --- Helper Functions for SmartGroupChatManager ---
+
+def get_insight_context(session_state: SessionState) -> str:
+    """Generate a context message based on available insights."""
+    if not session_state.insights:
+        return ""
+        
+    # Format the top insights for context
+    insights = session_state.insights[:5]  # Limit to top 5 insights
+    insights_text = "\n\n".join([f"**{i.title}**: {i.finding[:150]}..." for i in insights])
+    
+    return f"""
+## Context from Discovery Team
+
+These insights were discovered by the previous team:
+
+{insights_text}
+
+Please reference these insights when building your features.
+"""
 
 
 def should_continue_exploration(session_state: SessionState, round_count: int) -> bool:
@@ -4487,36 +4464,40 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         super().__init__(groupchat=groupchat, llm_config=llm_config)
         self.round_count = 0  # Reset round count for each new chat
 
-    def run_chat(self, messages, sender, config):
-        """Override the main chat runner to add smart features."""
-        session_state = config.get("session_state")
-        if not session_state:
-            logger.error("SessionState not found in config for SmartGroupChatManager.")
-            return super().run_chat(messages, sender, config)
-
+    def run_chat(
+        self, messages: List[Dict[str, Any]], sender: autogen.Agent, config: Optional[Dict[str, Any]] = None
+    ) -> Union[str, Dict[str, Any], None]:
+        """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
+        session_state = globals().get("session_state")
 
-        if self.round_count % 10 == 0:
-            insights_count = len(session_state.insights)
-            logger.info(
-                "Exploration progress: Round {}, {} insights captured",
-                self.round_count,
-                insights_count,
-            )
+        # If we're at round 1, attach insights/discovery context
+        if self.round_count == 1:
+            if session_state and hasattr(session_state, "insights"):
+                context_message = get_insight_context(session_state)
+                if context_message:
+                    self.groupchat.messages.append(
+                        {
+                            "role": "user",
+                            "content": context_message,
+                            "name": "SystemCoordinator",
+                        }
+                    )
 
-        if self.round_count % 25 == 0:
+        # Try to compress context if it's getting too long
+        if self.round_count > 10 and self.round_count % 10 == 0:
             try:
                 self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
                 logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        # Only allow termination if there is at least one insight
-        if self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
-            if len(session_state.insights) == 0:
-                logger.info("Termination criteria met, but no insights found. Forcing continuation.")
-            else:
-                logger.info("Exploration criteria met and at least one insight found, terminating conversation")
+        # Check if we should terminate based on discovery criteria
+        if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
+            if len(session_state.insights) > 0:
+                logger.info(
+                    "Exploration criteria met and insights found, terminating conversation"
+                )
                 self.groupchat.messages.append(
                     {
                         "role": "assistant",
@@ -4524,23 +4505,44 @@ class SmartGroupChatManager(autogen.GroupChatManager):
                         "name": "SystemCoordinator",
                     }
                 )
+            else:
+                logger.info(
+                    "Termination criteria met, but no insights found. Forcing continuation."
+                )
+
+        # Reset agents if potential loop detected
         if self.round_count > 0 and self.round_count % 20 == 0:
             logger.warning("Potential loop detected. Resetting agents.")
+            # Reset all agents to clear their memory
             for agent in self.groupchat.agents:
-                agent.reset()
+                # Use getattr for safer access to reset method
+                reset_method = getattr(agent, "reset", None)
+                if reset_method and callable(reset_method):
+                    reset_method()
 
-        if self.round_count > 5 and self.round_count % 15 == 0:
-            if progress_prompt := get_progress_prompt(session_state, self.round_count):
+        # Add progress prompts to guide agents periodically
+        if session_state and self.round_count > 5 and self.round_count % 15 == 0:
+            progress_guidance = get_progress_prompt(session_state, self.round_count)
+            if progress_guidance:
                 logger.info("Adding progress guidance at round {}", self.round_count)
                 self.groupchat.messages.append(
                     {
                         "role": "user",
-                        "content": progress_prompt,
+                        "content": progress_guidance,
                         "name": "SystemCoordinator",
                     }
                 )
 
-        return super().run_chat(messages, sender, config)
+        # Let the parent class handle the actual chat execution
+        # Pass the GroupChat object as config for correct typing
+        result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
+        # Handle possible tuple return value from parent class
+        if isinstance(result, tuple) and len(result) == 2:
+            success, response = result
+            if success and response:
+                return response
+            return None
+        return result
 
 
 # --- Orchestration Loops ---
@@ -4647,8 +4649,20 @@ def run_discovery_loop(session_state: SessionState) -> str:
     return session_state.get_final_insight_report()
 
 
-def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
-    """Orchestrates the Strategy Team to refine insights and generate features."""
+def run_strategy_loop(
+    session_state: SessionState,
+    strategy_agents_with_proxy: Dict[str, autogen.ConversableAgent],
+    llm_config: Dict,
+) -> Optional[Dict[str, Any]]:
+    """
+    Runs the streamlined strategy team loop with the following agents:
+    - StrategistAgent: Validates features from a business/strategy perspective
+    - EngineerAgent: Validates features from a technical perspective
+    - FeatureEngineer: Designs and implements features based on pre-generated hypotheses
+    - UserProxy_Strategy: Handles tool execution and stores features
+
+    The session_state should already contain hypotheses generated by the discovery team.
+    """
     logger.info("--- Running Strategy Loop ---")
     if not session_state.insights:
         logger.warning("No insights found, skipping strategy loop.")
@@ -4660,12 +4674,11 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         with open(views_file, "r", encoding="utf-8") as f:
             json.load(f)
 
-    llm_config = get_llm_config_list()
-    if not llm_config:
-        raise RuntimeError("Failed to get LLM configuration, cannot proceed with strategy.")
+    # Extract agents from pre-initialized dictionary
+    agents = {k: v for k, v in strategy_agents_with_proxy.items() if k != "user_proxy"}
+    user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    agents = get_strategy_team_agents(llm_config)
-    user_proxy = agents.pop("user_proxy")
+    # Register strategy team tools with the user proxy
     user_proxy.register_function(
         function_map={
             "run_sql_query": run_sql_query,
@@ -4673,29 +4686,77 @@ def run_strategy_loop(session_state: SessionState) -> Optional[Dict[str, Any]]:
         }
     )
 
-    # --- STRATEGY TEAM GROUP CHAT EXECUTION ---
-    strategy_agents = list(agents.values())
+    # Initialize group chat with all discovery agents
+    discovery_agents = list(agents.values())
+    # Using Sequence instead of List[Agent] for better type compatibility
+    agent_sequence: Sequence[autogen.ConversableAgent] = discovery_agents + [user_proxy]
     group_chat = autogen.GroupChat(
-        agents=strategy_agents + [user_proxy],
+        agents=agent_sequence,  # type: ignore # We're handling type compatibility with Sequence
         messages=[],
-        max_round=30,
-        allow_repeat_speaker=False
+        max_round=25,
+        allow_repeat_speaker=False,
     )
-    manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    manager = autogen.GroupChatManager(
+        groupchat=group_chat, llm_config=llm_config
+    )  # Using standard GroupChatManager
 
     logger.info("Closing database connection for strategy agent execution...")
     session_state.close_connection()
+
+    # Format the hypotheses data
+    hypotheses = session_state.get_final_hypotheses()
+    hypothesis_str = (
+        "\n".join([f"- {getattr(h, 'summary', str(h))}" for h in hypotheses])
+        if hypotheses
+        else "No hypotheses available."
+    )
+
+    # DB schema is now in agent system messages, no need to repeat it here
+    initial_message = f"""
+# Strategy Team Task: Turn Hypotheses into Features
+
+## Available Hypotheses
+{hypothesis_str}
+
+## Task
+Analyze these hypotheses and create features that can be used by the optimization team.
+Start by having the FeatureEngineer create specifications and implementations for each feature.
+The team will validate the features before finalizing them.
+
+Ready to begin?
+
+IMPORTANT INSTRUCTIONS:
+1. There is NO HypothesisAgent in this conversation - the hypotheses are already provided above.
+2. FeatureEngineer should take the lead with concrete implementation.
+3. To run tools, you MUST prefix your request with '@UserProxy_Strategy please run'
+4. To finalize hypotheses, use: '@UserProxy_Strategy please run finalize_hypotheses([{{"summary": "...", "rationale": "..."}}])'
+5. For SQL queries, use: '@UserProxy_Strategy please run run_sql_query("SELECT * FROM table")'
+6. Focus on producing production-ready code with detailed explanations.
+7. Feature implementations will be automatically stored in session_state.features
+8. End with FINAL_FEATURES when complete.
+
+YOUR GOAL: Efficiently translate the pre-generated hypotheses into implemented features, with the FeatureEngineer driving the creation process while StrategistAgent and EngineerAgent provide critical feedback."""
+
     try:
-        initial_message = "Strategy team, please review the insights and hypotheses, and generate a strategy report."
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
-        # Attempt to get a strategy report from session_state or fallback to hypotheses
-        if hasattr(session_state, 'get_final_strategy_report'):
+        # Check for realized features in session_state
+        features = getattr(session_state, "features", None)
+
+        # Attempt to get a strategy report from session_state or fallback to features/hypotheses
+        if hasattr(session_state, "get_final_strategy_report"):
             report = session_state.get_final_strategy_report()
-        elif hasattr(session_state, 'get_final_hypotheses'):
-            report = session_state.get_final_hypotheses()
+        elif features:
+            report = {
+                "features_count": len(features),
+                "hypotheses_count": len(session_state.hypotheses),
+            }
+        elif hasattr(session_state, "get_final_hypotheses"):
+            hypotheses = session_state.get_final_hypotheses()
+            # Convert List[Hypothesis] to Dict[str, Any]
+            report = {"hypotheses": [h.__dict__ for h in hypotheses] if hypotheses else []}
         else:
-            report = "No strategy report or hypotheses available."
+            report = {"message": "No strategy report, features, or hypotheses available."}
         return report
     finally:
         logger.info("Reopening database connection after strategy loop...")
@@ -4715,6 +4776,22 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     session_state = SessionState(run_dir)
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
+    # Get the database schema once to be reused by agents
+    try:
+        db_schema = get_db_schema_string()
+        logger.info("Successfully retrieved database schema for agents")
+    except Exception as e:
+        logger.warning(f"Could not get database schema: {e}")
+        db_schema = "[Error retrieving schema]"
+
+    # Initialize LLM configuration once to reuse
+    llm_config = get_llm_config_list()
+    if not llm_config:
+        raise RuntimeError("Failed to get LLM configuration, cannot proceed with orchestration.")
+
+    # Initialize strategy agents once with the schema
+    strategy_agents = get_strategy_team_agents(llm_config=llm_config, db_schema=db_schema)
+
     all_epoch_reports = []
     coverage_tracker = CoverageTracker()
 
@@ -4727,40 +4804,19 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
 
             # --- MANDATORY HYPOTHESIS GENERATION ---
             # --- MANDATORY HYPOTHESIS GENERATION ---
-            # If there are insights but no hypotheses, invoke the HypothesisAgent to generate hypotheses before strategy.
+            # Note: Discovery team should handle hypothesis generation now
+            # If no hypotheses are found, log the issue but don't attempt to generate them ourselves
             if session_state.insights and not session_state.get_final_hypotheses():
-                logger.info("No hypotheses found after discovery, invoking HypothesisAgent to generate hypotheses from insights.")
-                from src.agents.strategy_team.hypothesis_agents import get_hypothesis_agents
-                llm_config = get_llm_config_list()
-                hypothesis_agents = get_hypothesis_agents(llm_config, system_prompt="")
-                hypo_agent = hypothesis_agents["HypothesisAgent"]
-                # Compose a message with the insight report for the agent
-                insights_report = session_state.get_final_insight_report()
-                message = f"Here is the insight report. Please generate a list of initial hypotheses based on these findings.\n\n{insights_report}"
-                user_proxy = hypothesis_agents["user_proxy"]
-                # Register finalize_hypotheses tool
-                import autogen
-                from src.utils.tools import get_finalize_hypotheses_tool
-                autogen.register_function(
-                    get_finalize_hypotheses_tool(session_state),
-                    caller=hypo_agent,
-                    executor=user_proxy,
-                    name="finalize_hypotheses",
-                    description="Finalize and save hypotheses to the session state.",
+                logger.warning(
+                    "No hypotheses found after discovery. Continuing with strategy without hypotheses."
                 )
-                # Run a single chat round to generate hypotheses
-                group_chat = autogen.GroupChat(agents=[user_proxy, hypo_agent], messages=[], max_round=5)
-                # Properly instantiate GroupChatManager and use it for chat initiation
-                if llm_config is None:
-                    raise ValueError("LLM config is None; please check your OpenAI API key and config setup.")
-                group_manager = autogen.GroupChatManager(groupchat=group_chat, llm_config=llm_config)
-                user_proxy.initiate_chat(group_manager, message=message, session_state=session_state)
 
             if not session_state.get_final_hypotheses():
                 logger.info("No hypotheses found, skipping strategy loop.")
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
             else:
-                reflection_results = run_strategy_loop(session_state)
+                # Pass the pre-initialized strategy agents to the strategy loop
+                reflection_results = run_strategy_loop(session_state, strategy_agents, llm_config)
                 if reflection_results:
                     strategy_report = json.dumps(reflection_results, indent=2)
                 else:
@@ -6104,16 +6160,15 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 23,383 bytes
+**File size:** 23,464 bytes
 
 ```python
 # -*- coding: utf-8 -*-
 import json
 import logging
 import os
-
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -6133,8 +6188,9 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
     - Categorical: unique count, top frequencies, mode, missing count/ratio.
     Returns a markdown-formatted report.
     """
-    import pandas as pd
     import numpy as np
+    import pandas as pd
+
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
             # Sample up to limit rows for efficiency
@@ -6149,8 +6205,8 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
             missing_ratio = n_missing / len(series)
             report += f"- Missing: {n_missing} ({missing_ratio:.2%})\n"
             if pd.api.types.is_numeric_dtype(series):
-                desc = series.describe(percentiles=[.05, .25, .5, .75, .95])
-                report += f"- Type: Numerical\n"
+                desc = series.describe(percentiles=[0.05, 0.25, 0.5, 0.75, 0.95])
+                report += "- Type: Numerical\n"
                 report += f"- Count: {desc['count']}\n"
                 report += f"- Mean: {desc['mean']:.4f}\n"
                 report += f"- Std: {desc['std']:.4f}\n"
@@ -6161,12 +6217,12 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
                 report += f"- 75th pct: {desc.get('75%', np.nan)}\n"
                 report += f"- 95th pct: {desc.get('95%', np.nan)}\n"
                 report += f"- Max: {desc['max']}\n"
-                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                mode = series.mode().iloc[0] if not series.mode().empty else "N/A"
                 report += f"- Mode: {mode}\n"
             else:
                 report += "- Type: Categorical\n"
                 report += "- # Unique: {}\n".format(series.nunique())
-                mode = series.mode().iloc[0] if not series.mode().empty else 'N/A'
+                mode = series.mode().iloc[0] if not series.mode().empty else "N/A"
                 report += "- Mode: {}\n".format(mode)
                 top_freq = series.value_counts().head(5)
                 report += "- Top Values:\n"
@@ -6178,16 +6234,20 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
         logger.error("Failed to compute summary stats for %s: %s", table_or_view, e)
         return "ERROR: Could not compute summary stats for {}: {}".format(table_or_view, e)
 
+
 def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
     """
     Truncate the output to a maximum number of words, appending a message if truncation occurred.
     """
     words = text.split()
     if len(words) > word_limit:
-        truncated = ' '.join(words[:word_limit])
-        return (truncated +
-                f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]")
+        truncated = " ".join(words[:word_limit])
+        return (
+            truncated
+            + f"\n\n---\n[Output truncated to {word_limit} words. Please refine your query or request a smaller subset if needed.]"
+        )
     return text
+
 
 def run_sql_query(query: str) -> str:
     """
@@ -6226,7 +6286,14 @@ def save_plot(filename: str):
     return str(abs_path)
 
 
-def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = None, file_name: str = "plot.png", analysis_prompt: str = None) -> dict:
+def create_plot(
+    query: str,
+    plot_type: str = "scatter",
+    x: Union[str, None] = None,
+    y: Union[str, None] = None,
+    file_name: str = "plot.png",
+    analysis_prompt: Union[str, None] = None,
+) -> dict:
     """
     Executes a SQL query, generates a matplotlib plot, saves it, and analyzes it using vision_tool.
     Args:
@@ -6245,6 +6312,7 @@ def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = 
         if df.empty:
             return {"error": "Query returned no data to plot."}
         import matplotlib.pyplot as plt
+
         plt.figure(figsize=(8, 5))
         if plot_type == "scatter":
             if x is None or y is None:
@@ -6270,6 +6338,7 @@ def create_plot(query: str, plot_type: str = "scatter", x: str = None, y: str = 
         abs_path = save_plot(file_name)
         # Automatically call vision_tool
         from src.utils.tools import vision_tool
+
         if analysis_prompt is None:
             analysis_prompt = "Analyze this plot and summarize key trends and anomalies."
         vision_result = vision_tool(abs_path, analysis_prompt)
@@ -6287,9 +6356,7 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str):
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
             # Check if view exists to handle versioning
-            existing_views = [
-                v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()
-            ]
+            existing_views = [v[0] for v in write_conn.execute("SHOW TABLES;").fetchall()]
 
             actual_name = view_name
             version = 2
@@ -6360,9 +6427,9 @@ def get_add_insight_tool(session_state):
         finding: str,
         source_representation: str,
         reasoning_trace: List[str],
-        supporting_code: str = None,
-        plot_path: str = None,
-        plot_interpretation: str = None,
+        supporting_code: Union[None, str] = None,
+        plot_path: Union[None, str] = None,
+        plot_interpretation: Union[None, str] = None,
         quality_score: Optional[float] = None,
     ) -> str:
         """
@@ -6415,7 +6482,9 @@ def get_add_to_central_memory_tool(session_state):
     """Returns a function that agents can call to add notes to the shared central memory."""
     from datetime import datetime
 
-    def add_to_central_memory(note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None) -> str:
+    def add_to_central_memory(
+        note: str, reasoning: str, agent: str, metadata: Optional[Dict[str, str]] = None
+    ) -> str:
         """Appends a structured entry to ``session_state.central_memory`` and persists it.
 
         Args:
@@ -6482,10 +6551,7 @@ def get_finalize_hypotheses_tool(session_state):
     return finalize_hypotheses
 
 
-
-def validate_hypotheses(
-    hypotheses_data: List[Dict], insight_report: str
-) -> Tuple[bool, str]:
+def validate_hypotheses(hypotheses_data: List[Dict], insight_report: str) -> Tuple[bool, str]:
     """
     Validates a list of hypothesis data against the insight report and internal consistency.
     """
@@ -6518,14 +6584,15 @@ def vision_tool(image_path: str, prompt: str) -> str:
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
     import base64
     from pathlib import Path
-    import os
 
     from openai import OpenAI
 
     try:
         # Robust path resolution
         full_path = Path(image_path)
-        logger.info(f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})")
+        logger.info(
+            f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})"
+        )
         if not full_path.is_absolute():
             # Try CWD first
             if not full_path.exists():
@@ -6538,7 +6605,9 @@ def vision_tool(image_path: str, prompt: str) -> str:
         if not full_path.exists():
             logger.error(f"vision_tool: File not found at '{full_path}' (original: '{image_path}')")
             return f"ERROR: File not found at '{image_path}'. Please ensure the file was saved correctly."
-        logger.info(f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})")
+        logger.info(
+            f"vision_tool: Using resolved image path: '{full_path}' (exists: {full_path.exists()})"
+        )
 
         # Initialize OpenAI client
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -6557,9 +6626,7 @@ def vision_tool(image_path: str, prompt: str) -> str:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                },
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
                             },
                         ],
                     }
@@ -6580,20 +6647,27 @@ def vision_tool(image_path: str, prompt: str) -> str:
                 return error_msg
             raise
     except ImportError:
-        return "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
+        return (
+            "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
+        )
     except Exception as e:
         logger.error("Unexpected error during image analysis: %s", e)
         return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
 
+
 def _execute_python_run_code(pipe, code, run_dir):
     # Headless plotting
     import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import duckdb
+
+    matplotlib.use("Agg")
     from pathlib import Path
+
+    import duckdb
+    import matplotlib.pyplot as plt
+
     from src.config.settings import DB_PATH
     from src.utils.tools import get_table_sample
+
     # Save plot helper using provided run_dir
     def save_plot(filename: str):
         try:
@@ -6612,22 +6686,27 @@ def _execute_python_run_code(pipe, code, run_dir):
         except Exception as e:
             print(f"ERROR: Could not save plot: {e}")
             return None
+
     # Dummy add_insight_to_report for now
     def add_insight_to_report(title, finding, supporting_evidence, confidence):
-        print(f"INSIGHT_ADDED: {{'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}}")
+        print(
+            "INSIGHT_ADDED: {'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}"
+        )
+
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
     # If in future you want to expose CV folds or other context, load and inject here.
     local_ns = {
-        'save_plot': save_plot,
-        'get_table_sample': get_table_sample,
-        'conn': conn,
-        'add_insight_to_report': add_insight_to_report,
-        '__builtins__': __builtins__,
+        "save_plot": save_plot,
+        "get_table_sample": get_table_sample,
+        "conn": conn,
+        "add_insight_to_report": add_insight_to_report,
+        "__builtins__": __builtins__,
     }
-    import io
     import contextlib
+    import io
     import traceback
+
     stdout = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout):
@@ -6638,7 +6717,6 @@ def _execute_python_run_code(pipe, code, run_dir):
         tb = traceback.format_exc()
         pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
 
-from src.utils.run_utils import get_run_dir
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
@@ -6667,14 +6745,13 @@ def execute_python(code: str, timeout: int = 60) -> str:
     if parent_conn.poll():
         return parent_conn.recv()
     return "ERROR: No output returned from code execution."
-
 ```
 
 ## 📊 Summary
 
-- **Total files processed:** 43
+- **Total files processed:** 42
 - **Directory:** `src`
-- **Generated:** 2025-06-15 07:55:24
+- **Generated:** 2025-06-15 15:45:02
 
 ---
 

@@ -1,6 +1,6 @@
 import logging
 from src.utils.tools import compute_summary_stats, create_plot
-from src.utils.tools import run_sql_query  # for data preview if needed
+
 from src.utils.run_utils import get_run_dir
 
 logger = logging.getLogger(__name__)
