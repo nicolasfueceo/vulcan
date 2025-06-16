@@ -1,16 +1,16 @@
 # mkdocs.yml
 
-site_name: VULCAN Project
-site_author: Your Name
+site_name: AGENTIC - Autonomous Group Engineering for Next-generation Tabular Intelligence and Collaborative discovery
+site_author: Nicolas Dehandschoewercker
 site_description: >-
   An autonomous multi-agent system for strategic feature engineering 
   in recommender systems.
 
-repo_url: https://github.com/your_username/your_repo_name
-repo_name: your_username/your_repo_name
+repo_url: https://github.com/nicolasfueceo/vulcan
+repo_name: nicolasfueceo/vulcan
 edit_uri: ""
 
-copyright: Copyright &copy; 2025 Your Name
+copyright: Copyright &copy; 2025 Nicolas Dehandschoewercker
 
 theme:
   name: material

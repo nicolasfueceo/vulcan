@@ -56,7 +56,7 @@ Your responsibilities:
     - The `plot_path` if a plot was generated.
 
 
-- `execute_python(code)`: To run Python for advanced statistical analysis and plotting. You may analyze any view created by the team, whether it was made via `create_analysis_view` or direct `CREATE VIEW`/`conn.execute`. You MUST 
+- `execute_python(code)`: To run Python for advanced statistical analysis and plotting. You may analyze any view created by the team, whether it was made via `create_analysis_view` or direct `CREATE VIEW`/`conn.execute`. NOTE: Variable context is NOT retained across runs. Each execution of this tool must be self contained, even if it means redeclaring variables.
 - `add_insight(title, finding, source_representation, supporting_code, plot_path)`: To log your findings.
 
 **Common Mistakes:**

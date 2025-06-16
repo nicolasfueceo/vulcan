@@ -19,7 +19,7 @@ Your workflow is as follows:
 2.  **SYNTHESIZE** these insights into a list of formal, testable hypotheses once you determine that sufficient evidence has been gathered. Each hypothesis **MUST** be a dictionary with a "summary" and a "rationale".
 3.  **FINALIZE**. Your final action in this conversation **MUST** be to call the `finalize_hypotheses` tool. The entire `content` of your final message should be the tool call.
 
-Do not write "TERMINATE". Your successful call to `finalize_hypotheses` will signal the end of the discovery phase.
+Do not write "TERMINATE" until ou have had conversation that this function was executed successfully. Your successful call to `finalize_hypotheses` will signal the end of the discovery phase. Once it is executed, write TERMINATE. 
 
 ---
 

@@ -14,14 +14,13 @@ from loguru import logger
 
 import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
-from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
+from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
 from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.logging_utils import log_tool_call
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
@@ -29,14 +28,15 @@ from src.utils.tools import (
     execute_python,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
+    get_save_candidate_features_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_candidate_features_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
 scripts.setup_views.setup_views()
+
 
 # Load environment variables from .env file at the beginning.
 load_dotenv()
@@ -234,7 +234,7 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
         if session_state and session_state.get_final_hypotheses():
             logger.info("Hypotheses have been finalized. Terminating discovery loop.")
-            return True, "TERMINATE"
+            return True, "TERMINATE"  # Do NOT call super().run_chat if terminating
 
         # --- CONTEXT INJECTION: Add context on first round ---
         if self.round_count == 1 and session_state:
@@ -476,17 +476,11 @@ def run_strategy_loop(
     feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # --- Tool Registration with Logging ---
-    # --- Tool Registration with Logging ---
-    # Wrap each tool with the logging decorator before registration
-    logged_save_candidate_features = log_tool_call(get_save_candidate_features_tool(session_state), session_state)
-    logged_execute_python = log_tool_call(execute_python, session_state)
-
-    # The user proxy needs access to the session_state to save features.
+    # --- Tool Registration ---
     user_proxy.register_function(
         function_map={
-            "save_candidate_features": logged_save_candidate_features,
-            "execute_python": logged_execute_python,
+            "save_candidate_features": get_save_candidate_features_tool(session_state),
+            "execute_python": execute_python,
         }
     )
 
@@ -522,8 +516,6 @@ def run_strategy_loop(
 The StrategistAgent and EngineerAgent will then review your work. Begin now.
 """
 
-    logger.info("Reopening database connection before strategy loop...")
-    session_state.reconnect()
 
     # --- NEW: Ensure DB connection is refreshed before strategy loop ---
     logger.info("Refreshing DB connection before strategy loop to ensure all views are visible...")
@@ -532,12 +524,14 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
     report: Dict[str, Any] = {}
     try:
         # The user_proxy initiates the chat. The `message` is the first thing said.
-        user_proxy.initiate_chat(manager, message=initial_message)
-
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
+    
         # After the chat, we check the session_state for the results.
+        # Ensure features and hypotheses are always defined for downstream use
         features = getattr(session_state, "candidate_features", [])
         hypotheses = session_state.get_final_hypotheses()
-
+        insights = getattr(session_state, "insights", [])
+        logger.info(f"Exploration completed after {manager.round_count} rounds with {len(insights)} insights")
         # --- Feature Realization Step ---
         if features:
             feature_realization_agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
@@ -566,15 +560,26 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
 
 
 def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+    optimization_report = "Optimization step did not run."
     """
-    Main function to run the VULCAN agent orchestration.
-    Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
-    After all epochs, a final full-data optimization and evaluation is performed.
+    Main orchestration function for the VULCAN pipeline.
     """
+    # --- Set up logging and run context ---
+    
+    try:
+        run_id, run_dir = init_run()
+    except Exception as e:
+        logger.error(f"Failed to initialize run context: {e}")
+        sys.exit(1)
+    logger.info(f"Starting VULCAN run: {run_id}")
 
-    run_id, run_dir = init_run()
-    logger.info(f"Starting VULCAN Run ID: {run_id}")
     setup_logging()
+    
+    # --- Start TensorBoard for experiment tracking (after run context is initialized) ---
+    from src.config.tensorboard import start_tensorboard
+    logger.info("Launching TensorBoard server on port 6006 with global logdir: runtime/tensorboard_global")
+    start_tensorboard()
+
     session_state = SessionState(run_dir)
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 

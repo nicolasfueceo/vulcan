@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-16 16:37:04
+Generated on: 2025-06-16 19:28:56
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -85,7 +85,15 @@ This document contains the complete source code structure and contents of the `s
 │       ├── inspect_raw_dates.py
 │       └── verify_curated_dates.py
 ├── docs/
-│   └── code_mindmap.mermaid
+│   ├── agents/
+│   │   ├── discovery_team.md
+│   │   ├── downstream_agents.md
+│   │   └── strategy_team.md
+│   ├── architecture.md
+│   ├── code_mindmap.mermaid
+│   ├── data_schema.md
+│   ├── index.md
+│   └── setup.md
 ├── generate_src_docs.py
 ├── generated_prompts/
 │   ├── CandidateFeature.schema.json
@@ -105,10 +113,36 @@ This document contains the complete source code structure and contents of the `s
 │   ├── quantitative_analyst.txt
 │   ├── reflection_agent.txt
 │   └── strategist_agent.txt
+├── mkdocs.yml
 ├── pipeline_test_output.txt
 ├── pyproject.toml
 ├── report/
 │   ├── .DS_Store
+│   ├── agent_plots/
+│   │   ├── run_20250615_064431_acb54cc9_avg_ratings_distribution.png
+│   │   ├── run_20250615_064431_acb54cc9_common_descriptive_terms_fixed.png
+│   │   ├── run_20250615_064431_acb54cc9_term_avg_ratings_fixed.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_avg_rating_distribution.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_avg_rating_distribution_v2.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_avg_rating_distribution_v3.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_vs_book_avg_rating.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_vs_book_avg_rating_v2.png
+│   │   ├── run_20250615_070801_ffcbc59a_author_vs_book_avg_rating_v3.png
+│   │   ├── run_20250615_072012_c2f94c99_book_ratings_by_role.png
+│   │   ├── run_20250615_072605_1e3d9382_author_count_ratings_distribution.png
+│   │   ├── run_20250615_073633_65727d09_avg_ratings_by_genre_role.png
+│   │   ├── run_20250615_073633_65727d09_user_interaction_correlation.png
+│   │   ├── run_20250615_202427_c8f511d6_author_count_vs_avg_rating.png
+│   │   ├── run_20250615_203910_f3057677_author_rating_distribution.png
+│   │   ├── run_20250615_205310_cf92e698_avg_rating_over_time.png
+│   │   ├── run_20250615_205310_cf92e698_user_avg_rating_over_time.png
+│   │   ├── run_20250615_213102_33295545_avg_book_rating_distribution.png
+│   │   ├── run_20250616_003207_ae873312_authorship_rating_distribution.png
+│   │   ├── run_20250616_003207_ae873312_average_book_ratings_over_time.png
+│   │   ├── run_20250616_003207_ae873312_review_count_over_time.png
+│   │   ├── run_20250616_011922_821d1207_clustering_author_rating.png
+│   │   ├── run_20250616_014558_c70deac1_distribution_of_ratings.png
+│   │   └── run_20250616_163322_26197ad6_avg_rating_and_review_count_distribution.png
 │   ├── latex/
 │   │   ├── IC_New_Logo.pdf
 │   │   ├── chapters/
@@ -143,17 +177,21 @@ This document contains the complete source code structure and contents of the `s
 ├── requirements.txt
 ├── scripts/
 │   ├── __pycache__/
+│   ├── aggregate_agent_plots.py
 │   ├── check_lightfm_openmp.py
 │   ├── create_interactions_view.sql
 │   ├── dump_agent_prompts.py
 │   ├── dump_json_schemas.py
 │   ├── inspect_cv_splits.py
+│   ├── manual_reflection_handover_demo.py
 │   ├── setup_views.py
 │   ├── test_feature_optimization_pipeline.py
 │   ├── test_feature_realization.py
 │   ├── test_finalize_hypotheses.py
+│   ├── test_full_pipeline_logging.py
 │   ├── test_hypothesizer_agent.py
 │   ├── test_optimization_end_to_end.py
+│   ├── test_reflection_handover.py
 │   ├── test_schema_validation.py
 │   ├── test_strategy_team.py
 │   └── test_view_persistence.py
@@ -248,11 +286,13 @@ This document contains the complete source code structure and contents of the `s
 │       ├── logging_utils.py
 │       ├── plotting.py
 │       ├── prompt_utils.py
+│       ├── run_logger.py
 │       ├── run_utils.py
 │       ├── sampling.py
 │       ├── session_state.py
 │       ├── testing_utils.py
-│       └── tools.py
+│       ├── tools.py
+│       └── tools_logging.py
 ├── src_documentation.md
 ├── test_run_dir/
 │   └── session_state.json
@@ -4311,7 +4351,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 31,602 bytes
+**File size:** 31,724 bytes
 
 ```python
 import json
@@ -4321,7 +4361,7 @@ import sys
 # Ensure DB views are set up for pipeline compatibility
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import autogen
 from autogen import Agent
@@ -4337,7 +4377,7 @@ from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
 from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.prompt_utils import load_prompt
+from src.utils.logging_utils import log_tool_call
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
@@ -4348,9 +4388,7 @@ from src.utils.tools import (
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_features_tool,
     get_save_candidate_features_tool,
-    get_add_to_central_memory_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -4537,119 +4575,88 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         self.round_count = 0  # Reset round count for each new chat
 
     def run_chat(
-        self, messages: List[Dict[str, Any]], sender: autogen.Agent, config: Optional[Dict[str, Any]] = None
-    ) -> Union[str, Dict[str, Any], None]:
+        self,
+        messages: List[Dict[str, Any]],
+        sender: autogen.Agent,
+        config: Optional[autogen.GroupChat] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
         session_state = globals().get("session_state")
 
+        # The config is the groupchat.
+        groupchat = config or self.groupchat
+
         # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
-        if session_state and hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0:
-            logger.info("Hypotheses have been finalized. Injecting TERMINATE and ending chat.")
-            self.groupchat.messages.append(
-                {
-                    "role": "assistant",
-                    "content": "TERMINATE",
-                    "name": "SystemCoordinator",
-                }
-            )
-            # Call the parent class to process the termination message and return
-            return super().run_chat(self.groupchat.messages, sender, self.groupchat)
+        if session_state and session_state.get_final_hypotheses():
+            logger.info("Hypotheses have been finalized. Terminating discovery loop.")
+            return True, "TERMINATE"
 
-        # If we're at round 1, attach insights/discovery context
-        if self.round_count == 1:
-            if session_state and hasattr(session_state, "insights"):
-                context_message = get_insight_context(session_state)
-                if context_message:
-                    self.groupchat.messages.append(
-                        {
-                            "role": "user",
-                            "content": context_message,
-                            "name": "SystemCoordinator",
-                        }
-                    )
+        # --- CONTEXT INJECTION: Add context on first round ---
+        if self.round_count == 1 and session_state:
+            context_message = get_insight_context(session_state)
+            if context_message:
+                messages.append(
+                    {"role": "user", "content": context_message, "name": "SystemCoordinator"}
+                )
 
-        # Try to compress context if it's getting too long
+        # --- CONTEXT COMPRESSION ---
         if self.round_count > 10 and self.round_count % 10 == 0:
             try:
-                self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
+                groupchat.messages = compress_conversation_context(messages)
                 logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        # --- ENFORCE: Do not allow termination until finalize_hypotheses has been called ---
-        # If a termination signal is detected, but session_state.hypotheses is empty, inject a reminder and prevent termination
-        if session_state:
-            # Detect attempted termination in the last message
-            last_msg = self.groupchat.messages[-1]["content"].strip() if self.groupchat.messages else ""
-            attempted_termination = any(term in last_msg for term in ["FINAL_INSIGHTS", "TERMINATE"])
-            hypotheses_finalized = hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0
-            if attempted_termination and not hypotheses_finalized:
-                logger.warning("Termination signal received, but no hypotheses have been finalized. Blocking termination.")
-                # Inject a message that forces the Hypothesizer to act.
-                self.groupchat.messages.append(
-                    {
-                        "role": "user",
-                        "name": "SystemCoordinator",
-                        "content": (
-                            "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
-                            "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
-                        ),
-                    }
-                )
-                # Prevent actual termination this round
-                return super().run_chat(self.groupchat.messages, sender, self.groupchat)
-        # --- END ENFORCE ---
-        # Check if we should terminate based on discovery criteria
-        if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
-            if len(session_state.insights) > 0:
-                logger.info(
-                    "Exploration criteria met and insights found, terminating conversation"
-                )
-                self.groupchat.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "TERMINATE",
-                        "name": "SystemCoordinator",
-                    }
-                )
-            else:
-                logger.info(
-                    "Termination criteria met, but no insights found. Forcing continuation."
-                )
+        # --- TERMINATION BLOCKER: Enforce hypothesis finalization ---
+        last_msg_content = messages[-1]["content"].strip().upper() if messages else ""
+        if "TERMINATE" in last_msg_content and session_state and not session_state.get_final_hypotheses():
+            logger.warning("Termination signal received, but no hypotheses finalized. Blocking termination.")
+            messages.append(
+                {
+                    "role": "user",
+                    "name": "SystemCoordinator",
+                    "content": (
+                        "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
+                        "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
+                    ),
+                }
+            )
 
-        # Reset agents if potential loop detected
+        # --- FALLBACK TERMINATION: Prevent infinite loops ---
+        if session_state and not should_continue_exploration(session_state, self.round_count):
+            logger.info("Exploration criteria met (fallback), terminating conversation.")
+            return True, "TERMINATE"
+
+        # --- LOOP PREVENTION: Reset agents periodically ---
         if self.round_count > 0 and self.round_count % 20 == 0:
-            logger.warning("Potential loop detected. Resetting agents.")
-            # Reset all agents to clear their memory
-            for agent in self.groupchat.agents:
-                # Use getattr for safer access to reset method
-                reset_method = getattr(agent, "reset", None)
-                if reset_method and callable(reset_method):
-                    reset_method()
+            logger.warning("Potential loop detected at round {}. Resetting agents.", self.round_count)
+            for agent in groupchat.agents:
+                if hasattr(agent, "reset"):
+                    agent.reset()
 
-        # Add progress prompts to guide agents periodically
+        # --- GUIDANCE: Add progress prompts periodically ---
         if session_state and self.round_count > 5 and self.round_count % 15 == 0:
             progress_guidance = get_progress_prompt(session_state, self.round_count)
             if progress_guidance:
                 logger.info("Adding progress guidance at round {}", self.round_count)
-                self.groupchat.messages.append(
-                    {
-                        "role": "user",
-                        "content": progress_guidance,
-                        "name": "SystemCoordinator",
-                    }
+                messages.append(
+                    {"role": "user", "content": progress_guidance, "name": "SystemCoordinator"}
                 )
-
-        # --- VERBOSE LOGGING: Trace agent selection ---
-        try:
-            next_agent = self.groupchat.select_speaker(last_speaker=self.last_speaker, selector=self.selector)
-            logger.info(f"[DEBUG] Next agent selected by groupchat.select_speaker(): {getattr(next_agent, 'name', next_agent)}")
-        except Exception as e:
-            logger.error(f"[DEBUG] Exception during agent selection: {e}")
-        # Let the parent class handle the actual chat execution
-        # Pass the GroupChat object as config for correct typing
+        prev_message_count = len(self.groupchat.messages)
         result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
+        # --- LOGGING: Log every message in the groupchat ---
+        if session_state and hasattr(session_state, 'run_logger'):
+            # Only log new messages since the last call
+            new_messages = self.groupchat.messages[prev_message_count:]
+            for msg in new_messages:
+                session_state.run_logger.log_message(
+                    sender=msg.get('name', msg.get('role', 'unknown')),
+                    recipient=None,  # Not tracked at message level
+                    content=msg.get('content', ''),
+                    role=msg.get('role', None),
+                    extra={k: v for k, v in msg.items() if k not in ['content', 'role', 'name']}
+                )
         # Handle possible tuple return value from parent class
         if isinstance(result, tuple) and len(result) == 2:
             success, response = result
@@ -4683,54 +4690,41 @@ def run_discovery_loop(session_state: SessionState) -> str:
     critic = assistant_agents["PatternSeeker"]
     hypothesizer = assistant_agents["Hypothesizer"]
 
-    # Register tools for analysis agents only
+    # --- Tool Registration with Logging ---
+    from src.utils.tools_logging import log_tool_call
+
+    # A dictionary of tool functions to be wrapped and registered.
+    # The key is the name the agent will use to call the tool.
+    tool_functions = {
+        "run_sql_query": run_sql_query,
+        "get_table_sample": get_table_sample,
+        "create_analysis_view": create_analysis_view,
+        "vision_tool": vision_tool,
+        "add_insight_to_report": get_add_insight_tool(session_state),
+        "execute_python": execute_python,
+        "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
+    }
+
+    # Wrap all tool functions with the logger
+    logged_tools = {
+        name: log_tool_call(func, session_state, tool_name=name)
+        for name, func in tool_functions.items()
+    }
+
+    # Register tools for the appropriate agents
     for agent in [analyst, researcher, critic]:
-        autogen.register_function(
-            run_sql_query,
-            caller=agent,
-            executor=user_proxy,
-            name="run_sql_query",
-            description="Run a SQL query.",
-        )
-        autogen.register_function(
-            get_table_sample,
-            caller=agent,
-            executor=user_proxy,
-            name="get_table_sample",
-            description="Get a sample of rows from a table.",
-        )
-        autogen.register_function(
-            create_analysis_view,
-            caller=agent,
-            executor=user_proxy,
-            name="create_analysis_view",
-            description="Create a temporary SQL view.",
-        )
-        autogen.register_function(
-            vision_tool,
-            caller=agent,
-            executor=user_proxy,
-            name="vision_tool",
-            description="Analyze an image.",
-        )
-        autogen.register_function(
-            get_add_insight_tool(session_state),
-            caller=agent,
-            executor=user_proxy,
-            name="add_insight_to_report",
-            description="Saves insights to the report.",
-        )
-        autogen.register_function(
-            execute_python,
-            caller=agent,
-            executor=user_proxy,
-            name="execute_python",
-            description="Execute arbitrary Python code for analysis, stats, or plotting.",
-        )
+        for name in ["run_sql_query", "get_table_sample", "create_analysis_view", "vision_tool", "add_insight_to_report", "execute_python"]:
+            autogen.register_function(
+                logged_tools[name],
+                caller=agent,
+                executor=user_proxy,
+                name=name,
+                description=tool_functions[name].__doc__.strip().split('\n')[0] # Use first line of docstring
+            )
 
     # Register finalize_hypotheses only for the Hypothesizer
     autogen.register_function(
-        get_finalize_hypotheses_tool(session_state),
+        logged_tools["finalize_hypotheses"],
         caller=hypothesizer,
         executor=user_proxy,
         name="finalize_hypotheses",
@@ -4746,7 +4740,38 @@ def run_discovery_loop(session_state: SessionState) -> str:
     logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
     try:
+        # --- REFLECTION HANDOVER: Prepend latest reflection's next_steps (if any) ---
+        reflection_intro = ""
+        if getattr(session_state, 'reflections', None):
+            latest_reflection = session_state.reflections[-1]
+            if isinstance(latest_reflection, dict):
+                # Try to extract next_steps, novel_ideas, expansion_ideas
+                next_steps = latest_reflection.get("next_steps")
+                novel_ideas = latest_reflection.get("novel_ideas")
+                expansion_ideas = latest_reflection.get("expansion_ideas")
+                if next_steps:
+                    reflection_intro += "\n---\n**Reflection Agent's Next Steps:**\n"
+                    if isinstance(next_steps, list):
+                        for i, step in enumerate(next_steps, 1):
+                            reflection_intro += f"{i}. {step}\n"
+                    else:
+                        reflection_intro += str(next_steps) + "\n"
+                if novel_ideas:
+                    reflection_intro += "\n**Novel Unexplored Ideas:**\n"
+                    if isinstance(novel_ideas, list):
+                        for idea in novel_ideas:
+                            reflection_intro += f"- {idea}\n"
+                    else:
+                        reflection_intro += str(novel_ideas) + "\n"
+                if expansion_ideas:
+                    reflection_intro += "\n**Promising Expansions:**\n"
+                    if isinstance(expansion_ideas, list):
+                        for idea in expansion_ideas:
+                            reflection_intro += f"- {idea}\n"
+                    else:
+                        reflection_intro += str(expansion_ideas) + "\n"
         initial_message = (
+            reflection_intro +
             "Team, let's begin our analysis.\n"
             "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Explore the data and use the `add_insight_to_report` tool to log findings. When you believe enough insights have been gathered, prompt the Hypothesizer to finalize hypotheses. Do NOT call `TERMINATE` yourself for this reason.\n"
             "- **Hypothesizer:** Only you can end the discovery phase by calling the `finalize_hypotheses` tool. Listen for cues from the team, and when prompted (or when you believe enough insights are present), synthesize the insights and call `finalize_hypotheses`.\n\n"
@@ -4807,16 +4832,17 @@ def run_strategy_loop(
     feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # --- Tool Registration for this specific loop ---
-    # The user proxy needs access to the session_state to save features.
-    # CRITICAL: Only register tools relevant to this team. `finalize_hypotheses`
-    # belongs to the discovery team and was causing confusion.
-    # Register the tools the agents in this group chat can use.
+    # --- Tool Registration with Logging ---
+    # --- Tool Registration with Logging ---
+    # Wrap each tool with the logging decorator before registration
+    logged_save_candidate_features = log_tool_call(get_save_candidate_features_tool(session_state), session_state)
+    logged_execute_python = log_tool_call(execute_python, session_state)
+
     # The user proxy needs access to the session_state to save features.
     user_proxy.register_function(
         function_map={
-            "save_candidate_features": get_save_candidate_features_tool(session_state),
-            "execute_python": execute_python,
+            "save_candidate_features": logged_save_candidate_features,
+            "execute_python": logged_execute_python,
         }
     )
 
@@ -4862,11 +4888,14 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
     report: Dict[str, Any] = {}
     try:
         # The user_proxy initiates the chat. The `message` is the first thing said.
-        user_proxy.initiate_chat(manager, message=initial_message)
-
+        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
+    
         # After the chat, we check the session_state for the results.
+        # Ensure features and hypotheses are always defined for downstream use
         features = getattr(session_state, "candidate_features", [])
         hypotheses = session_state.get_final_hypotheses()
+        insights = getattr(session_state, "insights", [])
+        logger.info(f"Exploration completed after {manager.round_count} rounds with {len(insights)} insights")
 
         # --- Feature Realization Step ---
         if features:
@@ -4896,6 +4925,7 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
 
 
 def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+    optimization_report = "Optimization step did not run."
     """
     Main function to run the VULCAN agent orchestration.
     Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
@@ -4976,7 +5006,7 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
 
         # === Optimization Step ===
         logger.info("Starting optimization step with realized features...")
-        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []
+        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []  # pylint: disable=no-member
         if not realized_features:
             logger.warning("No realized features found for optimization. Skipping optimization step.")
             optimization_report = "No realized features found. Optimization skipped."
@@ -5005,7 +5035,8 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     final_report = (
         f"# VULCAN Run Complete: {run_id}\n\n"
         f"## Epoch Reports\n{json.dumps(all_epoch_reports, indent=2)}\n\n"
-        f"## Final Strategy Refinement Report\n{strategy_report}\n"
+        f"## Final Strategy Refinement Report\n{strategy_report}\n\n"
+        f"## Final Optimization Report\n{optimization_report}\n"
     )
     logger.info("VULCAN has completed its run.")
     print(final_report)
@@ -5579,6 +5610,66 @@ def load_prompt(template_name: str, **kwargs) -> str:
 
 ```
 
+### `utils/run_logger.py`
+
+**File size:** 1,790 bytes
+
+```python
+import json
+import threading
+from datetime import datetime
+from pathlib import Path
+
+class RunLogger:
+    """
+    Logs every tool call (input/output) and every group chat message to a JSON file incrementally.
+    Thread-safe for multi-agent, multi-process use.
+    """
+    def __init__(self, run_dir: Path, filename: str = "run_transcript.json"):
+        self.log_path = Path(run_dir) / filename
+        self.lock = threading.Lock()
+        # Create the file if it doesn't exist
+        if not self.log_path.exists():
+            with open(self.log_path, 'w') as f:
+                json.dump([], f)
+
+    def log_event(self, event_type: str, payload: dict):
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "event_type": event_type,
+            **payload
+        }
+        with self.lock:
+            # Read, append, and write back (atomic for small files)
+            with open(self.log_path, 'r+') as f:
+                try:
+                    data = json.load(f)
+                except Exception:
+                    data = []
+                data.append(entry)
+                f.seek(0)
+                json.dump(data, f, indent=2)
+                f.truncate()
+
+    def log_message(self, sender, recipient, content, role=None, extra=None):
+        self.log_event("message", {
+            "sender": sender,
+            "recipient": recipient,
+            "content": content,
+            "role": role,
+            "extra": extra or {}
+        })
+
+    def log_tool_call(self, tool_name, input_args, output, agent=None, extra=None):
+        self.log_event("tool_call", {
+            "tool_name": tool_name,
+            "input_args": input_args,
+            "output": output,
+            "agent": agent,
+            "extra": extra or {}
+        })
+```
+
 ### `utils/run_utils.py`
 
 **File size:** 5,771 bytes
@@ -5818,7 +5909,7 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 17,499 bytes
+**File size:** 17,640 bytes
 
 ```python
 import json
@@ -5894,6 +5985,9 @@ class SessionState:
     def __init__(self, run_dir: Optional[Path] = None):
         self.run_dir = run_dir or get_run_dir()
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        # --- RunLogger integration ---
+        from src.utils.run_logger import RunLogger
+        self.run_logger = RunLogger(self.run_dir)
 
         # Initialize default state
         self.insights: List[Insight] = []
@@ -6320,7 +6414,7 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 29,634 bytes
+**File size:** 30,272 bytes
 
 ```python
 # -*- coding: utf-8 -*-
@@ -6471,10 +6565,14 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str, session
                     f"[TOOL INFO] View '{view_name}' already exists. Creating '{actual_name}' instead."
                 )
 
+            # Remove trailing semicolon (and whitespace) if present
+            cleaned_sql_query = sql_query.rstrip().rstrip(';').rstrip()
+            if cleaned_sql_query != sql_query.rstrip():
+                logger.warning(f"[TOOL WARNING] Trailing semicolon removed from SQL query for view '{actual_name}'.")
             # Create the view
-            full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
+            full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({cleaned_sql_query})"
             write_conn.execute(full_sql)
-            logger.info(f"[TOOL SUCCESS] Created view {actual_name} with query: {sql_query}")
+            logger.info(f"[TOOL SUCCESS] Created view {actual_name} with query: {cleaned_sql_query}")
             if session_state is not None and hasattr(session_state, "log_view_creation"):
                 session_state.log_view_creation(actual_name, sql_query, rationale)
             print(f"VIEW_CREATED:{actual_name}")
@@ -6860,12 +6958,17 @@ def _execute_python_run_code(pipe, code, run_dir):
 
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
+    # Always import matplotlib and seaborn for agent code
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     # If in future you want to expose CV folds or other context, load and inject here.
     local_ns = {
         "save_plot": save_plot,
         "get_table_sample": get_table_sample,
         "conn": conn,
         "__builtins__": __builtins__,
+        "plt": plt,
+        "sns": sns,
     }
     import contextlib
     import io
@@ -6889,6 +6992,7 @@ def execute_python(code: str, timeout: int = 300) -> str:
 
     NOTE: After every major code block or SQL result, you should print the result using `print('!!!', result)` so outputs are clearly visible in logs and debugging is easier.
 
+    NOTE: Variable context is NOT retained across runs. Each execution of this tool must be self contained, even if it means redeclaring variables.
     Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
     Args:
         code: Python code to execute
@@ -7009,11 +7113,55 @@ def get_save_candidate_features_tool(session_state):
     return save_candidate_features
 ```
 
+### `utils/tools_logging.py`
+
+**File size:** 1,462 bytes
+
+```python
+from functools import wraps
+from datetime import datetime
+import inspect
+
+# This wrapper assumes the tool function signature includes session_state or can be passed one.
+def log_tool_call(tool_func, session_state, tool_name=None):
+    name = tool_name or tool_func.__name__
+    @wraps(tool_func)
+    def wrapper(*args, **kwargs):
+        input_args = inspect.getcallargs(tool_func, *args, **kwargs)
+        # Remove session_state from args for logging clarity
+        input_args_log = {k: v for k, v in input_args.items() if k != 'session_state'}
+        logger = getattr(session_state, 'run_logger', None)
+        agent = kwargs.get('agent', None)
+        start_time = datetime.utcnow().isoformat() + 'Z'
+        try:
+            output = tool_func(*args, **kwargs)
+            if logger:
+                logger.log_tool_call(
+                    tool_name=name,
+                    input_args=input_args_log,
+                    output=output,
+                    agent=agent,
+                    extra={"start_time": start_time, "success": True}
+                )
+            return output
+        except Exception as e:
+            if logger:
+                logger.log_tool_call(
+                    tool_name=name,
+                    input_args=input_args_log,
+                    output=str(e),
+                    agent=agent,
+                    extra={"start_time": start_time, "success": False}
+                )
+            raise
+    return wrapper
+```
+
 ## 📊 Summary
 
-- **Total files processed:** 42
+- **Total files processed:** 44
 - **Directory:** `src`
-- **Generated:** 2025-06-16 16:37:04
+- **Generated:** 2025-06-16 19:28:56
 
 ---
 

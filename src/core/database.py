@@ -97,7 +97,7 @@ def get_db_schema_string() -> str:
         # Connect in-process to an in-memory database to avoid file locks
         with duckdb.connect() as conn:
             # Attach the main database file in READ_ONLY mode, giving it an alias 'db'
-            conn.execute(f"ATTACH '{db_path}' AS db (READ_ONLY);")
+            conn.execute(f"ATTACH '{db_path}' AS db;")
 
             # Query the information_schema to find tables in the attached database's 'main' schema
             tables_df = conn.execute(

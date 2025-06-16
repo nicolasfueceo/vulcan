@@ -25,6 +25,7 @@ from scipy.sparse import coo_matrix, csr_matrix
 
 from src.data.cv_data_manager import CVDataManager
 from src.utils.run_utils import get_run_dir, get_run_tensorboard_dir
+from src.config.tensorboard import log_metric, log_metrics, log_hyperparams
 from src.utils.session_state import SessionState
 
 # Type aliases for better readability
@@ -163,6 +164,12 @@ class VULCANOptimizer:
 
             mean_score = np.mean(fold_scores) if fold_scores else 0.0
             logger.info(f"Trial {trial.number} -> Average Score: {mean_score:.4f}")
+
+            # === TensorBoard logging (per-trial) ===
+            if self.writer is not None:
+                log_metric(self.writer, "trial/score", mean_score, step=trial_number)
+                log_metrics(self.writer, {f"trial/params/{k}": v for k, v in params.items()}, step=trial_number)
+
             return float(mean_score)
 
         except optuna.TrialPruned:
@@ -536,6 +543,13 @@ class VULCANOptimizer:
 
         logger.info(f"✅ Optimization finished. Best score: {best_score:.4f}")
         logger.info(f"🏆 Best params: {best_params}")
+
+        # === TensorBoard logging (final results) ===
+        if self.writer is not None:
+            log_metric(self.writer, "optimization/best_score", best_score)
+            log_metrics(self.writer, {f"optimization/best_params/{k}": v for k, v in best_params.items()})
+            log_metrics(self.writer, {f"optimization/feature_importances/{k}": v for k, v in feature_importances.items()})
+            log_hyperparams(self.writer, best_params)
 
         result = OptimizationResult(
             best_params=best_params,

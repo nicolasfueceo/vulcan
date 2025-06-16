@@ -539,12 +539,17 @@ def _execute_python_run_code(pipe, code, run_dir):
 
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
+    # Always import matplotlib and seaborn for agent code
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     # If in future you want to expose CV folds or other context, load and inject here.
     local_ns = {
         "save_plot": save_plot,
         "get_table_sample": get_table_sample,
         "conn": conn,
         "__builtins__": __builtins__,
+        "plt": plt,
+        "sns": sns,
     }
     import contextlib
     import io
@@ -568,6 +573,7 @@ def execute_python(code: str, timeout: int = 300) -> str:
 
     NOTE: After every major code block or SQL result, you should print the result using `print('!!!', result)` so outputs are clearly visible in logs and debugging is easier.
 
+    NOTE: Variable context is NOT retained across runs. Each execution of this tool must be self contained, even if it means redeclaring variables.
     Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
     Args:
         code: Python code to execute
@@ -646,7 +652,7 @@ def get_save_candidate_features_tool(session_state):
             logger.error(error_message)
             return error_message
         # Gather schema info
-        with duckdb.connect(database=str(db_path), read_only=True) as conn:
+        with duckdb.connect(database=str(db_path), read_only=False) as conn:
             tables = set(row[0] for row in conn.execute("SHOW TABLES").fetchall())
             table_columns = {
                 t: set(row[1] for row in conn.execute(f"PRAGMA table_info('{t}')").fetchall())

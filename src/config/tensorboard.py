@@ -8,10 +8,9 @@ from src.utils.run_utils import get_run_tensorboard_dir
 
 
 def start_tensorboard() -> None:
-    """Start TensorBoard in the background."""
-    log_dir = get_run_tensorboard_dir()
+    """Start TensorBoard in the background for a global (non-run-specific) log directory."""
+    log_dir = "runtime/tensorboard_global"
     try:
-        # Start TensorBoard in the background
         subprocess.Popen(
             ["tensorboard", "--logdir", str(log_dir), "--port", "6006"],
             stdout=subprocess.DEVNULL,
@@ -22,8 +21,8 @@ def start_tensorboard() -> None:
 
 
 def get_tensorboard_writer() -> SummaryWriter:
-    """Get a TensorBoard writer for the current run."""
-    log_dir = get_run_tensorboard_dir()
+    """Get a TensorBoard writer for the global (non-run-specific) TensorBoard log directory."""
+    log_dir = "runtime/tensorboard_global"
     return SummaryWriter(log_dir=str(log_dir))
 
 
