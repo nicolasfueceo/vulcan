@@ -1,0 +1,53 @@
+# mkdocs.yml
+
+site_name: VULCAN Project
+site_author: Your Name
+site_description: >-
+  An autonomous multi-agent system for strategic feature engineering 
+  in recommender systems.
+
+repo_url: https://github.com/your_username/your_repo_name
+repo_name: your_username/your_repo_name
+edit_uri: ""
+
+copyright: Copyright &copy; 2025 Your Name
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - search.suggest
+    - search.highlight
+
+nav:
+  - 'Home': 'index.md'
+  - 'System Architecture': 'architecture.md'
+  - 'Agent Manuals':
+      - 'Discovery Team': 'agents/discovery_team.md'
+      - 'Strategy Team': 'agents/strategy_team.md'
+      - 'Downstream Agents': 'agents/downstream_agents.md'
+  - 'Data Schema': 'data_schema.md'
+  - 'Setup & Usage': 'setup.md'
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences

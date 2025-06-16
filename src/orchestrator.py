@@ -5,7 +5,7 @@ import sys
 # Ensure DB views are set up for pipeline compatibility
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import autogen
 from autogen import Agent
@@ -21,7 +21,7 @@ from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
 from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.prompt_utils import load_prompt
+from src.utils.logging_utils import log_tool_call
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
@@ -32,9 +32,7 @@ from src.utils.tools import (
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_features_tool,
     get_save_candidate_features_tool,
-    get_add_to_central_memory_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -221,118 +219,74 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         self.round_count = 0  # Reset round count for each new chat
 
     def run_chat(
-        self, messages: List[Dict[str, Any]], sender: autogen.Agent, config: Optional[Dict[str, Any]] = None
-    ) -> Union[str, Dict[str, Any], None]:
+        self,
+        messages: List[Dict[str, Any]],
+        sender: autogen.Agent,
+        config: Optional[autogen.GroupChat] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
         session_state = globals().get("session_state")
 
+        # The config is the groupchat.
+        groupchat = config or self.groupchat
+
         # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
-        if session_state and hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0:
-            logger.info("Hypotheses have been finalized. Injecting TERMINATE and ending chat.")
-            self.groupchat.messages.append(
-                {
-                    "role": "assistant",
-                    "content": "TERMINATE",
-                    "name": "SystemCoordinator",
-                }
-            )
-            # Call the parent class to process the termination message and return
-            return super().run_chat(self.groupchat.messages, sender, self.groupchat)
+        if session_state and session_state.get_final_hypotheses():
+            logger.info("Hypotheses have been finalized. Terminating discovery loop.")
+            return True, "TERMINATE"
 
-        # If we're at round 1, attach insights/discovery context
-        if self.round_count == 1:
-            if session_state and hasattr(session_state, "insights"):
-                context_message = get_insight_context(session_state)
-                if context_message:
-                    self.groupchat.messages.append(
-                        {
-                            "role": "user",
-                            "content": context_message,
-                            "name": "SystemCoordinator",
-                        }
-                    )
+        # --- CONTEXT INJECTION: Add context on first round ---
+        if self.round_count == 1 and session_state:
+            context_message = get_insight_context(session_state)
+            if context_message:
+                messages.append(
+                    {"role": "user", "content": context_message, "name": "SystemCoordinator"}
+                )
 
-        # Try to compress context if it's getting too long
+        # --- CONTEXT COMPRESSION ---
         if self.round_count > 10 and self.round_count % 10 == 0:
             try:
-                self.groupchat.messages = compress_conversation_context(self.groupchat.messages)
+                groupchat.messages = compress_conversation_context(messages)
                 logger.info("Applied LLM context compression at round {}", self.round_count)
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        # --- ENFORCE: Do not allow termination until finalize_hypotheses has been called ---
-        # If a termination signal is detected, but session_state.hypotheses is empty, inject a reminder and prevent termination
-        if session_state:
-            # Detect attempted termination in the last message
-            last_msg = self.groupchat.messages[-1]["content"].strip() if self.groupchat.messages else ""
-            attempted_termination = any(term in last_msg for term in ["FINAL_INSIGHTS", "TERMINATE"])
-            hypotheses_finalized = hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0
-            if attempted_termination and not hypotheses_finalized:
-                logger.warning("Termination signal received, but no hypotheses have been finalized. Blocking termination.")
-                # Inject a message that forces the Hypothesizer to act.
-                self.groupchat.messages.append(
-                    {
-                        "role": "user",
-                        "name": "SystemCoordinator",
-                        "content": (
-                            "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
-                            "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
-                        ),
-                    }
-                )
-                # Prevent actual termination this round
-                return super().run_chat(self.groupchat.messages, sender, self.groupchat)
-        # --- END ENFORCE ---
-        # Check if we should terminate based on discovery criteria
-        if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
-            if len(session_state.insights) > 0:
-                logger.info(
-                    "Exploration criteria met and insights found, terminating conversation"
-                )
-                self.groupchat.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "TERMINATE",
-                        "name": "SystemCoordinator",
-                    }
-                )
-            else:
-                logger.info(
-                    "Termination criteria met, but no insights found. Forcing continuation."
-                )
+        # --- TERMINATION BLOCKER: Enforce hypothesis finalization ---
+        last_msg_content = messages[-1]["content"].strip().upper() if messages else ""
+        if "TERMINATE" in last_msg_content and session_state and not session_state.get_final_hypotheses():
+            logger.warning("Termination signal received, but no hypotheses finalized. Blocking termination.")
+            messages.append(
+                {
+                    "role": "user",
+                    "name": "SystemCoordinator",
+                    "content": (
+                        "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
+                        "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
+                    ),
+                }
+            )
 
-        # Reset agents if potential loop detected
+        # --- FALLBACK TERMINATION: Prevent infinite loops ---
+        if session_state and not should_continue_exploration(session_state, self.round_count):
+            logger.info("Exploration criteria met (fallback), terminating conversation.")
+            return True, "TERMINATE"
+
+        # --- LOOP PREVENTION: Reset agents periodically ---
         if self.round_count > 0 and self.round_count % 20 == 0:
-            logger.warning("Potential loop detected. Resetting agents.")
-            # Reset all agents to clear their memory
-            for agent in self.groupchat.agents:
-                # Use getattr for safer access to reset method
-                reset_method = getattr(agent, "reset", None)
-                if reset_method and callable(reset_method):
-                    reset_method()
+            logger.warning("Potential loop detected at round {}. Resetting agents.", self.round_count)
+            for agent in groupchat.agents:
+                if hasattr(agent, "reset"):
+                    agent.reset()
 
-        # Add progress prompts to guide agents periodically
+        # --- GUIDANCE: Add progress prompts periodically ---
         if session_state and self.round_count > 5 and self.round_count % 15 == 0:
             progress_guidance = get_progress_prompt(session_state, self.round_count)
             if progress_guidance:
                 logger.info("Adding progress guidance at round {}", self.round_count)
-                self.groupchat.messages.append(
-                    {
-                        "role": "user",
-                        "content": progress_guidance,
-                        "name": "SystemCoordinator",
-                    }
+                messages.append(
+                    {"role": "user", "content": progress_guidance, "name": "SystemCoordinator"}
                 )
-
-        # --- VERBOSE LOGGING: Trace agent selection ---
-        try:
-            next_agent = self.groupchat.select_speaker(last_speaker=self.last_speaker, selector=self.selector)
-            logger.info(f"[DEBUG] Next agent selected by groupchat.select_speaker(): {getattr(next_agent, 'name', next_agent)}")
-        except Exception as e:
-            logger.error(f"[DEBUG] Exception during agent selection: {e}")
-        # Let the parent class handle the actual chat execution
-        # Pass the GroupChat object as config for correct typing
         prev_message_count = len(self.groupchat.messages)
         result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
         # --- LOGGING: Log every message in the groupchat ---
@@ -380,54 +334,41 @@ def run_discovery_loop(session_state: SessionState) -> str:
     critic = assistant_agents["PatternSeeker"]
     hypothesizer = assistant_agents["Hypothesizer"]
 
-    # Register tools for analysis agents only
+    # --- Tool Registration with Logging ---
+    from src.utils.tools_logging import log_tool_call
+
+    # A dictionary of tool functions to be wrapped and registered.
+    # The key is the name the agent will use to call the tool.
+    tool_functions = {
+        "run_sql_query": run_sql_query,
+        "get_table_sample": get_table_sample,
+        "create_analysis_view": create_analysis_view,
+        "vision_tool": vision_tool,
+        "add_insight_to_report": get_add_insight_tool(session_state),
+        "execute_python": execute_python,
+        "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
+    }
+
+    # Wrap all tool functions with the logger
+    logged_tools = {
+        name: log_tool_call(func, session_state, tool_name=name)
+        for name, func in tool_functions.items()
+    }
+
+    # Register tools for the appropriate agents
     for agent in [analyst, researcher, critic]:
-        autogen.register_function(
-            run_sql_query,
-            caller=agent,
-            executor=user_proxy,
-            name="run_sql_query",
-            description="Run a SQL query.",
-        )
-        autogen.register_function(
-            get_table_sample,
-            caller=agent,
-            executor=user_proxy,
-            name="get_table_sample",
-            description="Get a sample of rows from a table.",
-        )
-        autogen.register_function(
-            create_analysis_view,
-            caller=agent,
-            executor=user_proxy,
-            name="create_analysis_view",
-            description="Create a temporary SQL view.",
-        )
-        autogen.register_function(
-            vision_tool,
-            caller=agent,
-            executor=user_proxy,
-            name="vision_tool",
-            description="Analyze an image.",
-        )
-        autogen.register_function(
-            get_add_insight_tool(session_state),
-            caller=agent,
-            executor=user_proxy,
-            name="add_insight_to_report",
-            description="Saves insights to the report.",
-        )
-        autogen.register_function(
-            execute_python,
-            caller=agent,
-            executor=user_proxy,
-            name="execute_python",
-            description="Execute arbitrary Python code for analysis, stats, or plotting.",
-        )
+        for name in ["run_sql_query", "get_table_sample", "create_analysis_view", "vision_tool", "add_insight_to_report", "execute_python"]:
+            autogen.register_function(
+                logged_tools[name],
+                caller=agent,
+                executor=user_proxy,
+                name=name,
+                description=tool_functions[name].__doc__.strip().split('\n')[0] # Use first line of docstring
+            )
 
     # Register finalize_hypotheses only for the Hypothesizer
     autogen.register_function(
-        get_finalize_hypotheses_tool(session_state),
+        logged_tools["finalize_hypotheses"],
         caller=hypothesizer,
         executor=user_proxy,
         name="finalize_hypotheses",
@@ -535,16 +476,17 @@ def run_strategy_loop(
     feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # --- Tool Registration for this specific loop ---
-    # The user proxy needs access to the session_state to save features.
-    # CRITICAL: Only register tools relevant to this team. `finalize_hypotheses`
-    # belongs to the discovery team and was causing confusion.
-    # Register the tools the agents in this group chat can use.
+    # --- Tool Registration with Logging ---
+    # --- Tool Registration with Logging ---
+    # Wrap each tool with the logging decorator before registration
+    logged_save_candidate_features = log_tool_call(get_save_candidate_features_tool(session_state), session_state)
+    logged_execute_python = log_tool_call(execute_python, session_state)
+
     # The user proxy needs access to the session_state to save features.
     user_proxy.register_function(
         function_map={
-            "save_candidate_features": get_save_candidate_features_tool(session_state),
-            "execute_python": execute_python,
+            "save_candidate_features": logged_save_candidate_features,
+            "execute_python": logged_execute_python,
         }
     )
 
@@ -704,7 +646,7 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
 
         # === Optimization Step ===
         logger.info("Starting optimization step with realized features...")
-        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []
+        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []  # pylint: disable=no-member
         if not realized_features:
             logger.warning("No realized features found for optimization. Skipping optimization step.")
             optimization_report = "No realized features found. Optimization skipped."
@@ -733,7 +675,8 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     final_report = (
         f"# VULCAN Run Complete: {run_id}\n\n"
         f"## Epoch Reports\n{json.dumps(all_epoch_reports, indent=2)}\n\n"
-        f"## Final Strategy Refinement Report\n{strategy_report}\n"
+        f"## Final Strategy Refinement Report\n{strategy_report}\n\n"
+        f"## Final Optimization Report\n{optimization_report}\n"
     )
     logger.info("VULCAN has completed its run.")
     print(final_report)
