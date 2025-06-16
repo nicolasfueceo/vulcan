@@ -32,11 +32,9 @@ autogen[gemini]>=0.2.0
 # Recommender System Baselines
 featuretools>=1.29.0
 scikit-surprise>=1.1.3
-deepctr-torch>=0.3.0
-
-# Additional dependencies
+ Additional
+# dependencies
 tensorboard>=2.14.0
-
 # Added from the code block
 jinja2
 autogen
@@ -45,12 +43,19 @@ torch
 requests
 python-dotenv>=1.0.0
 pydantic
+duckdb
 redis
 tensorboardX
 tiktoken
-
+seaborn
+matplotlib
 # Added from the code block
 langchain>=0.1.0
 langchain-community>=0.1.0
 sqlalchemy>=2.0.0
 pytest>=7.0.0
+lightfm 
+scipy
+optuna
+tabulate
+rankereval

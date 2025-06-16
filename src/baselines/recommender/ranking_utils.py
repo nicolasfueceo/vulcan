@@ -40,25 +40,29 @@ def calculate_ndcg(
     batch_size: int = 1000,
 ) -> float:
     """
-    Calculate mean NDCG@k for a set of recommendations and ground truth, processing users in batches.
+    Efficiently calculate mean NDCG@k for a set of recommendations and ground truth using numpy, preserving all samples.
     recommendations: {user_id: [rec1, rec2, ...]}
     ground_truth: {user_id: [item1, item2, ...]}
     batch_size: Number of users to process at once (to avoid OOM)
     """
+    import numpy as np
     user_ids = list(recommendations.keys())
     ndcgs = []
     for i in range(0, len(user_ids), batch_size):
         batch_users = user_ids[i:i+batch_size]
+        # Precompute log2 denominators
+        log2s = np.log2(np.arange(2, k + 2))
         for user_id in batch_users:
-            recs = recommendations[user_id]
-            gt = ground_truth.get(user_id, [])
+            recs = recommendations[user_id][:k]
+            gt = set(ground_truth.get(user_id, []))
             if not gt:
                 continue
-            ideal_dcg = sum([1.0 / np.log2(j + 2) for j in range(min(len(gt), k))])
-            dcg = 0.0
-            for j, rec in enumerate(recs[:k]):
-                if rec in gt:
-                    dcg += 1.0 / np.log2(j + 2)
+            # DCG: 1/log2(rank+1) for each hit
+            hits = np.array([item in gt for item in recs], dtype=np.float32)
+            dcg = np.sum(hits / log2s[:len(recs)])
+            # Ideal DCG is sum for min(len(gt), k)
+            ideal_len = min(len(gt), k)
+            ideal_dcg = np.sum(1.0 / log2s[:ideal_len])
             ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0.0
             ndcgs.append(ndcg)
     return float(np.mean(ndcgs)) if ndcgs else 0.0

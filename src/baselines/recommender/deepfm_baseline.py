@@ -7,7 +7,8 @@ from deepctr_torch.models import DeepFM
 from loguru import logger
 from sklearn.preprocessing import LabelEncoder
 
-from .ranking_utils import calculate_ndcg, get_top_n_recommendations
+from src.evaluation.ranking_metrics import evaluate_ranking_metrics
+from .ranking_utils import get_top_n_recommendations
 
 
 def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
@@ -74,8 +75,8 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
         validation_data=(test_model_input, test_labels),
     )
 
-    # 5. Evaluate for Ranking (NDCG@10)
-    logger.info("Evaluating model for ranking (NDCG@10)...")
+    # 5. Evaluate for Ranking (NDCG, Precision@K, Recall@K) using RankerEval
+    logger.info("Evaluating model for ranking metrics (RankerEval)...")
     all_users = data["user_id"].unique()
     all_items = data["book_id"].unique()
     all_pairs = pd.DataFrame(
@@ -91,9 +92,13 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     anti_test_model_input = {name: anti_test_df[name] for name in feature_names}
     anti_test_predictions = model.predict(anti_test_model_input, batch_size=256)
     anti_test_df["rating"] = anti_test_predictions
-    top_n = get_top_n_recommendations(anti_test_df, n=10)
-    ndcg_score = calculate_ndcg(top_n, test, k=10, batch_size=1000)
-    logger.info(f"DeepFM baseline NDCG@10: {ndcg_score:.4f}")
+    # Get top-N for all K
+    top_n = get_top_n_recommendations(anti_test_df, n=20)
+    # Convert to {user_id: [item_id, ...]}
+    recommendations = {user: [item for item, _ in items] for user, items in top_n.items()}
+    ground_truth = test.groupby('user_id')['book_id'].apply(list).to_dict()
+    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+    logger.info(f"DeepFM ranking metrics: {ranking_metrics}")
 
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
@@ -102,11 +107,8 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     mse = np.mean((test_labels - predictions) ** 2)
     rmse = np.sqrt(mse)
     logger.info(f"DeepFM baseline RMSE: {rmse:.4f}")
-    metrics = {
-        "mse": mse,
-        "rmse": rmse,
-        "ndcg@10": ndcg_score,
-    }
+    metrics = {"mse": mse, "rmse": rmse}
+    metrics.update(ranking_metrics)
     logger.info(f"DeepFM metrics: {metrics}")
     logger.success("DeepFM baseline finished successfully.")
     return metrics

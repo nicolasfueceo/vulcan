@@ -9,17 +9,46 @@ def run_featuretools_baseline(
     # Convert all relevant columns to ensure compatibility.
     import logging
     logger = logging.getLogger("featuretools_baseline")
-    def clean_datetime_columns(df):
-        for col in ["date_added", "date_updated", "read_at", "started_at"]:
-            if col in df.columns and str(df[col].dtype).startswith("datetime64"):
-                if hasattr(df[col].dt, "tz") and df[col].dt.tz is not None:
-                    df[col] = df[col].dt.tz_localize(None)
-                df[col] = df[col].astype("datetime64[ns]")
-        return df
+    import pandas as pd
+    import numpy as np
 
-    train_df = clean_datetime_columns(train_df)
-    books_df = clean_datetime_columns(books_df)
-    users_df = clean_datetime_columns(users_df)
+    # Robust timestamp filtering utility
+    def filter_out_of_bounds_timestamps(df, name, extra_cols=None):
+        # Default columns and any extra columns
+        timestamp_cols = ["date_added", "date_updated", "read_at", "started_at"]
+        if extra_cols:
+            timestamp_cols += extra_cols
+        timestamp_cols = [col for col in timestamp_cols if col in df.columns]
+        if not timestamp_cols:
+            return df
+        before = len(df)
+        # Convert and coerce errors
+        for col in timestamp_cols:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            # Remove timezone if present
+            if pd.api.types.is_datetime64tz_dtype(df[col]):
+                df[col] = df[col].dt.tz_localize(None)
+            # Explicitly cast to datetime64[ns]
+            if not pd.api.types.is_datetime64_ns_dtype(df[col]):
+                df[col] = df[col].astype('datetime64[ns]')
+        # Remove rows with NaT or out-of-bounds
+        mask = pd.Series(True, index=df.index)
+        for col in timestamp_cols:
+            vals = pd.to_datetime(df[col], errors='coerce')
+            mask &= (vals >= pd.Timestamp.min) & (vals <= pd.Timestamp.max)
+            mask &= vals.notna()
+        cleaned = df[mask].copy()
+        dropped = before - len(cleaned)
+        if dropped > 0:
+            logger.warning(f"Dropped {dropped} rows from {name} due to out-of-bounds or invalid timestamps in columns {timestamp_cols}.")
+        return cleaned
+
+    train_df = filter_out_of_bounds_timestamps(train_df, "train_df")
+    books_df = filter_out_of_bounds_timestamps(books_df, "books_df")
+    users_df = filter_out_of_bounds_timestamps(users_df, "users_df")
+    if test_df is not None:
+        test_df = filter_out_of_bounds_timestamps(test_df, "test_df")
+
     """
     Runs the Featuretools baseline to generate features for the recommender system.
 
@@ -81,6 +110,15 @@ def run_featuretools_baseline(
     logger.info(f"Featuretools generated {feature_matrix.shape[1]} features.")
     logger.info(f"Shape of the resulting feature matrix: {feature_matrix.shape}")
 
+    # Optionally: Save feature matrix for visualization
+    try:
+        feature_matrix.head(100).to_html("reports/featuretools_feature_matrix_head.html")
+        feature_matrix.describe().to_csv("reports/featuretools_feature_matrix_stats.csv")
+        logger.info("Featuretools feature matrix head (100 rows) saved to reports/featuretools_feature_matrix_head.html")
+        logger.info("Featuretools feature matrix stats saved to reports/featuretools_feature_matrix_stats.csv")
+    except Exception as e:
+        logger.warning(f"Could not save featuretools feature matrix visualizations: {e}")
+
     # 4. Evaluate with LightFM (if test_df is provided)
     if test_df is not None:
         from lightfm.data import Dataset
@@ -100,34 +138,36 @@ def run_featuretools_baseline(
             for user_id in feature_matrix.index
         )
         metrics = {}
-        for k in [5, 10, 20]:
-            scores = _train_and_evaluate_lightfm(
-                dataset, train_df, test_interactions, user_features=user_features_train, k=k
-            )
-            metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
-            metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
-            metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
-        # Beyond-accuracy metrics
+        # Train LightFM model
         from lightfm import LightFM
         model = LightFM(loss="warp", random_state=42)
         (train_interactions, _) = dataset.build_interactions(
             [(row["user_id"], row["book_id"]) for _, row in train_df.iterrows()]
         )
         model.fit(train_interactions, user_features=user_features_train, epochs=5, num_threads=4)
-        def get_recommendations(model, dataset, user_ids, k):
-            recs = {}
-            for i, user_id in enumerate(user_ids):
-                scores = model.predict(i, np.arange(len(all_items)), user_features=None)
-                top_items = np.argsort(-scores)[:k]
-                rec_items = [all_items[j] for j in top_items]
-                recs[user_id] = rec_items
-            return recs
-        global_recs = get_recommendations(model, dataset, list(feature_matrix.index), k=10)
+        # Generate recommendations for all test users (top 20 for all K)
+        test_user_ids = test_df["user_id"].unique()
+        all_items = pd.concat([train_df["book_id"], test_df["book_id"]]).unique()
+        recommendations = {}
+        import numpy as np
+        for i, user_id in enumerate(test_user_ids):
+            scores = model.predict(i, np.arange(len(all_items)), user_features=None)
+            top_items = np.argsort(-scores)[:20]
+            rec_items = [all_items[j] for j in top_items]
+            recommendations[user_id] = rec_items
+        ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+        from src.evaluation.ranking_metrics import evaluate_ranking_metrics
+        ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+        metrics = dict(ranking_metrics)
+        # Beyond-accuracy metrics
+        global_recs = {user_id: recommendations.get(user_id, [])[:10] for user_id in test_user_ids}
         novelty = compute_novelty(global_recs, train_df)
         diversity = compute_diversity(global_recs)
         catalog = set(all_items)
         coverage = compute_catalog_coverage(global_recs, catalog)
-        metrics.update({"novelty": novelty, "diversity": diversity, "catalog_coverage": coverage})
+        metrics["novelty"] = novelty
+        metrics["diversity"] = diversity
+        metrics["catalog_coverage"] = coverage
         logger.success(f"Featuretools+LightFM metrics: {metrics}")
         return metrics
     logger.success("Featuretools baseline finished successfully.")

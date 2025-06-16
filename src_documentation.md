@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-16 19:28:56
+Generated on: 2025-06-17 00:43:28
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -8,48 +8,12 @@ This document contains the complete source code structure and contents of the `s
 
 ```
 ├── .gitignore
-├── .ruff_cache/
-│   ├── .gitignore
-│   ├── 0.11.13/
-│   │   ├── 10035001097010849136
-│   │   ├── 10209213205140466974
-│   │   ├── 11256956069432148776
-│   │   ├── 1231301740235175813
-│   │   ├── 12404207031273964348
-│   │   ├── 12986171790077239247
-│   │   ├── 13043826984468259098
-│   │   ├── 13450541447674714635
-│   │   ├── 14130817377459621375
-│   │   ├── 14195369555485797494
-│   │   ├── 14303290313017948516
-│   │   ├── 15715095191921689679
-│   │   ├── 1639093997070980232
-│   │   ├── 16701771181186239481
-│   │   ├── 16789539735357863146
-│   │   ├── 17033856446843569390
-│   │   ├── 18047837004551977747
-│   │   ├── 18076770827875221276
-│   │   ├── 2172303405870675659
-│   │   ├── 3096963027186623868
-│   │   ├── 3102837809023614707
-│   │   ├── 3427590981331677085
-│   │   ├── 3495669085465520408
-│   │   ├── 450221922813433944
-│   │   ├── 5320217578922298852
-│   │   ├── 644445844811209309
-│   │   ├── 711651472226615739
-│   │   ├── 8332078308367618719
-│   │   ├── 8475453963848076840
-│   │   ├── 8584604848142013301
-│   │   ├── 901234538733284022
-│   │   ├── 9394952767601150040
-│   │   └── 9713079930055746817
-│   └── CACHEDIR.TAG
 ├── .windsurf/
 │   └── rules/
 │       ├── thesis-audience.md
 │       └── writing-thesis.md
 ├── README.md
+├── average_rating_vs_ratings_count.png
 ├── config/
 │   └── OAI_CONFIG_LIST.json
 ├── data/
@@ -63,14 +27,11 @@ This document contains the complete source code structure and contents of the `s
 │   │   └── cv_splits/
 │   │       ├── cv_folds.json
 │   │       └── cv_summary.json
-│   ├── root/
-│   │   └── fuegoRecommender/
-│   ├── splits/
-│   │   ├── cold_start_users.json
-│   │   ├── cv_folds.json
-│   │   ├── cv_summary.json
-│   │   └── sample_users.json
-│   └── sql_views/
+│   └── splits/
+│       ├── cold_start_users.json
+│       ├── cv_folds.json
+│       ├── cv_summary.json
+│       └── sample_users.json
 ├── data_curation/
 │   ├── README.md
 │   ├── clean_data.py
@@ -114,10 +75,8 @@ This document contains the complete source code structure and contents of the `s
 │   ├── reflection_agent.txt
 │   └── strategist_agent.txt
 ├── mkdocs.yml
-├── pipeline_test_output.txt
 ├── pyproject.toml
 ├── report/
-│   ├── .DS_Store
 │   ├── agent_plots/
 │   │   ├── run_20250615_064431_acb54cc9_avg_ratings_distribution.png
 │   │   ├── run_20250615_064431_acb54cc9_common_descriptive_terms_fixed.png
@@ -174,6 +133,13 @@ This document contains the complete source code structure and contents of the `s
 │       ├── Report and Presentation Tips v7.pdf
 │       ├── Report_and_Presentation_Tips_v7.txt
 │       └── litterature_review.md
+├── reports/
+│   └── tensorboard_baselines/
+│       ├── events.out.tfevents.1750108365.vmi2642138.contaboserver.net.32791.0
+│       ├── events.out.tfevents.1750108444.vmi2642138.contaboserver.net.33011.0
+│       ├── events.out.tfevents.1750109114.vmi2642138.contaboserver.net.34556.0
+│       ├── events.out.tfevents.1750110289.vmi2642138.contaboserver.net.36471.0
+│       └── events.out.tfevents.1750111847.vmi2642138.contaboserver.net.41008.0
 ├── requirements.txt
 ├── scripts/
 │   ├── __pycache__/
@@ -196,7 +162,6 @@ This document contains the complete source code structure and contents of the `s
 │   ├── test_strategy_team.py
 │   └── test_view_persistence.py
 ├── src/
-│   ├── __pycache__/
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   ├── __pycache__/
@@ -212,10 +177,11 @@ This document contains the complete source code structure and contents of the `s
 │   │       ├── reflection_agent.py
 │   │       └── strategy_team_agents.py
 │   ├── baselines/
-│   │   ├── __pycache__/
 │   │   ├── feature_engineer/
+│   │   │   ├── __pycache__/
 │   │   │   └── featuretools_baseline.py
 │   │   ├── recommender/
+│   │   │   ├── __pycache__/
 │   │   │   ├── deepfm_baseline.py
 │   │   │   ├── popularity_baseline.py
 │   │   │   ├── ranking_utils.py
@@ -239,9 +205,9 @@ This document contains the complete source code structure and contents of the `s
 │   │   ├── __pycache__/
 │   │   ├── beyond_accuracy.py
 │   │   ├── clustering.py
+│   │   ├── ranking_metrics.py
 │   │   └── scoring.py
 │   ├── orchestration/
-│   │   ├── __pycache__/
 │   │   ├── ideation.py
 │   │   ├── insight.py
 │   │   ├── realization.py
@@ -274,7 +240,6 @@ This document contains the complete source code structure and contents of the `s
 │   │   └── helpers/
 │   │       ├── db_schema.j2
 │   │       └── tool_usage.j2
-│   ├── report/
 │   ├── schemas/
 │   │   ├── __pycache__/
 │   │   ├── eda_report_schema.json
@@ -294,19 +259,14 @@ This document contains the complete source code structure and contents of the `s
 │       ├── tools.py
 │       └── tools_logging.py
 ├── src_documentation.md
-├── test_run_dir/
-│   └── session_state.json
 └── tests/
     ├── __init__.py
-    ├── __pycache__/
     ├── agents/
     │   └── strategy_team/
-    │       ├── __pycache__/
     │       └── test_evaluation_agent.py
     ├── conftest.py
     ├── debug_db_connection.py
     ├── evaluation/
-    │   ├── __pycache__/
     │   ├── test_beyond_accuracy.py
     │   └── test_clustering.py
     ├── test_central_memory.py
@@ -950,7 +910,7 @@ def {candidate.name}(df: pd.DataFrame, {", ".join(all_params.keys())}):
 
 ### `agents/strategy_team/optimization_agent_v2.py`
 
-**File size:** 23,251 bytes
+**File size:** 24,072 bytes
 
 ```python
 """
@@ -980,6 +940,7 @@ from scipy.sparse import coo_matrix, csr_matrix
 
 from src.data.cv_data_manager import CVDataManager
 from src.utils.run_utils import get_run_dir, get_run_tensorboard_dir
+from src.config.tensorboard import log_metric, log_metrics, log_hyperparams
 from src.utils.session_state import SessionState
 
 # Type aliases for better readability
@@ -1118,6 +1079,12 @@ class VULCANOptimizer:
 
             mean_score = np.mean(fold_scores) if fold_scores else 0.0
             logger.info(f"Trial {trial.number} -> Average Score: {mean_score:.4f}")
+
+            # === TensorBoard logging (per-trial) ===
+            if self.writer is not None:
+                log_metric(self.writer, "trial/score", mean_score, step=trial_number)
+                log_metrics(self.writer, {f"trial/params/{k}": v for k, v in params.items()}, step=trial_number)
+
             return float(mean_score)
 
         except optuna.TrialPruned:
@@ -1492,6 +1459,13 @@ class VULCANOptimizer:
         logger.info(f"✅ Optimization finished. Best score: {best_score:.4f}")
         logger.info(f"🏆 Best params: {best_params}")
 
+        # === TensorBoard logging (final results) ===
+        if self.writer is not None:
+            log_metric(self.writer, "optimization/best_score", best_score)
+            log_metrics(self.writer, {f"optimization/best_params/{k}": v for k, v in best_params.items()})
+            log_metrics(self.writer, {f"optimization/feature_importances/{k}": v for k, v in feature_importances.items()})
+            log_hyperparams(self.writer, best_params)
+
         result = OptimizationResult(
             best_params=best_params,
             best_score=best_score,
@@ -1809,7 +1783,7 @@ def get_strategy_team_agents(
 
 ### `baselines/feature_engineer/featuretools_baseline.py`
 
-**File size:** 6,015 bytes
+**File size:** 7,821 bytes
 
 ```python
 import featuretools as ft
@@ -1824,16 +1798,38 @@ def run_featuretools_baseline(
     import logging
     logger = logging.getLogger("featuretools_baseline")
     def clean_datetime_columns(df):
+        import pandas as pd
+        import numpy as np
         for col in ["date_added", "date_updated", "read_at", "started_at"]:
-            if col in df.columns and str(df[col].dtype).startswith("datetime64"):
-                if hasattr(df[col].dt, "tz") and df[col].dt.tz is not None:
+            if col in df.columns:
+                before = df[col].copy()
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+                # Remove timezone if present
+                if pd.api.types.is_datetime64tz_dtype(df[col]):
                     df[col] = df[col].dt.tz_localize(None)
-                df[col] = df[col].astype("datetime64[ns]")
+                # Explicitly cast to datetime64[ns] to avoid Featuretools conversion errors
+                if not pd.api.types.is_datetime64_ns_dtype(df[col]):
+                    df[col] = df[col].astype('datetime64[ns]')
+                n_invalid = df[col].isna().sum() - before.isna().sum()
+                if n_invalid > 0:
+                    logger.warning(f"{n_invalid} invalid or out-of-bounds datetimes found in column '{col}' and set to NaT.")
         return df
 
     train_df = clean_datetime_columns(train_df)
     books_df = clean_datetime_columns(books_df)
     users_df = clean_datetime_columns(users_df)
+
+    # Drop rows with invalid datetimes (NaT) in any datetime column
+    for df, name in zip([train_df, books_df, users_df], ["train_df", "books_df", "users_df"]):
+        dt_cols = [col for col in ["date_added", "date_updated", "read_at", "started_at"] if col in df.columns]
+        if dt_cols:
+            before = len(df)
+            df.dropna(subset=dt_cols, inplace=True)
+            after = len(df)
+            dropped = before - after
+            if dropped > 0:
+                logger.warning(f"Dropped {dropped} rows from {name} due to invalid datetimes in columns {dt_cols}.")
+
     """
     Runs the Featuretools baseline to generate features for the recommender system.
 
@@ -1895,6 +1891,15 @@ def run_featuretools_baseline(
     logger.info(f"Featuretools generated {feature_matrix.shape[1]} features.")
     logger.info(f"Shape of the resulting feature matrix: {feature_matrix.shape}")
 
+    # Optionally: Save feature matrix for visualization
+    try:
+        feature_matrix.head(100).to_html("reports/featuretools_feature_matrix_head.html")
+        feature_matrix.describe().to_csv("reports/featuretools_feature_matrix_stats.csv")
+        logger.info("Featuretools feature matrix head (100 rows) saved to reports/featuretools_feature_matrix_head.html")
+        logger.info("Featuretools feature matrix stats saved to reports/featuretools_feature_matrix_stats.csv")
+    except Exception as e:
+        logger.warning(f"Could not save featuretools feature matrix visualizations: {e}")
+
     # 4. Evaluate with LightFM (if test_df is provided)
     if test_df is not None:
         from lightfm.data import Dataset
@@ -1914,29 +1919,29 @@ def run_featuretools_baseline(
             for user_id in feature_matrix.index
         )
         metrics = {}
-        for k in [5, 10, 20]:
-            scores = _train_and_evaluate_lightfm(
-                dataset, train_df, test_interactions, user_features=user_features_train, k=k
-            )
-            metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
-            metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
-            metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
-        # Beyond-accuracy metrics
+        # Train LightFM model
         from lightfm import LightFM
         model = LightFM(loss="warp", random_state=42)
         (train_interactions, _) = dataset.build_interactions(
             [(row["user_id"], row["book_id"]) for _, row in train_df.iterrows()]
         )
         model.fit(train_interactions, user_features=user_features_train, epochs=5, num_threads=4)
-        def get_recommendations(model, dataset, user_ids, k):
-            recs = {}
-            for i, user_id in enumerate(user_ids):
-                scores = model.predict(i, np.arange(len(all_items)), user_features=None)
-                top_items = np.argsort(-scores)[:k]
-                rec_items = [all_items[j] for j in top_items]
-                recs[user_id] = rec_items
-            return recs
-        global_recs = get_recommendations(model, dataset, list(feature_matrix.index), k=10)
+        # Generate recommendations for all test users (top 20 for all K)
+        test_user_ids = test_df["user_id"].unique()
+        all_items = pd.concat([train_df["book_id"], test_df["book_id"]]).unique()
+        recommendations = {}
+        import numpy as np
+        for i, user_id in enumerate(test_user_ids):
+            scores = model.predict(i, np.arange(len(all_items)), user_features=None)
+            top_items = np.argsort(-scores)[:20]
+            rec_items = [all_items[j] for j in top_items]
+            recommendations[user_id] = rec_items
+        ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+        from src.evaluation.ranking_metrics import evaluate_ranking_metrics
+        ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+        metrics = dict(ranking_metrics)
+        # Beyond-accuracy metrics
+        global_recs = {user_id: recommendations.get(user_id, [])[:10] for user_id in test_user_ids}
         novelty = compute_novelty(global_recs, train_df)
         diversity = compute_diversity(global_recs)
         catalog = set(all_items)
@@ -1950,7 +1955,7 @@ def run_featuretools_baseline(
 
 ### `baselines/recommender/deepfm_baseline.py`
 
-**File size:** 4,196 bytes
+**File size:** 4,562 bytes
 
 ```python
 import itertools
@@ -1962,7 +1967,8 @@ from deepctr_torch.models import DeepFM
 from loguru import logger
 from sklearn.preprocessing import LabelEncoder
 
-from .ranking_utils import calculate_ndcg, get_top_n_recommendations
+from src.evaluation.ranking_metrics import evaluate_ranking_metrics
+from .ranking_utils import get_top_n_recommendations
 
 
 def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
@@ -2029,8 +2035,8 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
         validation_data=(test_model_input, test_labels),
     )
 
-    # 5. Evaluate for Ranking (NDCG@10)
-    logger.info("Evaluating model for ranking (NDCG@10)...")
+    # 5. Evaluate for Ranking (NDCG, Precision@K, Recall@K) using RankerEval
+    logger.info("Evaluating model for ranking metrics (RankerEval)...")
     all_users = data["user_id"].unique()
     all_items = data["book_id"].unique()
     all_pairs = pd.DataFrame(
@@ -2046,9 +2052,13 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     anti_test_model_input = {name: anti_test_df[name] for name in feature_names}
     anti_test_predictions = model.predict(anti_test_model_input, batch_size=256)
     anti_test_df["rating"] = anti_test_predictions
-    top_n = get_top_n_recommendations(anti_test_df, n=10)
-    ndcg_score = calculate_ndcg(top_n, test, k=10, batch_size=1000)
-    logger.info(f"DeepFM baseline NDCG@10: {ndcg_score:.4f}")
+    # Get top-N for all K
+    top_n = get_top_n_recommendations(anti_test_df, n=20)
+    # Convert to {user_id: [item_id, ...]}
+    recommendations = {user: [item for item, _ in items] for user, items in top_n.items()}
+    ground_truth = test.groupby('user_id')['book_id'].apply(list).to_dict()
+    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+    logger.info(f"DeepFM ranking metrics: {ranking_metrics}")
 
     # 6. Evaluate for Accuracy (MSE)
     logger.info("Evaluating model on the test set...")
@@ -2069,11 +2079,11 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
 
 ### `baselines/recommender/popularity_baseline.py`
 
-**File size:** 1,015 bytes
+**File size:** 1,068 bytes
 
 ```python
 import pandas as pd
-from .ranking_utils import calculate_ndcg
+from src.evaluation.ranking_metrics import evaluate_ranking_metrics
 
 def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
     """
@@ -2091,20 +2101,16 @@ def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n
     user_ids = test_df['user_id'].unique()
     recommendations = {user_id: pop_books for user_id in user_ids}
 
-    # Prepare ground truth for NDCG
-    ground_truth = (
-        test_df.groupby('user_id')['book_id'].apply(list).to_dict()
-    )
-    ndcg = calculate_ndcg(recommendations, ground_truth, k=top_n)
-    return {
-        'ndcg@10': ndcg,
-        'top_n_books': pop_books
-    }
+    # Prepare ground truth for ranking metrics
+    ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+    result = {**ranking_metrics, 'top_n_books': pop_books}
+    return result
 ```
 
 ### `baselines/recommender/ranking_utils.py`
 
-**File size:** 2,169 bytes
+**File size:** 2,395 bytes
 
 ```python
 import numpy as np
@@ -2149,25 +2155,29 @@ def calculate_ndcg(
     batch_size: int = 1000,
 ) -> float:
     """
-    Calculate mean NDCG@k for a set of recommendations and ground truth, processing users in batches.
+    Efficiently calculate mean NDCG@k for a set of recommendations and ground truth using numpy, preserving all samples.
     recommendations: {user_id: [rec1, rec2, ...]}
     ground_truth: {user_id: [item1, item2, ...]}
     batch_size: Number of users to process at once (to avoid OOM)
     """
+    import numpy as np
     user_ids = list(recommendations.keys())
     ndcgs = []
     for i in range(0, len(user_ids), batch_size):
         batch_users = user_ids[i:i+batch_size]
+        # Precompute log2 denominators
+        log2s = np.log2(np.arange(2, k + 2))
         for user_id in batch_users:
-            recs = recommendations[user_id]
-            gt = ground_truth.get(user_id, [])
+            recs = recommendations[user_id][:k]
+            gt = set(ground_truth.get(user_id, []))
             if not gt:
                 continue
-            ideal_dcg = sum([1.0 / np.log2(j + 2) for j in range(min(len(gt), k))])
-            dcg = 0.0
-            for j, rec in enumerate(recs[:k]):
-                if rec in gt:
-                    dcg += 1.0 / np.log2(j + 2)
+            # DCG: 1/log2(rank+1) for each hit
+            hits = np.array([item in gt for item in recs], dtype=np.float32)
+            dcg = np.sum(hits / log2s[:len(recs)])
+            # Ideal DCG is sum for min(len(gt), k)
+            ideal_len = min(len(gt), k)
+            ideal_dcg = np.sum(1.0 / log2s[:ideal_len])
             ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0.0
             ndcgs.append(ndcg)
     return float(np.mean(ndcgs)) if ndcgs else 0.0
@@ -2175,7 +2185,7 @@ def calculate_ndcg(
 
 ### `baselines/recommender/svd_baseline.py`
 
-**File size:** 2,351 bytes
+**File size:** 2,761 bytes
 
 ```python
 import pandas as pd
@@ -2183,10 +2193,8 @@ from loguru import logger
 from surprise import SVD, Dataset, Reader
 from surprise.accuracy import mae, rmse
 
-from .ranking_utils import (
-    calculate_ndcg,
-    get_top_n_recommendations,
-)
+from src.evaluation.ranking_metrics import evaluate_ranking_metrics
+from .ranking_utils import get_top_n_recommendations
 
 
 def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
@@ -2201,8 +2209,8 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     trainset = train_data.build_full_trainset()
     testset = list(test_df[['user_id', 'book_id', 'rating']].itertuples(index=False, name=None))
 
-    # Build an anti-test set for generating predictions for items not in the training set
-    anti_testset = trainset.build_anti_testset()
+    # NOTE: Do not build a full anti-test set (can be huge). Instead, compute top-N recommendations per user in batches.
+    # anti_testset = trainset.build_anti_testset()
 
     # 2. Train Model
     logger.info("Training SVD model...")
@@ -2216,28 +2224,33 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     mae_score = mae(accuracy_predictions, verbose=False)
     logger.info(f"SVD baseline RMSE: {rmse_score:.4f}, MAE: {mae_score:.4f}")
 
-    # 4. Evaluate for Ranking (NDCG)
-    logger.info("Evaluating model for ranking (NDCG@10)...")
-    ranking_predictions = model.test(anti_testset)
-
-    # Convert predictions to a DataFrame
-    predictions_df = pd.DataFrame(
-        ranking_predictions,
-        columns=["user_id", "book_id", "true_rating", "rating", "details"],
-    )
-
-    top_n = get_top_n_recommendations(predictions_df, n=10)
-    ndcg_score = calculate_ndcg(top_n, test_df, n=10)
-    logger.info(f"SVD baseline NDCG@10: {ndcg_score:.4f}")
+    # 4. Evaluate for Ranking (NDCG, Precision@K, Recall@K) using RankerEval
+    logger.info("Evaluating model for ranking metrics (RankerEval)...")
+    import numpy as np
+    user_ids = test_df['user_id'].unique()
+    item_ids = train_df['book_id'].unique()
+    top_n = {}
+    for user_id in user_ids:
+        seen_items = set(train_df[train_df['user_id'] == user_id]['book_id'])
+        candidate_items = [iid for iid in item_ids if iid not in seen_items]
+        preds = []
+        for book_id in candidate_items:
+            try:
+                pred = model.predict(user_id, book_id)
+                preds.append((book_id, pred.est))
+            except Exception:
+                continue
+        preds.sort(key=lambda x: -x[1])
+        top_n[user_id] = [bid for bid, _ in preds[:20]]  # up to 20 for all K
+    ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+    ranking_metrics = evaluate_ranking_metrics(top_n, ground_truth, k_list=[5, 10, 20])
+    logger.info(f"SVD baseline ranking metrics: {ranking_metrics}")
 
     # 5. Return Metrics
-    # TODO: Replace the following placeholders with actual computed values
-    test_rmse = None  # Replace with actual RMSE computation
-    test_mae = None   # Replace with actual MAE computation
     metrics = {
-        "rmse": test_rmse,
-        "mae": test_mae,
-        "ndcg@10": ndcg_score,
+        "rmse": rmse_score,
+        "mae": mae_score,
+        **ranking_metrics,
     }
     logger.info(f"SVD metrics: {metrics}")
     logger.success("SVD baseline finished successfully.")
@@ -2246,7 +2259,7 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
 
 ### `baselines/run_all_baselines.py`
 
-**File size:** 5,428 bytes
+**File size:** 6,646 bytes
 
 ```python
 import json
@@ -2295,63 +2308,98 @@ def main():
         data_manager._return_connection(conn)
     logger.success("Metadata loaded.")
 
-    logger.info("Loading train/test data for fold 0...")
-    # Use 'full_train' to get combined training and validation data against the test set.
-    train_df, test_df = data_manager.get_fold_data(fold_idx=0, split_type="full_train")
+    logger.info("Loading CV fold summary...")
+    fold_summary = data_manager.get_fold_summary()
+    n_folds = fold_summary.get("n_folds", 0)
+    if n_folds == 0:
+        logger.error("No CV folds found. Exiting.")
+        return
 
-    # Dictionary to store results from all baselines
-    all_results = {}
-
-    # 2. Run Featuretools baseline (now uses LightFM for evaluation)
-    logger.info("--- Running Featuretools Baseline (LightFM evaluation) ---")
     writer = SummaryWriter("reports/tensorboard_baselines")
-    try:
-        featuretools_metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
-        all_results["featuretools_lightfm"] = {
-            "status": "success",
-            "metrics": featuretools_metrics,
-        }
-        logger.success(f"Featuretools+LightFM baseline completed. Metrics: {featuretools_metrics}")
-        if "precision_at_10" in featuretools_metrics:
-            writer.add_scalar("featuretools_lightfm/precision_at_10", featuretools_metrics["precision_at_10"])
-        if "n_clusters" in featuretools_metrics:
-            writer.add_scalar("featuretools_lightfm/n_clusters", featuretools_metrics["n_clusters"])
-    except Exception as e:
-        logger.error(f"Featuretools+LightFM baseline failed: {e}")
-        all_results["featuretools_lightfm"] = {"status": "failure", "error": str(e)}
+    per_fold_results = {"featuretools_lightfm": [], "svd": [], "popularity": [], "deepfm": []}
+    errors = {"featuretools_lightfm": [], "svd": [], "popularity": [], "deepfm": []}
 
-    # 3. Run SVD baseline (full dataset)
-    logger.info("--- Running SVD Baseline ---")
-    try:
-        svd_results = run_svd_baseline(train_df, test_df)
-        all_results["svd"] = {"status": "success", "metrics": svd_results}
-        logger.success(f"SVD baseline completed. Metrics: {svd_results}")
-        if "rmse" in svd_results:
-            writer.add_scalar("svd/RMSE", svd_results["rmse"])
-    except Exception as e:
-        logger.error(f"SVD baseline failed: {e}")
-        all_results["svd"] = {"status": "failure", "error": str(e)}
+    from src.baselines.recommender.popularity_baseline import run_popularity_baseline
 
-    # 5. Run Popularity baseline (to be implemented)
-    logger.info("--- Running Popularity Baseline ---")
-    try:
-        from src.baselines.recommender.popularity_baseline import run_popularity_baseline
-        popularity_results = run_popularity_baseline(train_df, test_df)
-        all_results["popularity"] = {"status": "success", "metrics": popularity_results}
-        logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
-    except Exception as e:
-        logger.error(f"Popularity baseline failed: {e}")
-        all_results["popularity"] = {"status": "failure", "error": str(e)}
+    for fold_idx in range(n_folds):
+        logger.info(f"--- Processing Fold {fold_idx+1}/{n_folds} ---")
+        train_df, test_df = data_manager.get_fold_data(fold_idx=fold_idx, split_type="full_train")
 
-    # 4. Run DeepFM baseline
-    logger.info("--- Running DeepFM Baseline ---")
-    try:
-        deepfm_results = run_deepfm_baseline(train_df, test_df)
-        all_results["deepfm"] = {"status": "success", "metrics": deepfm_results}
-        logger.success(f"DeepFM baseline completed. Metrics: {deepfm_results}")
-    except Exception as e:
-        logger.error(f"DeepFM baseline failed: {e}")
-        all_results["deepfm"] = {"status": "failure", "error": str(e)}
+        # Featuretools Baseline
+        try:
+            metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
+            per_fold_results["featuretools_lightfm"].append(metrics)
+            logger.success(f"Featuretools+LightFM baseline completed. Metrics: {metrics}")
+            if "precision_at_10" in metrics:
+                writer.add_scalar("featuretools_lightfm/precision_at_10", metrics["precision_at_10"], fold_idx)
+            if "n_clusters" in metrics:
+                writer.add_scalar("featuretools_lightfm/n_clusters", metrics["n_clusters"], fold_idx)
+        except Exception as e:
+            logger.error(f"Featuretools+LightFM baseline failed on fold {fold_idx}: {e}")
+            errors["featuretools_lightfm"].append(str(e))
+            per_fold_results["featuretools_lightfm"].append(None)
+
+        # SVD Baseline
+        try:
+            metrics = run_svd_baseline(train_df, test_df)
+            per_fold_results["svd"].append(metrics)
+            logger.success(f"SVD baseline completed. Metrics: {metrics}")
+            if "rmse" in metrics:
+                writer.add_scalar("svd/RMSE", metrics["rmse"], fold_idx)
+        except Exception as e:
+            logger.error(f"SVD baseline failed on fold {fold_idx}: {e}")
+            errors["svd"].append(str(e))
+            per_fold_results["svd"].append(None)
+
+        # Popularity Baseline
+        try:
+            metrics = run_popularity_baseline(train_df, test_df)
+            per_fold_results["popularity"].append(metrics)
+            logger.success(f"Popularity baseline completed. Metrics: {metrics}")
+        except Exception as e:
+            logger.error(f"Popularity baseline failed on fold {fold_idx}: {e}")
+            errors["popularity"].append(str(e))
+            per_fold_results["popularity"].append(None)
+
+        # DeepFM Baseline
+        try:
+            metrics = run_deepfm_baseline(train_df, test_df)
+            per_fold_results["deepfm"].append(metrics)
+            logger.success(f"DeepFM baseline completed. Metrics: {metrics}")
+        except Exception as e:
+            logger.error(f"DeepFM baseline failed on fold {fold_idx}: {e}")
+            errors["deepfm"].append(str(e))
+            per_fold_results["deepfm"].append(None)
+
+    # Aggregate results: mean and stddev for each metric and baseline
+    import numpy as np
+    aggregate_results = {}
+    for baseline, results in per_fold_results.items():
+        metrics_by_key = {}
+        for fold_result in results:
+            if fold_result is None:
+                continue
+            for k, v in fold_result.items():
+                if v is None:
+                    continue
+                metrics_by_key.setdefault(k, []).append(v)
+        baseline_agg = {}
+        for k, v_list in metrics_by_key.items():
+            arr = np.array(v_list)
+            baseline_agg[f"{k}_mean"] = float(np.mean(arr))
+            baseline_agg[f"{k}_std"] = float(np.std(arr))
+            # Log mean to TensorBoard
+            writer.add_scalar(f"{baseline}/{k}_mean", baseline_agg[f"{k}_mean"], 0)
+            writer.add_scalar(f"{baseline}/{k}_std", baseline_agg[f"{k}_std"], 0)
+        aggregate_results[baseline] = baseline_agg
+        if errors[baseline]:
+            aggregate_results[baseline]["errors"] = errors[baseline]
+
+    all_results = {
+        "per_fold": per_fold_results,
+        "aggregate": aggregate_results,
+        "n_folds": n_folds
+    }
 
     # 5. Save results to a JSON file
     try:
@@ -2484,7 +2532,7 @@ INSIGHT_MAX_CONSECUTIVE_AUTO_REPLY = 5
 
 ### `config/tensorboard.py`
 
-**File size:** 1,390 bytes
+**File size:** 1,436 bytes
 
 ```python
 import subprocess
@@ -2497,10 +2545,9 @@ from src.utils.run_utils import get_run_tensorboard_dir
 
 
 def start_tensorboard() -> None:
-    """Start TensorBoard in the background."""
-    log_dir = get_run_tensorboard_dir()
+    """Start TensorBoard in the background for a global (non-run-specific) log directory."""
+    log_dir = "runtime/tensorboard_global"
     try:
-        # Start TensorBoard in the background
         subprocess.Popen(
             ["tensorboard", "--logdir", str(log_dir), "--port", "6006"],
             stdout=subprocess.DEVNULL,
@@ -2511,8 +2558,8 @@ def start_tensorboard() -> None:
 
 
 def get_tensorboard_writer() -> SummaryWriter:
-    """Get a TensorBoard writer for the current run."""
-    log_dir = get_run_tensorboard_dir()
+    """Get a TensorBoard writer for the global (non-run-specific) TensorBoard log directory."""
+    log_dir = "runtime/tensorboard_global"
     return SummaryWriter(log_dir=str(log_dir))
 
 
@@ -2538,7 +2585,7 @@ def log_hyperparams(writer: SummaryWriter, hparams: dict) -> None:
 
 ### `core/database.py`
 
-**File size:** 10,655 bytes
+**File size:** 10,643 bytes
 
 ```python
 import logging
@@ -2640,7 +2687,7 @@ def get_db_schema_string() -> str:
         # Connect in-process to an in-memory database to avoid file locks
         with duckdb.connect() as conn:
             # Attach the main database file in READ_ONLY mode, giving it an alias 'db'
-            conn.execute(f"ATTACH '{db_path}' AS db (READ_ONLY);")
+            conn.execute(f"ATTACH '{db_path}' AS db;")
 
             # Query the information_schema to find tables in the attached database's 'main' schema
             tables_df = conn.execute(
@@ -3816,6 +3863,39 @@ def cluster_users_kmeans(X: pd.DataFrame, n_clusters: int = 5, random_state: int
     return dict(zip(X.index, labels))
 ```
 
+### `evaluation/ranking_metrics.py`
+
+**File size:** 1,056 bytes
+
+```python
+# ranking_metrics.py: Unified ranking metric evaluation using RankerEval
+
+from rankereval.metrics import ndcg, precision, recall
+import numpy as np
+
+
+def evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20]):
+    """
+    Evaluate NDCG, Precision@K, and Recall@K using RankerEval.
+    Args:
+        recommendations: dict {user_id: [item_id1, item_id2, ...]} (ranked list)
+        ground_truth: dict {user_id: [item_id1, item_id2, ...]} (relevant items)
+        k_list: list of cutoff values for metrics
+    Returns:
+        metrics: dict with keys like 'ndcg@10', 'precision@5', etc.
+    """
+    # Convert to RankerEval format
+    user_ids = sorted(set(recommendations) & set(ground_truth))
+    recs = [recommendations[u] for u in user_ids]
+    gts = [ground_truth[u] for u in user_ids]
+    metrics = {}
+    for k in k_list:
+        metrics[f'ndcg@{k}'] = float(ndcg(recs, gts, k=k))
+        metrics[f'precision@{k}'] = float(precision(recs, gts, k=k))
+        metrics[f'recall@{k}'] = float(recall(recs, gts, k=k))
+    return metrics
+```
+
 ### `evaluation/scoring.py`
 
 **File size:** 3,684 bytes
@@ -4351,7 +4431,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 31,724 bytes
+**File size:** 31,509 bytes
 
 ```python
 import json
@@ -4370,14 +4450,13 @@ from loguru import logger
 
 import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
-from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
+from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
 from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
-from src.utils.logging_utils import log_tool_call
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
@@ -4385,14 +4464,15 @@ from src.utils.tools import (
     execute_python,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
+    get_save_candidate_features_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_candidate_features_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
 scripts.setup_views.setup_views()
+
 
 # Load environment variables from .env file at the beginning.
 load_dotenv()
@@ -4590,7 +4670,7 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
         if session_state and session_state.get_final_hypotheses():
             logger.info("Hypotheses have been finalized. Terminating discovery loop.")
-            return True, "TERMINATE"
+            return True, "TERMINATE"  # Do NOT call super().run_chat if terminating
 
         # --- CONTEXT INJECTION: Add context on first round ---
         if self.round_count == 1 and session_state:
@@ -4832,17 +4912,11 @@ def run_strategy_loop(
     feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # --- Tool Registration with Logging ---
-    # --- Tool Registration with Logging ---
-    # Wrap each tool with the logging decorator before registration
-    logged_save_candidate_features = log_tool_call(get_save_candidate_features_tool(session_state), session_state)
-    logged_execute_python = log_tool_call(execute_python, session_state)
-
-    # The user proxy needs access to the session_state to save features.
+    # --- Tool Registration ---
     user_proxy.register_function(
         function_map={
-            "save_candidate_features": logged_save_candidate_features,
-            "execute_python": logged_execute_python,
+            "save_candidate_features": get_save_candidate_features_tool(session_state),
+            "execute_python": execute_python,
         }
     )
 
@@ -4878,8 +4952,6 @@ def run_strategy_loop(
 The StrategistAgent and EngineerAgent will then review your work. Begin now.
 """
 
-    logger.info("Reopening database connection before strategy loop...")
-    session_state.reconnect()
 
     # --- NEW: Ensure DB connection is refreshed before strategy loop ---
     logger.info("Refreshing DB connection before strategy loop to ensure all views are visible...")
@@ -4896,7 +4968,6 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
         hypotheses = session_state.get_final_hypotheses()
         insights = getattr(session_state, "insights", [])
         logger.info(f"Exploration completed after {manager.round_count} rounds with {len(insights)} insights")
-
         # --- Feature Realization Step ---
         if features:
             feature_realization_agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
@@ -4924,17 +4995,27 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
     return report
 
 
-def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
     optimization_report = "Optimization step did not run."
     """
-    Main function to run the VULCAN agent orchestration.
-    Now supports epoch-based execution. Each epoch runs the full pipeline in fast_mode (subsampled data).
-    After all epochs, a final full-data optimization and evaluation is performed.
+    Main orchestration function for the VULCAN pipeline.
     """
+    # --- Set up logging and run context ---
+    
+    try:
+        run_id, run_dir = init_run()
+    except Exception as e:
+        logger.error(f"Failed to initialize run context: {e}")
+        sys.exit(1)
+    logger.info(f"Starting VULCAN run: {run_id}")
 
-    run_id, run_dir = init_run()
-    logger.info(f"Starting VULCAN Run ID: {run_id}")
     setup_logging()
+    
+    # --- Start TensorBoard for experiment tracking (after run context is initialized) ---
+    from src.config.tensorboard import start_tensorboard
+    logger.info("Launching TensorBoard server on port 6006 with global logdir: runtime/tensorboard_global")
+    start_tensorboard()
+
     session_state = SessionState(run_dir)
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
 
@@ -6414,7 +6495,7 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 30,272 bytes
+**File size:** 30,273 bytes
 
 ```python
 # -*- coding: utf-8 -*-
@@ -7071,7 +7152,7 @@ def get_save_candidate_features_tool(session_state):
             logger.error(error_message)
             return error_message
         # Gather schema info
-        with duckdb.connect(database=str(db_path), read_only=True) as conn:
+        with duckdb.connect(database=str(db_path), read_only=False) as conn:
             tables = set(row[0] for row in conn.execute("SHOW TABLES").fetchall())
             table_columns = {
                 t: set(row[1] for row in conn.execute(f"PRAGMA table_info('{t}')").fetchall())
@@ -7159,9 +7240,9 @@ def log_tool_call(tool_func, session_state, tool_name=None):
 
 ## 📊 Summary
 
-- **Total files processed:** 44
+- **Total files processed:** 45
 - **Directory:** `src`
-- **Generated:** 2025-06-16 19:28:56
+- **Generated:** 2025-06-17 00:43:28
 
 ---
 

@@ -1,5 +1,5 @@
 import pandas as pd
-from .ranking_utils import calculate_ndcg
+from src.evaluation.ranking_metrics import evaluate_ranking_metrics
 
 def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n: int = 10) -> dict:
     """
@@ -17,12 +17,9 @@ def run_popularity_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, top_n
     user_ids = test_df['user_id'].unique()
     recommendations = {user_id: pop_books for user_id in user_ids}
 
-    # Prepare ground truth for NDCG
-    ground_truth = (
-        test_df.groupby('user_id')['book_id'].apply(list).to_dict()
-    )
-    ndcg = calculate_ndcg(recommendations, ground_truth, k=top_n)
-    return {
-        'ndcg@10': ndcg,
-        'top_n_books': pop_books
-    }
+    # Prepare ground truth for ranking metrics
+    ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
+    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+    result = dict(ranking_metrics)
+    result['top_n_books'] = pop_books
+    return result

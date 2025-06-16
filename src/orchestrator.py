@@ -559,7 +559,7 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
     return report
 
 
-def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
+def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
     optimization_report = "Optimization step did not run."
     """
     Main orchestration function for the VULCAN pipeline.

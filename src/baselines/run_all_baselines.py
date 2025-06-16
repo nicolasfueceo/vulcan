@@ -44,63 +44,98 @@ def main():
         data_manager._return_connection(conn)
     logger.success("Metadata loaded.")
 
-    logger.info("Loading train/test data for fold 0...")
-    # Use 'full_train' to get combined training and validation data against the test set.
-    train_df, test_df = data_manager.get_fold_data(fold_idx=0, split_type="full_train")
+    logger.info("Loading CV fold summary...")
+    fold_summary = data_manager.get_fold_summary()
+    n_folds = fold_summary.get("n_folds", 0)
+    if n_folds == 0:
+        logger.error("No CV folds found. Exiting.")
+        return
 
-    # Dictionary to store results from all baselines
-    all_results = {}
-
-    # 2. Run Featuretools baseline (now uses LightFM for evaluation)
-    logger.info("--- Running Featuretools Baseline (LightFM evaluation) ---")
     writer = SummaryWriter("reports/tensorboard_baselines")
-    try:
-        featuretools_metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
-        all_results["featuretools_lightfm"] = {
-            "status": "success",
-            "metrics": featuretools_metrics,
-        }
-        logger.success(f"Featuretools+LightFM baseline completed. Metrics: {featuretools_metrics}")
-        if "precision_at_10" in featuretools_metrics:
-            writer.add_scalar("featuretools_lightfm/precision_at_10", featuretools_metrics["precision_at_10"])
-        if "n_clusters" in featuretools_metrics:
-            writer.add_scalar("featuretools_lightfm/n_clusters", featuretools_metrics["n_clusters"])
-    except Exception as e:
-        logger.error(f"Featuretools+LightFM baseline failed: {e}")
-        all_results["featuretools_lightfm"] = {"status": "failure", "error": str(e)}
+    per_fold_results = {"featuretools_lightfm": [], "svd": [], "popularity": [], "deepfm": []}
+    errors = {"featuretools_lightfm": [], "svd": [], "popularity": [], "deepfm": []}
 
-    # 3. Run SVD baseline (full dataset)
-    logger.info("--- Running SVD Baseline ---")
-    try:
-        svd_results = run_svd_baseline(train_df, test_df)
-        all_results["svd"] = {"status": "success", "metrics": svd_results}
-        logger.success(f"SVD baseline completed. Metrics: {svd_results}")
-        if "rmse" in svd_results:
-            writer.add_scalar("svd/RMSE", svd_results["rmse"])
-    except Exception as e:
-        logger.error(f"SVD baseline failed: {e}")
-        all_results["svd"] = {"status": "failure", "error": str(e)}
+    from src.baselines.recommender.popularity_baseline import run_popularity_baseline
 
-    # 5. Run Popularity baseline (to be implemented)
-    logger.info("--- Running Popularity Baseline ---")
-    try:
-        from src.baselines.recommender.popularity_baseline import run_popularity_baseline
-        popularity_results = run_popularity_baseline(train_df, test_df)
-        all_results["popularity"] = {"status": "success", "metrics": popularity_results}
-        logger.success(f"Popularity baseline completed. Metrics: {popularity_results}")
-    except Exception as e:
-        logger.error(f"Popularity baseline failed: {e}")
-        all_results["popularity"] = {"status": "failure", "error": str(e)}
+    for fold_idx in range(n_folds):
+        logger.info(f"--- Processing Fold {fold_idx+1}/{n_folds} ---")
+        train_df, test_df = data_manager.get_fold_data(fold_idx=fold_idx, split_type="full_train")
 
-    # 4. Run DeepFM baseline
-    logger.info("--- Running DeepFM Baseline ---")
-    try:
-        deepfm_results = run_deepfm_baseline(train_df, test_df)
-        all_results["deepfm"] = {"status": "success", "metrics": deepfm_results}
-        logger.success(f"DeepFM baseline completed. Metrics: {deepfm_results}")
-    except Exception as e:
-        logger.error(f"DeepFM baseline failed: {e}")
-        all_results["deepfm"] = {"status": "failure", "error": str(e)}
+        # Featuretools Baseline
+        try:
+            metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
+            per_fold_results["featuretools_lightfm"].append(metrics)
+            logger.success(f"Featuretools+LightFM baseline completed. Metrics: {metrics}")
+            if "precision_at_10" in metrics:
+                writer.add_scalar("featuretools_lightfm/precision_at_10", metrics["precision_at_10"], fold_idx)
+            if "n_clusters" in metrics:
+                writer.add_scalar("featuretools_lightfm/n_clusters", metrics["n_clusters"], fold_idx)
+        except Exception as e:
+            logger.error(f"Featuretools+LightFM baseline failed on fold {fold_idx}: {e}")
+            errors["featuretools_lightfm"].append(str(e))
+            per_fold_results["featuretools_lightfm"].append(None)
+
+        # SVD Baseline
+        try:
+            metrics = run_svd_baseline(train_df, test_df)
+            per_fold_results["svd"].append(metrics)
+            logger.success(f"SVD baseline completed. Metrics: {metrics}")
+            if "rmse" in metrics:
+                writer.add_scalar("svd/RMSE", metrics["rmse"], fold_idx)
+        except Exception as e:
+            logger.error(f"SVD baseline failed on fold {fold_idx}: {e}")
+            errors["svd"].append(str(e))
+            per_fold_results["svd"].append(None)
+
+        # Popularity Baseline
+        try:
+            metrics = run_popularity_baseline(train_df, test_df)
+            per_fold_results["popularity"].append(metrics)
+            logger.success(f"Popularity baseline completed. Metrics: {metrics}")
+        except Exception as e:
+            logger.error(f"Popularity baseline failed on fold {fold_idx}: {e}")
+            errors["popularity"].append(str(e))
+            per_fold_results["popularity"].append(None)
+
+        # DeepFM Baseline
+        try:
+            metrics = run_deepfm_baseline(train_df, test_df)
+            per_fold_results["deepfm"].append(metrics)
+            logger.success(f"DeepFM baseline completed. Metrics: {metrics}")
+        except Exception as e:
+            logger.error(f"DeepFM baseline failed on fold {fold_idx}: {e}")
+            errors["deepfm"].append(str(e))
+            per_fold_results["deepfm"].append(None)
+
+    # Aggregate results: mean and stddev for each metric and baseline
+    import numpy as np
+    aggregate_results = {}
+    for baseline, results in per_fold_results.items():
+        metrics_by_key = {}
+        for fold_result in results:
+            if fold_result is None:
+                continue
+            for k, v in fold_result.items():
+                if v is None:
+                    continue
+                metrics_by_key.setdefault(k, []).append(v)
+        baseline_agg = {}
+        for k, v_list in metrics_by_key.items():
+            arr = np.array(v_list)
+            baseline_agg[f"{k}_mean"] = float(np.mean(arr))
+            baseline_agg[f"{k}_std"] = float(np.std(arr))
+            # Log mean to TensorBoard
+            writer.add_scalar(f"{baseline}/{k}_mean", baseline_agg[f"{k}_mean"], 0)
+            writer.add_scalar(f"{baseline}/{k}_std", baseline_agg[f"{k}_std"], 0)
+        aggregate_results[baseline] = baseline_agg
+        if errors[baseline]:
+            aggregate_results[baseline]["errors"] = errors[baseline]
+
+    all_results = {
+        "per_fold": per_fold_results,
+        "aggregate": aggregate_results,
+        "n_folds": n_folds
+    }
 
     # 5. Save results to a JSON file
     try:
