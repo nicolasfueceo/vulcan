@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import base64
 import json
 import logging
 import os
@@ -7,7 +8,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import duckdb
 import matplotlib.pyplot as plt
-from openai import BadRequestError
+import pandas as pd
+from openai import BadRequestError, OpenAI
 
 from src.config.settings import DB_PATH
 from src.schemas.models import Hypothesis, Insight
@@ -24,7 +26,6 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
     Returns a markdown-formatted report.
     """
     import numpy as np
-    import pandas as pd
 
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
@@ -86,11 +87,10 @@ def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
 
 def run_sql_query(query: str) -> str:
     """
-    Executes a read-only SQL query against the database and returns the result as a markdown string.
-    This tool should be used for all SELECT queries.
+    Executes an SQL query against the database and returns the result as a markdown .
     """
     try:
-        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+        with duckdb.connect(database=str(DB_PATH), read_only=False) as conn:
             df = conn.execute(query).fetchdf()
             if df.empty:
                 return "Query executed successfully, but returned no results."
@@ -183,11 +183,13 @@ def create_plot(
         return {"error": f"Could not create plot. {e}"}
 
 
-def create_analysis_view(view_name: str, sql_query: str, rationale: str):
+def create_analysis_view(view_name: str, sql_query: str, rationale: str, session_state=None):
     """
     Creates a permanent view for analysis. It opens a temporary write-enabled
     connection to do so, avoiding holding a lock.
+    Logs all arguments, versioning, success, and failure.
     """
+    logger.info(f"[TOOL CALL] create_analysis_view called with arguments: view_name={view_name}, sql_query={sql_query}, rationale={rationale}, session_state_present={session_state is not None}")
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
             # Check if view exists to handle versioning
@@ -200,23 +202,19 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str):
                 version += 1
 
             if actual_name != view_name:
-                logger.info(
-                    "View '%s' already exists. Creating '%s' instead.",
-                    view_name,
-                    actual_name,
-                )
+                logger.info(f"[TOOL INFO] View '{view_name}' already exists. Creating '{actual_name}' instead.")
 
             # Create the view
             full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
             write_conn.execute(full_sql)
-
-            # ... (rest of the metadata tracking is the same)
-
+            logger.info(f"[TOOL SUCCESS] Created view {actual_name} with query: {sql_query}")
+            if session_state is not None and hasattr(session_state, 'log_view_creation'):
+                session_state.log_view_creation(actual_name, sql_query, rationale)
             print(f"VIEW_CREATED:{actual_name}")
             return f"Successfully created view: {actual_name}"
     except Exception as e:
-        logger.error(f"Failed to create view '{view_name}': {e}")
-        return f"ERROR: Could not create view '{view_name}'. Reason: {e}"
+        logger.error(f"[TOOL ERROR] Failed to create view {view_name}: {e}")
+        return f"ERROR: Failed to create view '{view_name}'. Reason: {e}"
 
 
 def cleanup_analysis_views(run_dir: Path):
@@ -350,39 +348,66 @@ def get_add_to_central_memory_tool(session_state):
 
 
 def get_finalize_hypotheses_tool(session_state):
-    """Returns a function that can be used as an AutoGen tool to finalize hypotheses."""
+    """
+    Returns a function that can be used as an AutoGen tool to finalize hypotheses.
+    
+    TOOL DESCRIPTION FOR AGENTS:
+    ------------------------------------------------------------
+    finalize_hypotheses(hypotheses_data: list) -> str
+    
+    This tool is used to submit the final list of hypotheses for the current discovery round. Each hypothesis MUST be a dictionary with the following structure:
+        {
+            "summary": <str, required, non-empty>,
+            "rationale": <str, required, non-empty>,
+            "id": <str, optional, will be auto-generated if omitted>
+        }
+    - The "summary" is a concise, one-sentence statement of the hypothesis.
+    - The "rationale" is a clear explanation of why this hypothesis is useful and worth testing.
+    - The "id" field is optional; if not provided, it will be auto-generated.
+    - All fields must be strings. Empty or missing required fields will cause the tool to fail.
+    - The tool will return an explicit error message if any item does not match the schema, or if any required field is missing or invalid.
+    - If your call fails, read the error message carefully and correct your output to match the schema contract exactly.
+    
+    Example valid call:
+        finalize_hypotheses([
+            {"summary": "Users who review more books tend to give higher ratings.", "rationale": "Observed a positive correlation in the sample."},
+            {"summary": "Standalone books are rated higher than series books.", "rationale": "Series books have more variance and lower means in ratings."}
+        ])
+    ------------------------------------------------------------
+    """
 
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
-        Finalizes the list of vetted hypotheses after validation.
+        Validates and finalizes the list of vetted hypotheses. Each item in the list MUST
+        conform to the Hypothesis schema (e.g., {"summary": "...", "rationale": "..."}).
+        - If any item is missing required fields or has an empty value, the tool will fail with a detailed error message.
+        - If the call fails, carefully read the error and correct your output to match the schema contract.
         """
-        # Step 1: Instantiate Hypothesis models (assigns IDs, validates fields)
+        logger.info(f"[TOOL CALL] finalize_hypotheses called with {len(hypotheses_data)} items.")
+        validated_hypotheses = []
+        for i, h_data in enumerate(hypotheses_data):
+            try:
+                hypothesis = Hypothesis(**h_data)
+                validated_hypotheses.append(hypothesis)
+            except Exception as e:
+                error_message = (
+                    f"[SCHEMA VALIDATION ERROR] Hypothesis at index {i} failed validation.\n"
+                    f"Input: {h_data}\n"
+                    f"Error: {e}\n"
+                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary' and 'rationale'. 'id' is optional.\n"
+                    "Please correct your output to match the schema contract exactly."
+                )
+                logger.error(f"[TOOL ERROR] {error_message}")
+                return error_message
         try:
-            hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+            session_state.finalize_hypotheses(validated_hypotheses)
+            success_message = f"SUCCESS: Successfully validated and saved {len(validated_hypotheses)} hypotheses."
+            logger.info(f"[TOOL SUCCESS] {success_message}")
+            return success_message
         except Exception as e:
-            logger.error(f"Failed to instantiate Hypothesis models: {e}")
-            return f"ERROR: Failed to instantiate Hypothesis models. Reason: {e}"
-
-        # Step 2: Validate for duplicate IDs and empty rationales
-        ids = set()
-        for h in hyp_models:
-            if h.id in ids:
-                logger.error(f"Duplicate hypothesis ID found: {h.id}")
-                return f"ERROR: Hypothesis validation failed. Duplicate hypothesis ID found: {h.id}"
-            ids.add(h.id)
-            if not h.rationale:
-                logger.error(f"Hypothesis {h.id} has an empty rationale.")
-                return f"ERROR: Hypothesis validation failed. Hypothesis {h.id} has an empty rationale."
-
-        # Step 3: Save to session state
-        try:
-            session_state.finalize_hypotheses(hyp_models)
-            logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
-            return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
-        except Exception as e:
-            logger.error(f"Failed to save hypotheses after validation: {e}")
-            return f"ERROR: Failed to save hypotheses after validation. Reason: {e}"
-
+            error_message = f"[INTERNAL ERROR] Failed to save hypotheses after validation. Reason: {e}"
+            logger.error(f"[TOOL ERROR] {error_message}")
+            return error_message
     return finalize_hypotheses
 
 
@@ -415,33 +440,11 @@ def validate_hypotheses(hypotheses_data: List[Dict], insight_report: str) -> Tup
     return True, "All hypotheses are valid."
 
 
-def vision_tool(image_path: str, prompt: str) -> str:
+def vision_tool(image_path: str, prompt: str) -> str:  # type: ignore[misc] # Known phantom lint # type: ignore[misc] # Known phantom lint
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
-    import base64
-
-
-def get_save_features_tool(session_state):
-    """Returns a function that can be used as an AutoGen tool to save features to the session state."""
-    def save_features(features_data: list) -> str:
-        """
-        Saves a list of features (as dicts) to session_state.features.
-        """
-        try:
-            features_dict = {f.get('name', f'feature_{i}'): f for i, f in enumerate(features_data)}
-            session_state.set_state("features", features_dict)
-            logger.info(f"Saved {len(features_dict)} features to session state.")
-            return f"SUCCESS: Successfully saved {len(features_dict)} features to session state."
-        except Exception as e:
-            logger.error(f"Failed to save features: {e}")
-            return f"ERROR: Failed to save features. Reason: {e}"
-    return save_features
-    from pathlib import Path
-
-    from openai import OpenAI
-
     try:
         # Robust path resolution
-        full_path = Path(image_path)
+        full_path = Path(image_path)  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
         logger.info(
             f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})"
         )
@@ -475,7 +478,7 @@ def get_save_features_tool(session_state):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": prompt},  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
                             {
                                 "type": "image_url",
                                 "image_url": {"url": f"data:image/png;base64,{base64_image}"},
@@ -483,7 +486,7 @@ def get_save_features_tool(session_state):
                         ],
                     }
                 ],
-                max_tokens=1000,
+                max_tokens=2000,
             )
             return response.choices[0].message.content
         except BadRequestError as e:
@@ -498,13 +501,63 @@ def get_save_features_tool(session_state):
                 logger.error(error_msg)
                 return error_msg
             raise
-    except ImportError:
-        return (
-            "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
-        )
     except Exception as e:
-        logger.error("Unexpected error during image analysis: %s", e)
-        return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+        logger.error(f"An unexpected error occurred in vision_tool: {e}", exc_info=True)
+        return f"ERROR: An unexpected error occurred: {e}"
+
+
+def get_save_features_tool(session_state):
+    """Returns a function that can be used as an AutoGen tool to save features to the session state."""
+
+    def save_features(features_data: list) -> str:
+        """
+        Saves a list of features (as dicts) to session_state.features.
+        """
+        try:
+            features_dict = {f.get("name", f"feature_{i}"): f for i, f in enumerate(features_data)}
+            session_state.set_state("features", features_dict)
+            logger.info(f"Saved {len(features_dict)} features to session state.")
+            return f"SUCCESS: Successfully saved {len(features_dict)} features to session state."
+        except Exception as e:
+            logger.error(f"Failed to save features: {e}")
+            return f"ERROR: Failed to save features. Reason: {e}"
+
+    return save_features
+
+
+def get_save_candidate_features_tool(session_state):
+    """
+    Returns a function to save candidate features, now with schema validation.
+    """
+    from src.schemas.models import CandidateFeature
+    def save_candidate_features(candidate_features_data: list) -> str:
+        """
+        Validates and saves a list of candidate feature specifications to the session state.
+        Each feature MUST conform to the CandidateFeature schema.
+        """
+        logger.info(f"[TOOL CALL] save_candidate_features called with {len(candidate_features_data)} items.")
+        validated_features = []
+        for i, f_data in enumerate(candidate_features_data):
+            try:
+                feature = CandidateFeature(**f_data)
+                validated_features.append(feature)
+            except Exception as e:
+                error_message = (
+                    f"ERROR: CandidateFeature at index {i} (name: '{f_data.get('name', '<missing>')}') failed validation. Error: {e}. "
+                    "Please ensure all required fields are provided and correctly formatted."
+                )
+                logger.error(f"[TOOL ERROR] {error_message}")
+                return error_message
+        try:
+            session_state.set_candidate_features([f.model_dump() for f in validated_features])
+            success_message = f"SUCCESS: Successfully validated and saved {len(validated_features)} candidate features."
+            logger.info(f"[TOOL SUCCESS] {success_message}")
+            return success_message
+        except Exception as e:
+            error_message = f"ERROR: Failed to save candidate features after validation. Reason: {e}"
+            logger.error(f"[TOOL ERROR] {error_message}")
+            return error_message
+    return save_candidate_features
 
 
 def _execute_python_run_code(pipe, code, run_dir):
@@ -563,11 +616,12 @@ def _execute_python_run_code(pipe, code, run_dir):
     try:
         with contextlib.redirect_stdout(stdout):
             exec(code, local_ns, local_ns)
-        conn.close()
         pipe.send(stdout.getvalue().strip())
     except Exception as e:
         tb = traceback.format_exc()
         pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
+    finally:
+        conn.close()
 
 
 def execute_python(code: str, timeout: int = 60) -> str:

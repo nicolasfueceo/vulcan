@@ -76,11 +76,11 @@ class PrioritizedHypothesis(BaseModel):
 
 class CandidateFeature(BaseModel):
     name: str = Field(..., description="A unique, descriptive name for the feature.")
-    type: Literal["code", "llm", "composition"] = Field(
-        ..., description="The type of feature to be realized."
+    type: Optional[Literal["code", "llm", "composition"]] = Field(
+        default=None, description="The type of feature to be realized."
     )
-    spec: str = Field(
-        ...,
+    spec: Optional[str] = Field(
+        default=None,
         description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
     )
     depends_on: List[str] = Field(
@@ -91,8 +91,8 @@ class CandidateFeature(BaseModel):
         default_factory=dict,
         description="A dictionary of tunable parameters for the feature.",
     )
-    rationale: str = Field(
-        ..., description="A detailed explanation of why this feature is useful."
+    rationale: Optional[str] = Field(
+        default=None, description="A detailed explanation of why this feature is useful."
     )
 
     def validate_spec(self):

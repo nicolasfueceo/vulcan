@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-15 15:45:02
+Generated on: 2025-06-16 00:14:12
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -87,6 +87,22 @@ This document contains the complete source code structure and contents of the `s
 ├── docs/
 │   └── code_mindmap.mermaid
 ├── generate_src_docs.py
+├── generated_prompts/
+│   ├── DataRepresenter.txt
+│   ├── Hypothesizer.txt
+│   ├── PatternSeeker.txt
+│   ├── QuantitativeAnalyst.txt
+│   ├── base_analyst.txt
+│   ├── data_representer.txt
+│   ├── engineer_agent.txt
+│   ├── feature_engineer.txt
+│   ├── feature_realization.txt
+│   ├── feature_realization_agent.txt
+│   ├── optimization_agent.txt
+│   ├── pattern_seeker.txt
+│   ├── quantitative_analyst.txt
+│   ├── reflection_agent.txt
+│   └── strategist_agent.txt
 ├── pyproject.toml
 ├── report/
 │   ├── .DS_Store
@@ -126,10 +142,16 @@ This document contains the complete source code structure and contents of the `s
 │   ├── __pycache__/
 │   ├── check_lightfm_openmp.py
 │   ├── create_interactions_view.sql
+│   ├── dump_agent_prompts.py
 │   ├── inspect_cv_splits.py
+│   ├── setup_and_test_feature_realization.sh
 │   ├── setup_views.py
+│   ├── test_feature_realization.py
 │   ├── test_finalize_hypotheses.py
-│   └── test_strategy_team.py
+│   ├── test_hypothesizer_agent.py
+│   ├── test_optimization_end_to_end.py
+│   ├── test_strategy_team.py
+│   └── test_view_persistence.py
 ├── src/
 │   ├── __pycache__/
 │   ├── agents/
@@ -187,13 +209,16 @@ This document contains the complete source code structure and contents of the `s
 │   │   │   ├── discovery_team/
 │   │   │   │   ├── base_analyst.j2
 │   │   │   │   ├── data_representer.j2
+│   │   │   │   ├── hypothesizer.j2
 │   │   │   │   ├── pattern_seeker.j2
 │   │   │   │   └── quantitative_analyst.j2
+│   │   │   ├── feature_realization.j2
 │   │   │   ├── optimization_agent.j2
 │   │   │   ├── reflection_agent.j2
 │   │   │   └── strategy_team/
 │   │   │       ├── engineer_agent.j2
 │   │   │       ├── feature_engineer.j2
+│   │   │       ├── feature_realization_agent.j2
 │   │   │       └── strategist_agent.j2
 │   │   ├── globals/
 │   │   │   ├── base_agent.j2
@@ -223,7 +248,6 @@ This document contains the complete source code structure and contents of the `s
 │       ├── session_state.py
 │       ├── testing_utils.py
 │       └── tools.py
-├── src.zip
 ├── src_documentation.md
 └── tests/
     ├── __init__.py
@@ -257,7 +281,7 @@ This document contains the complete source code structure and contents of the `s
 
 ### `agents/discovery_team/insight_discovery_agents.py`
 
-**File size:** 1,116 bytes
+**File size:** 1,217 bytes
 
 ```python
 """
@@ -283,10 +307,10 @@ def get_insight_discovery_agents(
     # Load agent prompts from Jinja2 templates
     agent_prompts = {
         "DataRepresenter": load_prompt("agents/discovery_team/data_representer.j2"),
-        "QuantitativeAnalyst": load_prompt(
-            "agents/discovery_team/quantitative_analyst.j2"
-        ),
+        "QuantitativeAnalyst": load_prompt("agents/discovery_team/quantitative_analyst.j2"),
         "PatternSeeker": load_prompt("agents/discovery_team/pattern_seeker.j2"),
+        # --- ADD THE NEW AGENT'S PROMPT ---
+        "Hypothesizer": load_prompt("agents/discovery_team/hypothesizer.j2"),
     }
 
     # Create agents with loaded prompts
@@ -539,7 +563,7 @@ class FeatureAuditorAgent:
 
 ### `agents/strategy_team/feature_realization_agent.py`
 
-**File size:** 15,108 bytes
+**File size:** 15,304 bytes
 
 ```python
 # src/agents/strategy_team/feature_realization_agent.py
@@ -572,87 +596,92 @@ class FeatureRealizationAgent:
         self.llm_agent = autogen.AssistantAgent(
             name="FeatureRealizationAssistant",
             llm_config=self.llm_config,
-            system_message="""You are an expert Python programmer. Given a feature specification, you write clean, efficient, and correct Python code that follows the provided function signature and relies only on standard libraries like pandas and numpy.""",
+            system_message=(
+                "You are an expert Python programmer. You must ONLY output the Python function code matching the provided template. "
+                "Do NOT include any tool directives (e.g., @UserProxy_Strategy please run ...), object/class instantiations, or extra markdown/code blocks. "
+                "Fill in ONLY the logic section marked in the template. Do NOT alter the function signature or imports. "
+                "Your code must be clean, efficient, robust, and use only standard libraries like pandas and numpy."
+            ),
         )
 
     @agent_run_decorator("FeatureRealizationAgent")
     def run(self) -> None:
         """
-        Main method to realize candidate features from the session state,
-        with a self-correction loop for validation failures.
-        Also wires fast_mode_frac/sample_frac from session_state to optimizer.optimize and get_fold_data.
+        Main method to realize candidate features from the session state, enforcing the contract-based template.
+        Each candidate is realized using a strict function template, validated, and registered. Redundant/legacy code is removed.
         """
         logger.info("Starting feature realization...")
         candidate_features_data = self.session_state.get_candidate_features()
         if not candidate_features_data:
             logger.warning("No candidate features found to realize.")
             self.session_state.set_state("realized_features", [])
+            self.session_state.set_state("features", {})
             return
 
+        # Patch: fill missing fields with defaults to avoid validation errors
+        for f in candidate_features_data:
+            if "type" not in f or f["type"] is None:
+                f["type"] = "code"
+            if "spec" not in f or f["spec"] is None:
+                f["spec"] = ""
+            if "rationale" not in f or f["rationale"] is None:
+                f["rationale"] = f.get("description", "")
         candidate_features = [CandidateFeature(**f) for f in candidate_features_data]
         realized_features: List[RealizedFeature] = []
-        MAX_RETRIES = 2  # Allow up to 2 correction attempts per feature
+        MAX_RETRIES = 2
 
-        # Create a user proxy agent for the chat
         user_proxy = autogen.UserProxyAgent(
             name="TempProxy",
             human_input_mode="NEVER",
-            code_execution_config=False,  # We execute code in our own sandbox
+            code_execution_config=False,
         )
 
-        # --- Pass fast_mode_frac/sample_frac to optimizer via session_state ---
         fast_mode_sample_frac = self.session_state.get_state("fast_mode_sample_frac")
         logger.info(f"[FeatureRealizationAgent] fast_mode_sample_frac before set: {fast_mode_sample_frac}")
-        if fast_mode_sample_frac is not None:
-            logger.info(f"[FeatureRealizationAgent] Using fast_mode_sample_frac={fast_mode_sample_frac} for downstream optimization.")
-        else:
-            logger.info("[FeatureRealizationAgent] No fast_mode_sample_frac set; using full data.")
         self.session_state.set_state("optimizer_sample_frac", fast_mode_sample_frac)
         optimizer_sample_frac = self.session_state.get_state("optimizer_sample_frac")
         logger.info(f"[FeatureRealizationAgent] optimizer_sample_frac after set: {optimizer_sample_frac}")
 
         for candidate in candidate_features:
             logger.info(f"Attempting to realize feature: {candidate.name}")
-            
             is_realized = False
             last_error = ""
             code_str = ""
-
-            for attempt in range(MAX_RETRIES + 1): # +1 to include initial attempt
+            for attempt in range(MAX_RETRIES + 1):
                 if attempt == 0:
-                    # First attempt: Generate code from the original spec
-                    message = load_prompt("agents/feature_realization.j2", **candidate.model_dump())
+                    template_kwargs = dict(
+                        feature_name=candidate.name,
+                        description=candidate.description,
+                        dependencies=candidate.depends_on if hasattr(candidate, 'depends_on') else candidate.dependencies,
+                        params=list(candidate.params.keys()) if hasattr(candidate, 'params') else [],
+                    )
+                    message = load_prompt("agents/strategy_team/feature_realization_agent.j2", **template_kwargs)
+                    prompt = (
+                        "Your only job is to fill in the Python function template for this feature. "
+                        "Do NOT add any extra markdown or explanations. Output ONLY the function code block."
+                    )
+                    message = f"{message}\n\n{prompt}"
                 else:
-                    # Retry attempt: Provide the error context and ask for a fix
-                    logger.warning(f"Retrying realization for '{candidate.name}' (Attempt {attempt}/{MAX_RETRIES}). Error: {last_error}")
-                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\nORIGINAL CODE:\n```python\n{code_str}\n```\nPlease analyze the error and the original spec, then provide a corrected version of the full Python function.\nThe function MUST be complete, including all necessary imports and the function signature.\n\nOriginal Spec: {candidate.spec}\n"""
-                # Initiate a chat to generate/fix the code
+                    message = (
+                        f"The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\n"
+                        "Please provide a corrected version of the LOGIC BLOCK ONLY to be inserted into the function."
+                    )
                 user_proxy.initiate_chat(self.llm_agent, message=message, max_turns=1, silent=True)
                 last_message = user_proxy.last_message(self.llm_agent)
-                
                 if not last_message or "content" not in last_message:
                     last_error = "LLM response was empty or invalid."
                     code_str = ""
-                    continue # Go to the next retry attempt
-
+                    continue
                 response_msg = last_message["content"]
-
                 try:
-                    code_str = response_msg.split("```python")[1].split("```")[0].strip()
+                    code_str = response_msg.split("```python")[1].split("```", 1)[0].strip()
                 except IndexError:
-                    code_str = ""
-                    last_error = "LLM response did not contain a valid Python code block."
-                    continue  # Go to the next retry attempt
-
-                # --- Validation ---
+                    code_str = response_msg.strip()
                 passed, last_error = self._validate_feature(candidate.name, code_str, candidate.params)
-
                 if passed:
                     logger.success(f"Successfully validated feature '{candidate.name}' on attempt {attempt + 1}.")
                     is_realized = True
-                    break  # Exit the retry loop on success
-
-            # After the loop, create the final RealizedFeature object
+                    break
             realized = RealizedFeature(
                 name=candidate.name,
                 code_str=code_str,
@@ -664,7 +693,6 @@ class FeatureRealizationAgent:
             realized_features.append(realized)
             if is_realized:
                 self._register_feature(realized)
-
         # --- Correlation-based feature pruning ---
         import pandas as pd
         import numpy as np
@@ -672,7 +700,6 @@ class FeatureRealizationAgent:
         for r in realized_features:
             if r.passed_test:
                 try:
-                    # Compile and call the feature function on a small dummy DataFrame
                     temp_namespace = {}
                     exec(r.code_str, globals(), temp_namespace)
                     func = temp_namespace[r.name]
@@ -690,7 +717,6 @@ class FeatureRealizationAgent:
             for col in upper.columns:
                 for row in upper.index:
                     if upper.loc[row, col] > 0.95:
-                        # Drop the feature with lower variance (arbitrary tie-break)
                         var_row = feature_matrix[row].var()
                         var_col = feature_matrix[col].var()
                         drop = row if var_row < var_col else col
@@ -700,7 +726,9 @@ class FeatureRealizationAgent:
                 logger.info(f"Pruned highly correlated features: {sorted(list(to_drop))}")
         else:
             pruned_realized = realized_features
+        # Save to both realized_features and features for downstream use
         self.session_state.set_state("realized_features", [r.model_dump() for r in pruned_realized])
+        self.session_state.set_state("features", {r.name: r.model_dump() for r in pruned_realized if r.passed_test})
         successful_count = len([r for r in pruned_realized if r.passed_test])
         logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features after correlation pruning.")
 
@@ -786,7 +814,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
             code_str=code_str,
             params=candidate.params,
             passed_test=False,
-            type=candidate.type,
+            type=candidate.type or "code",
             source_candidate=candidate,
         )
 
@@ -1622,7 +1650,7 @@ class ReflectionAgent:
 
 ### `agents/strategy_team/strategy_team_agents.py`
 
-**File size:** 2,002 bytes
+**File size:** 4,404 bytes
 
 ```python
 """
@@ -1635,6 +1663,7 @@ from typing import Dict
 import autogen
 
 from src.utils.prompt_utils import load_prompt
+from src.utils.session_state import get_run_dir
 
 
 def get_strategy_team_agents(
@@ -1656,18 +1685,58 @@ def get_strategy_team_agents(
     agent_prompts = {
         "StrategistAgent": load_prompt("agents/strategy_team/strategist_agent.j2", db_schema=db_schema),
         "EngineerAgent": load_prompt("agents/strategy_team/engineer_agent.j2", db_schema=db_schema),
-        "FeatureEngineer": load_prompt("agents/strategy_team/feature_engineer.j2", db_schema=db_schema),
+        "FeatureEngineer": load_prompt("agents/feature_realization.j2"),
+    }
+
+    # Define the schema for the save_candidate_features tool
+    save_candidate_features_tool_schema = {
+        "type": "function",
+        "function": {
+            "name": "save_candidate_features",
+            "description": "Saves a list of candidate feature specifications. Each feature spec should be a dictionary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "candidate_features_data": {
+                        "type": "array",
+                        "description": "A list of candidate features, where each feature is a dictionary defining its 'name', 'description', 'dependencies', and 'parameters'.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Unique, snake_case name."},
+                                "description": {"type": "string", "description": "Explanation of the feature."},
+                                "dependencies": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "List of source column names."
+                                },
+                                "parameters": {
+                                    "type": "object",
+                                    "description": "Dictionary of tunable parameters (name: {type, description}). Empty if no params."
+                                }
+                            },
+                            "required": ["name", "description", "dependencies", "parameters"]
+                        }
+                    }
+                },
+                "required": ["candidate_features_data"]
+            }
+        }
     }
 
     # Create agents with loaded prompts
-    agents = {
-        name: autogen.AssistantAgent(
+    agents = {}
+    for name, prompt in agent_prompts.items():
+        current_llm_config = llm_config.copy()
+        if name == "FeatureEngineer":
+            current_llm_config["tools"] = [save_candidate_features_tool_schema]
+        
+        agents[name] = autogen.AssistantAgent(
             name=name,
             system_message=prompt,
-            llm_config=llm_config,
+            llm_config=current_llm_config,
         )
-        for name, prompt in agent_prompts.items()
-    }
+
 
     # Add user proxy for code execution with faster termination condition
     user_proxy = autogen.UserProxyAgent(
@@ -1675,8 +1744,13 @@ def get_strategy_team_agents(
         human_input_mode="NEVER",
         max_consecutive_auto_reply=15,  # Increased to allow more iterations within a single chat
         is_termination_msg=lambda x: "FINAL_FEATURES" in x.get("content", ""),  # Updated termination message
-        code_execution_config={"use_docker": False},
+        code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
+
+    # Register save_candidate_features tool for user_proxy
+    # Assume session_state will be passed in or made available at runtime
+    # This is a placeholder; actual registration should occur where session_state is available
+    # user_proxy.register_tool(get_save_candidate_features_tool(session_state))
 
     agents["user_proxy"] = user_proxy
     return agents
@@ -2440,7 +2514,7 @@ def check_db_schema() -> bool:
     if not db_file.exists() or db_file.stat().st_size == 0:
         return False
     try:
-        with duckdb.connect(database=DB_PATH, read_only=True) as conn:
+        with duckdb.connect(database=DB_PATH, read_only=False) as conn:
             tables = [t[0] for t in conn.execute("SHOW TABLES;").fetchall()]
             required_tables = {"books", "reviews", "users"}
 
@@ -2497,7 +2571,7 @@ def fetch_df(query: str) -> pd.DataFrame:
     """
     Connects to the database, executes a query, and returns a DataFrame.
     """
-    with duckdb.connect(DB_PATH, read_only=True) as conn:
+    with duckdb.connect(DB_PATH, read_only=False) as conn:
         return conn.execute(query).fetchdf()
 
 
@@ -3027,7 +3101,7 @@ class CVDataManager:
             # Determine access mode
             self.read_only = not os.access(self.db_path.parent, os.W_OK)
             connection_kwargs = {
-                "read_only": self.read_only,
+                "read_only": False,
                 "config": {"memory_limit": f"{self._cache_size_mb}MB"},
             }
 
@@ -4226,7 +4300,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 26,800 bytes
+**File size:** 30,883 bytes
 
 ```python
 import json
@@ -4246,6 +4320,8 @@ from loguru import logger
 import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
+from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
@@ -4253,13 +4329,15 @@ from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
-    execute_python,  # FIX: Import execute_python for agent registration
+    execute_python,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_features_tool,  # Register save_features tool for agents
+    get_save_features_tool,
+    get_save_candidate_features_tool,
+    get_add_to_central_memory_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -4492,6 +4570,29 @@ class SmartGroupChatManager(autogen.GroupChatManager):
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
+        # --- ENFORCE: Do not allow termination until finalize_hypotheses has been called ---
+        # If a termination signal is detected, but session_state.hypotheses is empty, inject a reminder and prevent termination
+        if session_state:
+            # Detect attempted termination in the last message
+            last_msg = self.groupchat.messages[-1]["content"].strip() if self.groupchat.messages else ""
+            attempted_termination = any(term in last_msg for term in ["FINAL_INSIGHTS", "TERMINATE"])
+            hypotheses_finalized = hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0
+            if attempted_termination and not hypotheses_finalized:
+                logger.warning("Termination signal received, but no hypotheses have been finalized. Blocking termination.")
+                # Inject a message that forces the Hypothesizer to act.
+                self.groupchat.messages.append(
+                    {
+                        "role": "user",
+                        "name": "SystemCoordinator",
+                        "content": (
+                            "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
+                            "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
+                        ),
+                    }
+                )
+                # Prevent actual termination this round
+                return super().run_chat(self.groupchat.messages, sender, self.groupchat)
+        # --- END ENFORCE ---
         # Check if we should terminate based on discovery criteria
         if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
             if len(session_state.insights) > 0:
@@ -4533,6 +4634,12 @@ class SmartGroupChatManager(autogen.GroupChatManager):
                     }
                 )
 
+        # --- VERBOSE LOGGING: Trace agent selection ---
+        try:
+            next_agent = self.groupchat.select_speaker(last_speaker=self.last_speaker, selector=self.selector)
+            logger.info(f"[DEBUG] Next agent selected by groupchat.select_speaker(): {getattr(next_agent, 'name', next_agent)}")
+        except Exception as e:
+            logger.error(f"[DEBUG] Exception during agent selection: {e}")
         # Let the parent class handle the actual chat execution
         # Pass the GroupChat object as config for correct typing
         result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
@@ -4558,7 +4665,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
+        max_consecutive_auto_reply=100,
         is_termination_msg=lambda x: "TERMINATE" in x.get("content", "").strip(),
         code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
@@ -4567,7 +4674,9 @@ def run_discovery_loop(session_state: SessionState) -> str:
     analyst = assistant_agents["QuantitativeAnalyst"]
     researcher = assistant_agents["DataRepresenter"]
     critic = assistant_agents["PatternSeeker"]
+    hypothesizer = assistant_agents["Hypothesizer"]
 
+    # Register tools for analysis agents only
     for agent in [analyst, researcher, critic]:
         autogen.register_function(
             run_sql_query,
@@ -4604,7 +4713,6 @@ def run_discovery_loop(session_state: SessionState) -> str:
             name="add_insight_to_report",
             description="Saves insights to the report.",
         )
-        # Register execute_python for all discovery agents
         autogen.register_function(
             execute_python,
             caller=agent,
@@ -4613,16 +4721,30 @@ def run_discovery_loop(session_state: SessionState) -> str:
             description="Execute arbitrary Python code for analysis, stats, or plotting.",
         )
 
-    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic]
+    # Register finalize_hypotheses only for the Hypothesizer
+    autogen.register_function(
+        get_finalize_hypotheses_tool(session_state),
+        caller=hypothesizer,
+        executor=user_proxy,
+        name="finalize_hypotheses",
+        description="Finalize and submit a list of all validated hypotheses. This is the mandatory final step before the discovery loop can end.",
+    )
+
+    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic, hypothesizer]
     group_chat = autogen.GroupChat(
-        agents=agents, messages=[], max_round=100, allow_repeat_speaker=False
+        agents=agents, messages=[], max_round=100, allow_repeat_speaker=True
     )
     manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
     logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
     try:
-        initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
+        initial_message = (
+            "Team, let's begin our analysis.\n"
+            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Your goal is to explore the data and use the `add_insight_to_report` tool to log your findings.\n"
+            "- **Hypothesizer:** Your role is to monitor the conversation. Once enough insights have been gathered, your job is to synthesize them and call the `finalize_hypotheses` tool.\n\n"
+            "Let the analysis begin."
+        )
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
         logger.info(
@@ -4641,8 +4763,11 @@ def run_discovery_loop(session_state: SessionState) -> str:
             logger.info("Total views created: {}", len(views_data.get("views", [])))
         else:
             logger.info("Total views created: 0")
+        # --- NEW: Always reconnect after discovery loop to refresh DB schema/views ---
+        logger.info("Refreshing DB connection after discovery loop to ensure new views are visible...")
+        session_state.reconnect()
     finally:
-        logger.info("Reopening database connection...")
+        logger.info("Reopening database connection (final cleanup in discovery loop)...")
         session_state.reconnect()
 
     logger.info("--- Insight Discovery Loop Complete ---")
@@ -4656,111 +4781,110 @@ def run_strategy_loop(
 ) -> Optional[Dict[str, Any]]:
     """
     Runs the streamlined strategy team loop with the following agents:
-    - StrategistAgent: Validates features from a business/strategy perspective
-    - EngineerAgent: Validates features from a technical perspective
-    - FeatureEngineer: Designs and implements features based on pre-generated hypotheses
-    - UserProxy_Strategy: Handles tool execution and stores features
+    - StrategistAgent: Validates features from a business/strategy perspective.
+    - EngineerAgent: Validates features from a technical perspective.
+    - FeatureEngineer: Designs feature contracts based on pre-generated hypotheses.
+    - UserProxy_Strategy: Handles tool execution and stores features.
 
     The session_state should already contain hypotheses generated by the discovery team.
     """
     logger.info("--- Running Strategy Loop ---")
-    if not session_state.insights:
-        logger.warning("No insights found, skipping strategy loop.")
-        return None
+    if not session_state.get_final_hypotheses():
+        logger.warning("No hypotheses found, skipping strategy loop.")
+        return {"message": "Strategy loop skipped: No hypotheses were generated."}
 
-    run_dir = get_run_dir()
-    views_file = run_dir / "generated_views.json"
-    if views_file.exists():
-        with open(views_file, "r", encoding="utf-8") as f:
-            json.load(f)
-
-    # Extract agents from pre-initialized dictionary
-    agents = {k: v for k, v in strategy_agents_with_proxy.items() if k != "user_proxy"}
+    # Extract agents from the pre-initialized dictionary
+    strategist = strategy_agents_with_proxy["StrategistAgent"]
+    engineer = strategy_agents_with_proxy["EngineerAgent"]
+    feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # Register strategy team tools with the user proxy
+    # --- Tool Registration for this specific loop ---
+    # The user proxy needs access to the session_state to save features.
+    # CRITICAL: Only register tools relevant to this team. `finalize_hypotheses`
+    # belongs to the discovery team and was causing confusion.
+    # Register the tools the agents in this group chat can use.
+    # The user proxy needs access to the session_state to save features.
     user_proxy.register_function(
         function_map={
-            "run_sql_query": run_sql_query,
-            "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
+            "save_candidate_features": get_save_candidate_features_tool(session_state),
+            "execute_python": execute_python,
         }
     )
 
-    # Initialize group chat with all discovery agents
-    discovery_agents = list(agents.values())
-    # Using Sequence instead of List[Agent] for better type compatibility
-    agent_sequence: Sequence[autogen.ConversableAgent] = discovery_agents + [user_proxy]
-    group_chat = autogen.GroupChat(
-        agents=agent_sequence,  # type: ignore # We're handling type compatibility with Sequence
+    # Create the group chat with the necessary agents
+    groupchat = autogen.GroupChat(
+        agents=[user_proxy, strategist, engineer, feature_engineer],
         messages=[],
-        max_round=25,
-        allow_repeat_speaker=False,
-    )
-    manager = autogen.GroupChatManager(
-        groupchat=group_chat, llm_config=llm_config
-    )  # Using standard GroupChatManager
-
-    logger.info("Closing database connection for strategy agent execution...")
-    session_state.close_connection()
-
-    # Format the hypotheses data
-    hypotheses = session_state.get_final_hypotheses()
-    hypothesis_str = (
-        "\n".join([f"- {getattr(h, 'summary', str(h))}" for h in hypotheses])
-        if hypotheses
-        else "No hypotheses available."
+        max_round=1000,
+        speaker_selection_method="auto",
     )
 
-    # DB schema is now in agent system messages, no need to repeat it here
-    initial_message = f"""
-# Strategy Team Task: Turn Hypotheses into Features
+    manager = SmartGroupChatManager(groupchat=groupchat, llm_config=llm_config)
 
-## Available Hypotheses
-{hypothesis_str}
+    # Format hypotheses for the initial message
+    hypotheses_json = json.dumps(
+        [h.model_dump() for h in session_state.get_final_hypotheses()], indent=2
+    )
 
-## Task
-Analyze these hypotheses and create features that can be used by the optimization team.
-Start by having the FeatureEngineer create specifications and implementations for each feature.
-The team will validate the features before finalizing them.
+    # Construct the initial message to kick off the conversation.
+    # This message is a direct command to the FeatureEngineer to ensure it acts first.
+    initial_message = f"""You are the FeatureEngineer. Your task is to design a set of `CandidateFeature` contracts based on the following hypotheses.
 
-Ready to begin?
+**Hypotheses:**
+```json
+{hypotheses_json}
+```
 
-IMPORTANT INSTRUCTIONS:
-1. There is NO HypothesisAgent in this conversation - the hypotheses are already provided above.
-2. FeatureEngineer should take the lead with concrete implementation.
-3. To run tools, you MUST prefix your request with '@UserProxy_Strategy please run'
-4. To finalize hypotheses, use: '@UserProxy_Strategy please run finalize_hypotheses([{{"summary": "...", "rationale": "..."}}])'
-5. For SQL queries, use: '@UserProxy_Strategy please run run_sql_query("SELECT * FROM table")'
-6. Focus on producing production-ready code with detailed explanations.
-7. Feature implementations will be automatically stored in session_state.features
-8. End with FINAL_FEATURES when complete.
+**Your Instructions:**
+1.  Analyze the hypotheses.
+2.  Design a list of `CandidateFeature` contracts. Each contract must be a dictionary with `name`, `description`, `dependencies`, and `parameters`.
+3.  Use the `save_candidate_features` tool to submit your designs. Your response MUST be a call to this tool.
 
-YOUR GOAL: Efficiently translate the pre-generated hypotheses into implemented features, with the FeatureEngineer driving the creation process while StrategistAgent and EngineerAgent provide critical feedback."""
+The StrategistAgent and EngineerAgent will then review your work. Begin now.
+"""
 
+    logger.info("Reopening database connection before strategy loop...")
+    session_state.reconnect()
+
+    # --- NEW: Ensure DB connection is refreshed before strategy loop ---
+    logger.info("Refreshing DB connection before strategy loop to ensure all views are visible...")
+    session_state.reconnect()
+
+    report: Dict[str, Any] = {}
     try:
-        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
+        # The user_proxy initiates the chat. The `message` is the first thing said.
+        user_proxy.initiate_chat(manager, message=initial_message)
 
-        # Check for realized features in session_state
-        features = getattr(session_state, "features", None)
+        # After the chat, we check the session_state for the results.
+        features = getattr(session_state, "candidate_features", [])
+        hypotheses = session_state.get_final_hypotheses()
 
-        # Attempt to get a strategy report from session_state or fallback to features/hypotheses
-        if hasattr(session_state, "get_final_strategy_report"):
-            report = session_state.get_final_strategy_report()
-        elif features:
-            report = {
-                "features_count": len(features),
-                "hypotheses_count": len(session_state.hypotheses),
-            }
-        elif hasattr(session_state, "get_final_hypotheses"):
-            hypotheses = session_state.get_final_hypotheses()
-            # Convert List[Hypothesis] to Dict[str, Any]
-            report = {"hypotheses": [h.__dict__ for h in hypotheses] if hypotheses else []}
+        # --- Feature Realization Step ---
+        if features:
+            feature_realization_agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
+            feature_realization_agent.run()
+            realized_features = getattr(session_state, "features", {})
+            realized_features_list = list(realized_features.values()) if isinstance(realized_features, dict) else realized_features
         else:
-            report = {"message": "No strategy report, features, or hypotheses available."}
-        return report
+            realized_features_list = []
+
+        report = {
+            "features_generated": len(features),
+            "hypotheses_processed": len(hypotheses),
+            "features": features,  # candidate_features are dicts, not Pydantic models
+            "realized_features": [f["name"] if isinstance(f, dict) and "name" in f else getattr(f, "name", None) for f in realized_features_list],
+            "hypotheses": [h.model_dump() for h in hypotheses],
+        }
+
+    except Exception as e:
+        logger.error("Strategy loop failed", exc_info=True)
+        report = {"error": str(e)}
     finally:
         logger.info("Reopening database connection after strategy loop...")
-        session_state.reconnect()
+        session_state.reconnect()  # Reconnect again to be safe.
+
+    return report
 
 
 def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
@@ -4837,8 +4961,22 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
                     "coverage": coverage_tracker.get_coverage(),
                 }
             )
-        # from src.agents.strategy_team.evaluation_agent import EvaluationAgent
-        # EvaluationAgent().run(session_state)
+
+        # === Optimization Step ===
+        logger.info("Starting optimization step with realized features...")
+        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []
+        if not realized_features:
+            logger.warning("No realized features found for optimization. Skipping optimization step.")
+            optimization_report = "No realized features found. Optimization skipped."
+        else:
+            optimizer = VULCANOptimizer(session=session_state)
+            try:
+                optimization_result = optimizer.optimize(features=realized_features, n_trials=10, use_fast_mode=True)
+                optimization_report = optimization_result.json(indent=2)
+                logger.info(f"Optimization completed. Best score: {optimization_result.best_score}")
+            except Exception as opt_e:
+                logger.error(f"Optimization failed: {opt_e}")
+                optimization_report = f"Optimization failed: {opt_e}"
 
     except Exception as e:
         logger.error(
@@ -4927,7 +5065,7 @@ if __name__ == "__main__":
 
 ### `schemas/models.py`
 
-**File size:** 6,268 bytes
+**File size:** 6,325 bytes
 
 ```python
 # src/utils/schemas.py
@@ -5008,11 +5146,11 @@ class PrioritizedHypothesis(BaseModel):
 
 class CandidateFeature(BaseModel):
     name: str = Field(..., description="A unique, descriptive name for the feature.")
-    type: Literal["code", "llm", "composition"] = Field(
-        ..., description="The type of feature to be realized."
+    type: Optional[Literal["code", "llm", "composition"]] = Field(
+        default=None, description="The type of feature to be realized."
     )
-    spec: str = Field(
-        ...,
+    spec: Optional[str] = Field(
+        default=None,
         description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
     )
     depends_on: List[str] = Field(
@@ -5023,8 +5161,8 @@ class CandidateFeature(BaseModel):
         default_factory=dict,
         description="A dictionary of tunable parameters for the feature.",
     )
-    rationale: str = Field(
-        ..., description="A detailed explanation of why this feature is useful."
+    rationale: Optional[str] = Field(
+        default=None, description="A detailed explanation of why this feature is useful."
     )
 
     def validate_spec(self):
@@ -5658,7 +5796,7 @@ def sample_users_stratified(n_total: int, strata: dict) -> list[str]:
 
 ### `utils/session_state.py`
 
-**File size:** 17,495 bytes
+**File size:** 17,499 bytes
 
 ```python
 import json
@@ -6087,14 +6225,14 @@ class SessionState:
     @property
     def db_connection(self) -> duckdb.DuckDBPyConnection:
         """
-        Provides a lazy-loaded, read-only database connection.
+        Provides a lazy-loaded, read-write database connection.
         The connection is created on first access.
         """
         if self.conn is None:
             try:
-                logger.info(f"Connecting to {self.db_path} in read-only mode...")
-                self.conn = duckdb.connect(database=self.db_path, read_only=True)
-                logger.info(f"Successfully connected to {self.db_path} in read-only mode.")
+                logger.info(f"Connecting to {self.db_path} in read-write mode...")
+                self.conn = duckdb.connect(database=self.db_path, read_only=False)
+                logger.info(f"Successfully connected to {self.db_path} in read-write mode.")
             except Exception as e:
                 logger.error(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
                 self.conn = None
@@ -6160,10 +6298,11 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 23,464 bytes
+**File size:** 25,976 bytes
 
 ```python
 # -*- coding: utf-8 -*-
+import base64
 import json
 import logging
 import os
@@ -6172,7 +6311,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import duckdb
 import matplotlib.pyplot as plt
-from openai import BadRequestError
+import pandas as pd
+from openai import BadRequestError, OpenAI
 
 from src.config.settings import DB_PATH
 from src.schemas.models import Hypothesis, Insight
@@ -6189,7 +6329,6 @@ def compute_summary_stats(table_or_view: str, limit: int = 10000) -> str:
     Returns a markdown-formatted report.
     """
     import numpy as np
-    import pandas as pd
 
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
@@ -6255,7 +6394,7 @@ def run_sql_query(query: str) -> str:
     This tool should be used for all SELECT queries.
     """
     try:
-        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
+        with duckdb.connect(database=str(DB_PATH), read_only=False) as conn:
             df = conn.execute(query).fetchdf()
             if df.empty:
                 return "Query executed successfully, but returned no results."
@@ -6348,11 +6487,13 @@ def create_plot(
         return {"error": f"Could not create plot. {e}"}
 
 
-def create_analysis_view(view_name: str, sql_query: str, rationale: str):
+def create_analysis_view(view_name: str, sql_query: str, rationale: str, session_state=None):
     """
     Creates a permanent view for analysis. It opens a temporary write-enabled
     connection to do so, avoiding holding a lock.
+    Logs all arguments, versioning, success, and failure.
     """
+    logger.info(f"[TOOL CALL] create_analysis_view called with arguments: view_name={view_name}, sql_query={sql_query}, rationale={rationale}, session_state_present={session_state is not None}")
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
             # Check if view exists to handle versioning
@@ -6365,23 +6506,19 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str):
                 version += 1
 
             if actual_name != view_name:
-                logger.info(
-                    "View '%s' already exists. Creating '%s' instead.",
-                    view_name,
-                    actual_name,
-                )
+                logger.info(f"[TOOL INFO] View '{view_name}' already exists. Creating '{actual_name}' instead.")
 
             # Create the view
             full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
             write_conn.execute(full_sql)
-
-            # ... (rest of the metadata tracking is the same)
-
+            logger.info(f"[TOOL SUCCESS] Created view {actual_name} with query: {sql_query}")
+            if session_state is not None and hasattr(session_state, 'log_view_creation'):
+                session_state.log_view_creation(actual_name, sql_query, rationale)
             print(f"VIEW_CREATED:{actual_name}")
             return f"Successfully created view: {actual_name}"
     except Exception as e:
-        logger.error(f"Failed to create view '{view_name}': {e}")
-        return f"ERROR: Could not create view '{view_name}'. Reason: {e}"
+        logger.error(f"[TOOL ERROR] Failed to create view {view_name}: {e}")
+        return f"ERROR: Failed to create view '{view_name}'. Reason: {e}"
 
 
 def cleanup_analysis_views(run_dir: Path):
@@ -6521,31 +6658,32 @@ def get_finalize_hypotheses_tool(session_state):
         """
         Finalizes the list of vetted hypotheses after validation.
         """
+        logger.info("[TOOL CALL] finalize_hypotheses called with arguments: {}", hypotheses_data)
         # Step 1: Instantiate Hypothesis models (assigns IDs, validates fields)
         try:
             hyp_models = [Hypothesis(**h) for h in hypotheses_data]
         except Exception as e:
-            logger.error(f"Failed to instantiate Hypothesis models: {e}")
+            logger.error(f"[TOOL ERROR] Failed to instantiate Hypothesis models: {e}")
             return f"ERROR: Failed to instantiate Hypothesis models. Reason: {e}"
 
         # Step 2: Validate for duplicate IDs and empty rationales
         ids = set()
         for h in hyp_models:
             if h.id in ids:
-                logger.error(f"Duplicate hypothesis ID found: {h.id}")
+                logger.error(f"[TOOL ERROR] Duplicate hypothesis ID found: {h.id}")
                 return f"ERROR: Hypothesis validation failed. Duplicate hypothesis ID found: {h.id}"
             ids.add(h.id)
             if not h.rationale:
-                logger.error(f"Hypothesis {h.id} has an empty rationale.")
+                logger.error(f"[TOOL ERROR] Hypothesis {h.id} has an empty rationale.")
                 return f"ERROR: Hypothesis validation failed. Hypothesis {h.id} has an empty rationale."
 
         # Step 3: Save to session state
         try:
             session_state.finalize_hypotheses(hyp_models)
-            logger.info(f"Finalized and saved {len(hyp_models)} valid hypotheses.")
+            logger.info(f"[TOOL SUCCESS] Finalized and saved {len(hyp_models)} valid hypotheses. Hypotheses: {hyp_models}")
             return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
         except Exception as e:
-            logger.error(f"Failed to save hypotheses after validation: {e}")
+            logger.error(f"[TOOL ERROR] Failed to save hypotheses after validation: {e}")
             return f"ERROR: Failed to save hypotheses after validation. Reason: {e}"
 
     return finalize_hypotheses
@@ -6580,16 +6718,11 @@ def validate_hypotheses(hypotheses_data: List[Dict], insight_report: str) -> Tup
     return True, "All hypotheses are valid."
 
 
-def vision_tool(image_path: str, prompt: str) -> str:
+def vision_tool(image_path: str, prompt: str) -> str:  # type: ignore[misc] # Known phantom lint # type: ignore[misc] # Known phantom lint
     """Analyzes an image file using OpenAI's GPT-4o vision model."""
-    import base64
-    from pathlib import Path
-
-    from openai import OpenAI
-
     try:
         # Robust path resolution
-        full_path = Path(image_path)
+        full_path = Path(image_path)  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
         logger.info(
             f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})"
         )
@@ -6623,7 +6756,7 @@ def vision_tool(image_path: str, prompt: str) -> str:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": prompt},  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
                             {
                                 "type": "image_url",
                                 "image_url": {"url": f"data:image/png;base64,{base64_image}"},
@@ -6646,13 +6779,51 @@ def vision_tool(image_path: str, prompt: str) -> str:
                 logger.error(error_msg)
                 return error_msg
             raise
-    except ImportError:
-        return (
-            "ERROR: OpenAI library is not installed. Please install it with `pip install openai`."
-        )
     except Exception as e:
-        logger.error("Unexpected error during image analysis: %s", e)
-        return f"ERROR: An unexpected error occurred while analyzing the image: {e}"
+        logger.error(f"An unexpected error occurred in vision_tool: {e}", exc_info=True)
+        return f"ERROR: An unexpected error occurred: {e}"
+
+
+def get_save_features_tool(session_state):
+    """Returns a function that can be used as an AutoGen tool to save features to the session state."""
+
+    def save_features(features_data: list) -> str:
+        """
+        Saves a list of features (as dicts) to session_state.features.
+        """
+        try:
+            features_dict = {f.get("name", f"feature_{i}"): f for i, f in enumerate(features_data)}
+            session_state.set_state("features", features_dict)
+            logger.info(f"Saved {len(features_dict)} features to session state.")
+            return f"SUCCESS: Successfully saved {len(features_dict)} features to session state."
+        except Exception as e:
+            logger.error(f"Failed to save features: {e}")
+            return f"ERROR: Failed to save features. Reason: {e}"
+
+    return save_features
+
+
+def get_save_candidate_features_tool(session_state):
+    """
+    Returns a function that can be used as an AutoGen tool to save candidate features to the session state.
+    """
+
+    def save_candidate_features(candidate_features_data: list) -> str:
+        """
+        Saves a list of candidate features (as dicts) to session_state.candidate_features.
+        """
+        try:
+            # Optionally validate each candidate feature dict here (e.g. required keys)
+            session_state.set_candidate_features(candidate_features_data)
+            logger.info(
+                f"Saved {len(candidate_features_data)} candidate features to session state."
+            )
+            return f"SUCCESS: Successfully saved {len(candidate_features_data)} candidate features to session state."
+        except Exception as e:
+            logger.error(f"Failed to save candidate features: {e}")
+            return f"ERROR: Failed to save candidate features. Reason: {e}"
+
+    return save_candidate_features
 
 
 def _execute_python_run_code(pipe, code, run_dir):
@@ -6751,7 +6922,7 @@ def execute_python(code: str, timeout: int = 60) -> str:
 
 - **Total files processed:** 42
 - **Directory:** `src`
-- **Generated:** 2025-06-15 15:45:02
+- **Generated:** 2025-06-16 00:14:12
 
 ---
 

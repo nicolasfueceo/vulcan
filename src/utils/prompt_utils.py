@@ -32,11 +32,21 @@ def _refresh_database_schema():
         _jinja_env.globals["db_schema"] = "ERROR: Could not load database schema"
         return None
 
+def refresh_global_db_schema():
+    """
+    Public API for refreshing the DB schema in the Jinja environment globals.
+    Call this ONCE per epoch/run, NOT per prompt.
+    """
+    return _refresh_database_schema()
+
+# Initialize db_schema at module load so it's present for all prompts
+_refresh_database_schema()
+
 
 def load_prompt(template_name: str, **kwargs) -> str:
     """
     Loads and renders a Jinja2 template from the prompts directory.
-    Refreshes database schema and logs the rendered prompt for debugging.
+    Uses the cached global DB schema (refreshed only once per epoch/run).
 
     Args:
         template_name: The name of the template file (e.g., 'agents/strategist.j2').
@@ -46,10 +56,7 @@ def load_prompt(template_name: str, **kwargs) -> str:
         The rendered prompt as a string.
     """
     try:
-        # Refresh database schema to ensure it's current
-        _refresh_database_schema()
-
-        # Load and render the template
+        # Do NOT refresh db schema here; it is now cached per epoch/run.
         template = _jinja_env.get_template(template_name)
         rendered_prompt = template.render(**kwargs)
 

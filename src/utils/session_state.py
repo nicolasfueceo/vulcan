@@ -424,14 +424,14 @@ class SessionState:
     @property
     def db_connection(self) -> duckdb.DuckDBPyConnection:
         """
-        Provides a lazy-loaded, read-only database connection.
+        Provides a lazy-loaded, read-write database connection.
         The connection is created on first access.
         """
         if self.conn is None:
             try:
-                logger.info(f"Connecting to {self.db_path} in read-only mode...")
-                self.conn = duckdb.connect(database=self.db_path, read_only=True)
-                logger.info(f"Successfully connected to {self.db_path} in read-only mode.")
+                logger.info(f"Connecting to {self.db_path} in read-write mode...")
+                self.conn = duckdb.connect(database=self.db_path, read_only=False)
+                logger.info(f"Successfully connected to {self.db_path} in read-write mode.")
             except Exception as e:
                 logger.error(f"FATAL: Failed to connect to database at {self.db_path}: {e}")
                 self.conn = None

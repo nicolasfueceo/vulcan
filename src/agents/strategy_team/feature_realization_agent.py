@@ -28,87 +28,92 @@ class FeatureRealizationAgent:
         self.llm_agent = autogen.AssistantAgent(
             name="FeatureRealizationAssistant",
             llm_config=self.llm_config,
-            system_message="""You are an expert Python programmer. Given a feature specification, you write clean, efficient, and correct Python code that follows the provided function signature and relies only on standard libraries like pandas and numpy.""",
+            system_message=(
+                "You are an expert Python programmer. You must ONLY output the Python function code matching the provided template. "
+                "Do NOT include any tool directives (e.g., @UserProxy_Strategy please run ...), object/class instantiations, or extra markdown/code blocks. "
+                "Fill in ONLY the logic section marked in the template. Do NOT alter the function signature or imports. "
+                "Your code must be clean, efficient, robust, and use only standard libraries like pandas and numpy."
+            ),
         )
 
     @agent_run_decorator("FeatureRealizationAgent")
     def run(self) -> None:
         """
-        Main method to realize candidate features from the session state,
-        with a self-correction loop for validation failures.
-        Also wires fast_mode_frac/sample_frac from session_state to optimizer.optimize and get_fold_data.
+        Main method to realize candidate features from the session state, enforcing the contract-based template.
+        Each candidate is realized using a strict function template, validated, and registered. Redundant/legacy code is removed.
         """
         logger.info("Starting feature realization...")
         candidate_features_data = self.session_state.get_candidate_features()
         if not candidate_features_data:
             logger.warning("No candidate features found to realize.")
             self.session_state.set_state("realized_features", [])
+            self.session_state.set_state("features", {})
             return
 
+        # Patch: fill missing fields with defaults to avoid validation errors
+        for f in candidate_features_data:
+            if "type" not in f or f["type"] is None:
+                f["type"] = "code"
+            if "spec" not in f or f["spec"] is None:
+                f["spec"] = ""
+            if "rationale" not in f or f["rationale"] is None:
+                f["rationale"] = f.get("description", "")
         candidate_features = [CandidateFeature(**f) for f in candidate_features_data]
         realized_features: List[RealizedFeature] = []
-        MAX_RETRIES = 2  # Allow up to 2 correction attempts per feature
+        MAX_RETRIES = 2
 
-        # Create a user proxy agent for the chat
         user_proxy = autogen.UserProxyAgent(
             name="TempProxy",
             human_input_mode="NEVER",
-            code_execution_config=False,  # We execute code in our own sandbox
+            code_execution_config=False,
         )
 
-        # --- Pass fast_mode_frac/sample_frac to optimizer via session_state ---
         fast_mode_sample_frac = self.session_state.get_state("fast_mode_sample_frac")
         logger.info(f"[FeatureRealizationAgent] fast_mode_sample_frac before set: {fast_mode_sample_frac}")
-        if fast_mode_sample_frac is not None:
-            logger.info(f"[FeatureRealizationAgent] Using fast_mode_sample_frac={fast_mode_sample_frac} for downstream optimization.")
-        else:
-            logger.info("[FeatureRealizationAgent] No fast_mode_sample_frac set; using full data.")
         self.session_state.set_state("optimizer_sample_frac", fast_mode_sample_frac)
         optimizer_sample_frac = self.session_state.get_state("optimizer_sample_frac")
         logger.info(f"[FeatureRealizationAgent] optimizer_sample_frac after set: {optimizer_sample_frac}")
 
         for candidate in candidate_features:
             logger.info(f"Attempting to realize feature: {candidate.name}")
-            
             is_realized = False
             last_error = ""
             code_str = ""
-
-            for attempt in range(MAX_RETRIES + 1): # +1 to include initial attempt
+            for attempt in range(MAX_RETRIES + 1):
                 if attempt == 0:
-                    # First attempt: Generate code from the original spec
-                    message = load_prompt("agents/feature_realization.j2", **candidate.model_dump())
+                    template_kwargs = dict(
+                        feature_name=candidate.name,
+                        description=candidate.description,
+                        dependencies=candidate.depends_on if hasattr(candidate, 'depends_on') else candidate.dependencies,
+                        params=list(candidate.params.keys()) if hasattr(candidate, 'params') else [],
+                    )
+                    message = load_prompt("agents/strategy_team/feature_realization_agent.j2", **template_kwargs)
+                    prompt = (
+                        "Your only job is to fill in the Python function template for this feature. "
+                        "Do NOT add any extra markdown or explanations. Output ONLY the function code block."
+                    )
+                    message = f"{message}\n\n{prompt}"
                 else:
-                    # Retry attempt: Provide the error context and ask for a fix
-                    logger.warning(f"Retrying realization for '{candidate.name}' (Attempt {attempt}/{MAX_RETRIES}). Error: {last_error}")
-                    message = f"""The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\nORIGINAL CODE:\n```python\n{code_str}\n```\nPlease analyze the error and the original spec, then provide a corrected version of the full Python function.\nThe function MUST be complete, including all necessary imports and the function signature.\n\nOriginal Spec: {candidate.spec}\n"""
-                # Initiate a chat to generate/fix the code
+                    message = (
+                        f"The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\n"
+                        "Please provide a corrected version of the LOGIC BLOCK ONLY to be inserted into the function."
+                    )
                 user_proxy.initiate_chat(self.llm_agent, message=message, max_turns=1, silent=True)
                 last_message = user_proxy.last_message(self.llm_agent)
-                
                 if not last_message or "content" not in last_message:
                     last_error = "LLM response was empty or invalid."
                     code_str = ""
-                    continue # Go to the next retry attempt
-
+                    continue
                 response_msg = last_message["content"]
-
                 try:
-                    code_str = response_msg.split("```python")[1].split("```")[0].strip()
+                    code_str = response_msg.split("```python")[1].split("```", 1)[0].strip()
                 except IndexError:
-                    code_str = ""
-                    last_error = "LLM response did not contain a valid Python code block."
-                    continue  # Go to the next retry attempt
-
-                # --- Validation ---
+                    code_str = response_msg.strip()
                 passed, last_error = self._validate_feature(candidate.name, code_str, candidate.params)
-
                 if passed:
                     logger.success(f"Successfully validated feature '{candidate.name}' on attempt {attempt + 1}.")
                     is_realized = True
-                    break  # Exit the retry loop on success
-
-            # After the loop, create the final RealizedFeature object
+                    break
             realized = RealizedFeature(
                 name=candidate.name,
                 code_str=code_str,
@@ -120,7 +125,6 @@ class FeatureRealizationAgent:
             realized_features.append(realized)
             if is_realized:
                 self._register_feature(realized)
-
         # --- Correlation-based feature pruning ---
         import pandas as pd
         import numpy as np
@@ -128,7 +132,6 @@ class FeatureRealizationAgent:
         for r in realized_features:
             if r.passed_test:
                 try:
-                    # Compile and call the feature function on a small dummy DataFrame
                     temp_namespace = {}
                     exec(r.code_str, globals(), temp_namespace)
                     func = temp_namespace[r.name]
@@ -146,7 +149,6 @@ class FeatureRealizationAgent:
             for col in upper.columns:
                 for row in upper.index:
                     if upper.loc[row, col] > 0.95:
-                        # Drop the feature with lower variance (arbitrary tie-break)
                         var_row = feature_matrix[row].var()
                         var_col = feature_matrix[col].var()
                         drop = row if var_row < var_col else col
@@ -156,7 +158,9 @@ class FeatureRealizationAgent:
                 logger.info(f"Pruned highly correlated features: {sorted(list(to_drop))}")
         else:
             pruned_realized = realized_features
+        # Save to both realized_features and features for downstream use
         self.session_state.set_state("realized_features", [r.model_dump() for r in pruned_realized])
+        self.session_state.set_state("features", {r.name: r.model_dump() for r in pruned_realized if r.passed_test})
         successful_count = len([r for r in pruned_realized if r.passed_test])
         logger.info(f"Finished feature realization. Successfully realized and validated {successful_count} features after correlation pruning.")
 
@@ -242,7 +246,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
             code_str=code_str,
             params=candidate.params,
             passed_test=False,
-            type=candidate.type,
+            type=candidate.type or "code",
             source_candidate=candidate,
         )
 

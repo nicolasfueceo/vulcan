@@ -21,10 +21,10 @@ def get_insight_discovery_agents(
     # Load agent prompts from Jinja2 templates
     agent_prompts = {
         "DataRepresenter": load_prompt("agents/discovery_team/data_representer.j2"),
-        "QuantitativeAnalyst": load_prompt(
-            "agents/discovery_team/quantitative_analyst.j2"
-        ),
+        "QuantitativeAnalyst": load_prompt("agents/discovery_team/quantitative_analyst.j2"),
         "PatternSeeker": load_prompt("agents/discovery_team/pattern_seeker.j2"),
+        # --- ADD THE NEW AGENT'S PROMPT ---
+        "Hypothesizer": load_prompt("agents/discovery_team/hypothesizer.j2"),
     }
 
     # Create agents with loaded prompts

@@ -15,20 +15,25 @@ from loguru import logger
 import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
+from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
+from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 from src.config.log_config import setup_logging
-from src.core.database import get_db_schema_string
+from src.core.database import get_db_schema_string, refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
+from src.utils.prompt_utils import load_prompt
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
     create_analysis_view,
-    execute_python,  # FIX: Import execute_python for agent registration
+    execute_python,
     get_add_insight_tool,
     get_finalize_hypotheses_tool,
     get_table_sample,
     run_sql_query,
     vision_tool,
-    get_save_features_tool,  # Register save_features tool for agents
+    get_save_features_tool,
+    get_save_candidate_features_tool,
+    get_add_to_central_memory_tool,
 )
 
 # Ensure DB views are set up for pipeline compatibility
@@ -261,6 +266,29 @@ class SmartGroupChatManager(autogen.GroupChatManager):
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
+        # --- ENFORCE: Do not allow termination until finalize_hypotheses has been called ---
+        # If a termination signal is detected, but session_state.hypotheses is empty, inject a reminder and prevent termination
+        if session_state:
+            # Detect attempted termination in the last message
+            last_msg = self.groupchat.messages[-1]["content"].strip() if self.groupchat.messages else ""
+            attempted_termination = any(term in last_msg for term in ["FINAL_INSIGHTS", "TERMINATE"])
+            hypotheses_finalized = hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0
+            if attempted_termination and not hypotheses_finalized:
+                logger.warning("Termination signal received, but no hypotheses have been finalized. Blocking termination.")
+                # Inject a message that forces the Hypothesizer to act.
+                self.groupchat.messages.append(
+                    {
+                        "role": "user",
+                        "name": "SystemCoordinator",
+                        "content": (
+                            "A termination request was detected, but no hypotheses have been finalized. **Hypothesizer, it is now your turn to act.** "
+                            "Please synthesize the team's insights and call the `finalize_hypotheses` tool."
+                        ),
+                    }
+                )
+                # Prevent actual termination this round
+                return super().run_chat(self.groupchat.messages, sender, self.groupchat)
+        # --- END ENFORCE ---
         # Check if we should terminate based on discovery criteria
         if session_state and self.round_count > 15 and not should_continue_exploration(session_state, self.round_count):
             if len(session_state.insights) > 0:
@@ -302,6 +330,12 @@ class SmartGroupChatManager(autogen.GroupChatManager):
                     }
                 )
 
+        # --- VERBOSE LOGGING: Trace agent selection ---
+        try:
+            next_agent = self.groupchat.select_speaker(last_speaker=self.last_speaker, selector=self.selector)
+            logger.info(f"[DEBUG] Next agent selected by groupchat.select_speaker(): {getattr(next_agent, 'name', next_agent)}")
+        except Exception as e:
+            logger.error(f"[DEBUG] Exception during agent selection: {e}")
         # Let the parent class handle the actual chat execution
         # Pass the GroupChat object as config for correct typing
         result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
@@ -327,7 +361,7 @@ def run_discovery_loop(session_state: SessionState) -> str:
     user_proxy = autogen.UserProxyAgent(
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
+        max_consecutive_auto_reply=100,
         is_termination_msg=lambda x: "TERMINATE" in x.get("content", "").strip(),
         code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
@@ -336,7 +370,9 @@ def run_discovery_loop(session_state: SessionState) -> str:
     analyst = assistant_agents["QuantitativeAnalyst"]
     researcher = assistant_agents["DataRepresenter"]
     critic = assistant_agents["PatternSeeker"]
+    hypothesizer = assistant_agents["Hypothesizer"]
 
+    # Register tools for analysis agents only
     for agent in [analyst, researcher, critic]:
         autogen.register_function(
             run_sql_query,
@@ -373,7 +409,6 @@ def run_discovery_loop(session_state: SessionState) -> str:
             name="add_insight_to_report",
             description="Saves insights to the report.",
         )
-        # Register execute_python for all discovery agents
         autogen.register_function(
             execute_python,
             caller=agent,
@@ -382,16 +417,30 @@ def run_discovery_loop(session_state: SessionState) -> str:
             description="Execute arbitrary Python code for analysis, stats, or plotting.",
         )
 
-    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic]
+    # Register finalize_hypotheses only for the Hypothesizer
+    autogen.register_function(
+        get_finalize_hypotheses_tool(session_state),
+        caller=hypothesizer,
+        executor=user_proxy,
+        name="finalize_hypotheses",
+        description="Finalize and submit a list of all validated hypotheses. This is the mandatory final step before the discovery loop can end.",
+    )
+
+    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic, hypothesizer]
     group_chat = autogen.GroupChat(
-        agents=agents, messages=[], max_round=100, allow_repeat_speaker=False
+        agents=agents, messages=[], max_round=100, allow_repeat_speaker=True
     )
     manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
     logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
     try:
-        initial_message = "Team, let's begin our analysis. The database schema and our mission are in your system prompts. Please start by planning your first exploration step."
+        initial_message = (
+            "Team, let's begin our analysis.\n"
+            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Your goal is to explore the data and use the `add_insight_to_report` tool to log your findings.\n"
+            "- **Hypothesizer:** Your role is to monitor the conversation. Once enough insights have been gathered, your job is to synthesize them and call the `finalize_hypotheses` tool.\n\n"
+            "Let the analysis begin."
+        )
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
 
         logger.info(
@@ -410,8 +459,11 @@ def run_discovery_loop(session_state: SessionState) -> str:
             logger.info("Total views created: {}", len(views_data.get("views", [])))
         else:
             logger.info("Total views created: 0")
+        # --- NEW: Always reconnect after discovery loop to refresh DB schema/views ---
+        logger.info("Refreshing DB connection after discovery loop to ensure new views are visible...")
+        session_state.reconnect()
     finally:
-        logger.info("Reopening database connection...")
+        logger.info("Reopening database connection (final cleanup in discovery loop)...")
         session_state.reconnect()
 
     logger.info("--- Insight Discovery Loop Complete ---")
@@ -425,111 +477,110 @@ def run_strategy_loop(
 ) -> Optional[Dict[str, Any]]:
     """
     Runs the streamlined strategy team loop with the following agents:
-    - StrategistAgent: Validates features from a business/strategy perspective
-    - EngineerAgent: Validates features from a technical perspective
-    - FeatureEngineer: Designs and implements features based on pre-generated hypotheses
-    - UserProxy_Strategy: Handles tool execution and stores features
+    - StrategistAgent: Validates features from a business/strategy perspective.
+    - EngineerAgent: Validates features from a technical perspective.
+    - FeatureEngineer: Designs feature contracts based on pre-generated hypotheses.
+    - UserProxy_Strategy: Handles tool execution and stores features.
 
     The session_state should already contain hypotheses generated by the discovery team.
     """
     logger.info("--- Running Strategy Loop ---")
-    if not session_state.insights:
-        logger.warning("No insights found, skipping strategy loop.")
-        return None
+    if not session_state.get_final_hypotheses():
+        logger.warning("No hypotheses found, skipping strategy loop.")
+        return {"message": "Strategy loop skipped: No hypotheses were generated."}
 
-    run_dir = get_run_dir()
-    views_file = run_dir / "generated_views.json"
-    if views_file.exists():
-        with open(views_file, "r", encoding="utf-8") as f:
-            json.load(f)
-
-    # Extract agents from pre-initialized dictionary
-    agents = {k: v for k, v in strategy_agents_with_proxy.items() if k != "user_proxy"}
+    # Extract agents from the pre-initialized dictionary
+    strategist = strategy_agents_with_proxy["StrategistAgent"]
+    engineer = strategy_agents_with_proxy["EngineerAgent"]
+    feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
-    # Register strategy team tools with the user proxy
+    # --- Tool Registration for this specific loop ---
+    # The user proxy needs access to the session_state to save features.
+    # CRITICAL: Only register tools relevant to this team. `finalize_hypotheses`
+    # belongs to the discovery team and was causing confusion.
+    # Register the tools the agents in this group chat can use.
+    # The user proxy needs access to the session_state to save features.
     user_proxy.register_function(
         function_map={
-            "run_sql_query": run_sql_query,
-            "finalize_hypotheses": get_finalize_hypotheses_tool(session_state),
+            "save_candidate_features": get_save_candidate_features_tool(session_state),
+            "execute_python": execute_python,
         }
     )
 
-    # Initialize group chat with all discovery agents
-    discovery_agents = list(agents.values())
-    # Using Sequence instead of List[Agent] for better type compatibility
-    agent_sequence: Sequence[autogen.ConversableAgent] = discovery_agents + [user_proxy]
-    group_chat = autogen.GroupChat(
-        agents=agent_sequence,  # type: ignore # We're handling type compatibility with Sequence
+    # Create the group chat with the necessary agents
+    groupchat = autogen.GroupChat(
+        agents=[user_proxy, strategist, engineer, feature_engineer],
         messages=[],
-        max_round=25,
-        allow_repeat_speaker=False,
-    )
-    manager = autogen.GroupChatManager(
-        groupchat=group_chat, llm_config=llm_config
-    )  # Using standard GroupChatManager
-
-    logger.info("Closing database connection for strategy agent execution...")
-    session_state.close_connection()
-
-    # Format the hypotheses data
-    hypotheses = session_state.get_final_hypotheses()
-    hypothesis_str = (
-        "\n".join([f"- {getattr(h, 'summary', str(h))}" for h in hypotheses])
-        if hypotheses
-        else "No hypotheses available."
+        max_round=1000,
+        speaker_selection_method="auto",
     )
 
-    # DB schema is now in agent system messages, no need to repeat it here
-    initial_message = f"""
-# Strategy Team Task: Turn Hypotheses into Features
+    manager = SmartGroupChatManager(groupchat=groupchat, llm_config=llm_config)
 
-## Available Hypotheses
-{hypothesis_str}
+    # Format hypotheses for the initial message
+    hypotheses_json = json.dumps(
+        [h.model_dump() for h in session_state.get_final_hypotheses()], indent=2
+    )
 
-## Task
-Analyze these hypotheses and create features that can be used by the optimization team.
-Start by having the FeatureEngineer create specifications and implementations for each feature.
-The team will validate the features before finalizing them.
+    # Construct the initial message to kick off the conversation.
+    # This message is a direct command to the FeatureEngineer to ensure it acts first.
+    initial_message = f"""You are the FeatureEngineer. Your task is to design a set of `CandidateFeature` contracts based on the following hypotheses.
 
-Ready to begin?
+**Hypotheses:**
+```json
+{hypotheses_json}
+```
 
-IMPORTANT INSTRUCTIONS:
-1. There is NO HypothesisAgent in this conversation - the hypotheses are already provided above.
-2. FeatureEngineer should take the lead with concrete implementation.
-3. To run tools, you MUST prefix your request with '@UserProxy_Strategy please run'
-4. To finalize hypotheses, use: '@UserProxy_Strategy please run finalize_hypotheses([{{"summary": "...", "rationale": "..."}}])'
-5. For SQL queries, use: '@UserProxy_Strategy please run run_sql_query("SELECT * FROM table")'
-6. Focus on producing production-ready code with detailed explanations.
-7. Feature implementations will be automatically stored in session_state.features
-8. End with FINAL_FEATURES when complete.
+**Your Instructions:**
+1.  Analyze the hypotheses.
+2.  Design a list of `CandidateFeature` contracts. Each contract must be a dictionary with `name`, `description`, `dependencies`, and `parameters`.
+3.  Use the `save_candidate_features` tool to submit your designs. Your response MUST be a call to this tool.
 
-YOUR GOAL: Efficiently translate the pre-generated hypotheses into implemented features, with the FeatureEngineer driving the creation process while StrategistAgent and EngineerAgent provide critical feedback."""
+The StrategistAgent and EngineerAgent will then review your work. Begin now.
+"""
 
+    logger.info("Reopening database connection before strategy loop...")
+    session_state.reconnect()
+
+    # --- NEW: Ensure DB connection is refreshed before strategy loop ---
+    logger.info("Refreshing DB connection before strategy loop to ensure all views are visible...")
+    session_state.reconnect()
+
+    report: Dict[str, Any] = {}
     try:
-        user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
+        # The user_proxy initiates the chat. The `message` is the first thing said.
+        user_proxy.initiate_chat(manager, message=initial_message)
 
-        # Check for realized features in session_state
-        features = getattr(session_state, "features", None)
+        # After the chat, we check the session_state for the results.
+        features = getattr(session_state, "candidate_features", [])
+        hypotheses = session_state.get_final_hypotheses()
 
-        # Attempt to get a strategy report from session_state or fallback to features/hypotheses
-        if hasattr(session_state, "get_final_strategy_report"):
-            report = session_state.get_final_strategy_report()
-        elif features:
-            report = {
-                "features_count": len(features),
-                "hypotheses_count": len(session_state.hypotheses),
-            }
-        elif hasattr(session_state, "get_final_hypotheses"):
-            hypotheses = session_state.get_final_hypotheses()
-            # Convert List[Hypothesis] to Dict[str, Any]
-            report = {"hypotheses": [h.__dict__ for h in hypotheses] if hypotheses else []}
+        # --- Feature Realization Step ---
+        if features:
+            feature_realization_agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
+            feature_realization_agent.run()
+            realized_features = getattr(session_state, "features", {})
+            realized_features_list = list(realized_features.values()) if isinstance(realized_features, dict) else realized_features
         else:
-            report = {"message": "No strategy report, features, or hypotheses available."}
-        return report
+            realized_features_list = []
+
+        report = {
+            "features_generated": len(features),
+            "hypotheses_processed": len(hypotheses),
+            "features": features,  # candidate_features are dicts, not Pydantic models
+            "realized_features": [f["name"] if isinstance(f, dict) and "name" in f else getattr(f, "name", None) for f in realized_features_list],
+            "hypotheses": [h.model_dump() for h in hypotheses],
+        }
+
+    except Exception as e:
+        logger.error("Strategy loop failed", exc_info=True)
+        report = {"error": str(e)}
     finally:
         logger.info("Reopening database connection after strategy loop...")
-        session_state.reconnect()
+        session_state.reconnect()  # Reconnect again to be safe.
+
+    return report
 
 
 def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
@@ -567,6 +618,10 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     try:
         for epoch in range(epochs):
             logger.info(f"=== Starting Epoch {epoch + 1} / {epochs} (fast_mode) ===")
+
+            # Refresh DB schema for prompt context ONCE per epoch
+            refresh_global_db_schema()
+
             session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
             discovery_report = run_discovery_loop(session_state)
             logger.info(session_state.get_final_insight_report())
@@ -606,8 +661,22 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
                     "coverage": coverage_tracker.get_coverage(),
                 }
             )
-        # from src.agents.strategy_team.evaluation_agent import EvaluationAgent
-        # EvaluationAgent().run(session_state)
+
+        # === Optimization Step ===
+        logger.info("Starting optimization step with realized features...")
+        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []
+        if not realized_features:
+            logger.warning("No realized features found for optimization. Skipping optimization step.")
+            optimization_report = "No realized features found. Optimization skipped."
+        else:
+            optimizer = VULCANOptimizer(session=session_state)
+            try:
+                optimization_result = optimizer.optimize(features=realized_features, n_trials=10, use_fast_mode=True)
+                optimization_report = optimization_result.json(indent=2)
+                logger.info(f"Optimization completed. Best score: {optimization_result.best_score}")
+            except Exception as opt_e:
+                logger.error(f"Optimization failed: {opt_e}")
+                optimization_report = f"Optimization failed: {opt_e}"
 
     except Exception as e:
         logger.error(
