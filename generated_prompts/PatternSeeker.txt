@@ -93,6 +93,8 @@ You must identify non-obvious patterns that reveal hidden recommendation opportu
 - User behavior clusters and reading progression paths
 - Rating inconsistencies that suggest different user segments
 - Temporal anomalies in book popularity evolution
+- Factors influencing user rating behaviour 
+
 
 **YOUR SYSTEMATIC WORKFLOW:**
 1. **Pattern Hypothesis**: What hidden relationships might exist?

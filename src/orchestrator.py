@@ -201,7 +201,7 @@ def get_llm_config_list() -> Optional[Dict[str, Any]]:
             raise ValueError("No valid LLM configurations found.")
 
         logger.info(f"Successfully loaded {len(config_list)} LLM configurations.")
-        return {"config_list": config_list, "cache_seed": None, "max_tokens": 50000}
+        return {"config_list": config_list, "cache_seed": None, "max_tokens": 16384}
 
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load or parse LLM config: {e}", exc_info=True)
@@ -226,6 +226,19 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
         session_state = globals().get("session_state")
+
+        # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
+        if session_state and hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0:
+            logger.info("Hypotheses have been finalized. Injecting TERMINATE and ending chat.")
+            self.groupchat.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "TERMINATE",
+                    "name": "SystemCoordinator",
+                }
+            )
+            # Call the parent class to process the termination message and return
+            return super().run_chat(self.groupchat.messages, sender, self.groupchat)
 
         # If we're at round 1, attach insights/discovery context
         if self.round_count == 1:
@@ -320,7 +333,20 @@ class SmartGroupChatManager(autogen.GroupChatManager):
             logger.error(f"[DEBUG] Exception during agent selection: {e}")
         # Let the parent class handle the actual chat execution
         # Pass the GroupChat object as config for correct typing
+        prev_message_count = len(self.groupchat.messages)
         result = super().run_chat(messages, sender, self.groupchat)  # type: ignore
+        # --- LOGGING: Log every message in the groupchat ---
+        if session_state and hasattr(session_state, 'run_logger'):
+            # Only log new messages since the last call
+            new_messages = self.groupchat.messages[prev_message_count:]
+            for msg in new_messages:
+                session_state.run_logger.log_message(
+                    sender=msg.get('name', msg.get('role', 'unknown')),
+                    recipient=None,  # Not tracked at message level
+                    content=msg.get('content', ''),
+                    role=msg.get('role', None),
+                    extra={k: v for k, v in msg.items() if k not in ['content', 'role', 'name']}
+                )
         # Handle possible tuple return value from parent class
         if isinstance(result, tuple) and len(result) == 2:
             success, response = result
@@ -417,7 +443,38 @@ def run_discovery_loop(session_state: SessionState) -> str:
     logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
     try:
+        # --- REFLECTION HANDOVER: Prepend latest reflection's next_steps (if any) ---
+        reflection_intro = ""
+        if getattr(session_state, 'reflections', None):
+            latest_reflection = session_state.reflections[-1]
+            if isinstance(latest_reflection, dict):
+                # Try to extract next_steps, novel_ideas, expansion_ideas
+                next_steps = latest_reflection.get("next_steps")
+                novel_ideas = latest_reflection.get("novel_ideas")
+                expansion_ideas = latest_reflection.get("expansion_ideas")
+                if next_steps:
+                    reflection_intro += "\n---\n**Reflection Agent's Next Steps:**\n"
+                    if isinstance(next_steps, list):
+                        for i, step in enumerate(next_steps, 1):
+                            reflection_intro += f"{i}. {step}\n"
+                    else:
+                        reflection_intro += str(next_steps) + "\n"
+                if novel_ideas:
+                    reflection_intro += "\n**Novel Unexplored Ideas:**\n"
+                    if isinstance(novel_ideas, list):
+                        for idea in novel_ideas:
+                            reflection_intro += f"- {idea}\n"
+                    else:
+                        reflection_intro += str(novel_ideas) + "\n"
+                if expansion_ideas:
+                    reflection_intro += "\n**Promising Expansions:**\n"
+                    if isinstance(expansion_ideas, list):
+                        for idea in expansion_ideas:
+                            reflection_intro += f"- {idea}\n"
+                    else:
+                        reflection_intro += str(expansion_ideas) + "\n"
         initial_message = (
+            reflection_intro +
             "Team, let's begin our analysis.\n"
             "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Explore the data and use the `add_insight_to_report` tool to log findings. When you believe enough insights have been gathered, prompt the Hypothesizer to finalize hypotheses. Do NOT call `TERMINATE` yourself for this reason.\n"
             "- **Hypothesizer:** Only you can end the discovery phase by calling the `finalize_hypotheses` tool. Listen for cues from the team, and when prompted (or when you believe enough insights are present), synthesize the insights and call `finalize_hypotheses`.\n\n"

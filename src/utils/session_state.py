@@ -71,6 +71,9 @@ class SessionState:
     def __init__(self, run_dir: Optional[Path] = None):
         self.run_dir = run_dir or get_run_dir()
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        # --- RunLogger integration ---
+        from src.utils.run_logger import RunLogger
+        self.run_logger = RunLogger(self.run_dir)
 
         # Initialize default state
         self.insights: List[Insight] = []

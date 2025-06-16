@@ -23,7 +23,7 @@ LLM_CONFIG = {
     "cache_seed": None,
     "temperature": 0.7,
     "timeout": 120,
-    "max_tokens": 50000,
+    "max_tokens": 16384,
 }
 
 # Agent configuration

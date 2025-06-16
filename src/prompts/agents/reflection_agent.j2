@@ -14,10 +14,12 @@ You are an expert data scientist and strategist. Your goal is to analyze the res
 {{ views }}
 
 **Your Task:**
-1. Evaluate the quality and completeness of the current insights and hypotheses
-2. Identify any gaps or areas that need more exploration
-3. Decide if another iteration of the pipeline would be valuable
-4. Provide clear reasoning for your decision
+1. Evaluate the quality and completeness of the current insights and hypotheses.
+2. Identify any gaps or areas that need more exploration.
+3. Propose **novel ideas or directions** that have not yet been explored, using coverage data (e.g., unexplored tables, columns, or relationships) to justify your suggestions.
+4. Propose **expansions or deeper investigation** of existing ideas that have shown promise but could be further developed.
+5. Decide if another iteration of the pipeline would be valuable.
+6. Provide clear reasoning for your decision.
 
 **Decision Criteria:**
 - Are there unexplored areas in the data that could yield valuable insights?
@@ -34,7 +36,17 @@ You must respond with a JSON object containing:
 {
     "should_continue": boolean,  // Whether to run another pipeline iteration
     "reasoning": string,        // Clear explanation of your decision
-    "next_steps": [            // List of specific areas to explore next
+    "novel_ideas": [           // List of unexplored directions or ideas, justified by coverage
+        "novel_area1",
+        "novel_area2",
+        ...
+    ],
+    "expansion_ideas": [       // List of ways to expand or deepen existing promising ideas
+        "expansion1",
+        "expansion2",
+        ...
+    ],
+    "next_steps": [           // Specific areas to explore next (may include both novel and expansion ideas)
         "area1",
         "area2",
         ...
@@ -46,12 +58,20 @@ Example response:
 ```json
 {
     "should_continue": true,
-    "reasoning": "While we have good coverage of user rating patterns, we haven't explored temporal aspects of user behavior or cross-genre relationships. These could yield valuable features for the recommendation system.",
+    "reasoning": "While we have good coverage of user rating patterns, some tables and columns (such as user demographics and book metadata) remain unexplored. Additionally, the analysis of genre crossover could be expanded to consider seasonal trends.",
+    "novel_ideas": [
+        "Investigate how user demographics influence reading patterns (unexplored columns in users table)",
+        "Analyze book metadata fields such as publisher or publication year for new patterns"
+    ],
+    "expansion_ideas": [
+        "Deepen the analysis of genre crossover by including seasonal trends",
+        "Expand the study of review length vs. rating to include sentiment analysis of review text"
+    ],
     "next_steps": [
-        "Analyze how user preferences evolve over time",
-        "Investigate genre crossover patterns",
-        "Study the relationship between review length and rating"
+        "Analyze user demographics for new insights",
+        "Expand genre crossover analysis to include time-based trends",
+        "Study review sentiment as a predictor of rating"
     ]
 }
 ```
-{% endblock %} 
+{% endblock %}

@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-16 02:41:29
+Generated on: 2025-06-16 16:37:04
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -105,6 +105,7 @@ This document contains the complete source code structure and contents of the `s
 │   ├── quantitative_analyst.txt
 │   ├── reflection_agent.txt
 │   └── strategist_agent.txt
+├── pipeline_test_output.txt
 ├── pyproject.toml
 ├── report/
 │   ├── .DS_Store
@@ -148,6 +149,7 @@ This document contains the complete source code structure and contents of the `s
 │   ├── dump_json_schemas.py
 │   ├── inspect_cv_splits.py
 │   ├── setup_views.py
+│   ├── test_feature_optimization_pipeline.py
 │   ├── test_feature_realization.py
 │   ├── test_finalize_hypotheses.py
 │   ├── test_hypothesizer_agent.py
@@ -252,6 +254,8 @@ This document contains the complete source code structure and contents of the `s
 │       ├── testing_utils.py
 │       └── tools.py
 ├── src_documentation.md
+├── test_run_dir/
+│   └── session_state.json
 └── tests/
     ├── __init__.py
     ├── __pycache__/
@@ -566,7 +570,7 @@ class FeatureAuditorAgent:
 
 ### `agents/strategy_team/feature_realization_agent.py`
 
-**File size:** 15,304 bytes
+**File size:** 15,423 bytes
 
 ```python
 # src/agents/strategy_team/feature_realization_agent.py
@@ -621,14 +625,6 @@ class FeatureRealizationAgent:
             self.session_state.set_state("features", {})
             return
 
-        # Patch: fill missing fields with defaults to avoid validation errors
-        for f in candidate_features_data:
-            if "type" not in f or f["type"] is None:
-                f["type"] = "code"
-            if "spec" not in f or f["spec"] is None:
-                f["spec"] = ""
-            if "rationale" not in f or f["rationale"] is None:
-                f["rationale"] = f.get("description", "")
         candidate_features = [CandidateFeature(**f) for f in candidate_features_data]
         realized_features: List[RealizedFeature] = []
         MAX_RETRIES = 2
@@ -654,9 +650,9 @@ class FeatureRealizationAgent:
                 if attempt == 0:
                     template_kwargs = dict(
                         feature_name=candidate.name,
-                        description=candidate.description,
-                        dependencies=candidate.depends_on if hasattr(candidate, 'depends_on') else candidate.dependencies,
-                        params=list(candidate.params.keys()) if hasattr(candidate, 'params') else [],
+                        rationale=candidate.rationale,
+                        depends_on=candidate.depends_on,
+                        parameters=list(candidate.parameters.keys()),
                     )
                     message = load_prompt("agents/strategy_team/feature_realization_agent.j2", **template_kwargs)
                     prompt = (
@@ -664,6 +660,15 @@ class FeatureRealizationAgent:
                         "Do NOT add any extra markdown or explanations. Output ONLY the function code block."
                     )
                     message = f"{message}\n\n{prompt}"
+                    # === DEBUG: Log everything being sent to LLM ===
+                    logger.info("=== LLM CALL PAYLOAD ===")
+                    logger.info(f"System message: {self.llm_agent.system_message}")
+                    logger.info(f"Prompt message: {message}")
+                    # Print chat history if present (should be empty for new agent)
+                    if hasattr(self.llm_agent, 'chat_messages'):
+                        import pprint
+                        logger.info("Current chat history for llm_agent:")
+                        pprint.pprint(self.llm_agent.chat_messages)
                 else:
                     message = (
                         f"The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\n"
@@ -680,7 +685,7 @@ class FeatureRealizationAgent:
                     code_str = response_msg.split("```python")[1].split("```", 1)[0].strip()
                 except IndexError:
                     code_str = response_msg.strip()
-                passed, last_error = self._validate_feature(candidate.name, code_str, candidate.params)
+                passed, last_error = self._validate_feature(candidate.name, code_str, candidate.parameters)
                 if passed:
                     logger.success(f"Successfully validated feature '{candidate.name}' on attempt {attempt + 1}.")
                     is_realized = True
@@ -688,7 +693,7 @@ class FeatureRealizationAgent:
             realized = RealizedFeature(
                 name=candidate.name,
                 code_str=code_str,
-                params=candidate.params,
+                params=candidate.parameters,
                 passed_test=is_realized,
                 type=candidate.type,
                 source_candidate=candidate,
@@ -761,7 +766,7 @@ class FeatureRealizationAgent:
     def _realize_code_feature(self, candidate: CandidateFeature) -> RealizedFeature:
         """Realizes a feature based on a code spec by wrapping it in a function."""
         logger.info(f"Realizing code feature: {candidate.name}")
-        param_string = ", ".join(candidate.params.keys())
+        param_string = ", ".join(candidate.parameters.keys())
         code_str = f"""
 import pandas as pd
 import numpy as np
@@ -779,7 +784,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
         return RealizedFeature(
             name=candidate.name,
             code_str=code_str,
-            params=candidate.params,
+            parameters=candidate.parameters,
             passed_test=False,  # Will be set after validation
             type=candidate.type,
             source_candidate=candidate,
@@ -793,7 +798,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
             feature_name=candidate.name,
             feature_rationale=candidate.rationale,
             feature_spec=candidate.spec,
-            feature_params=json.dumps(candidate.params, indent=2),
+            feature_params=json.dumps(candidate.parameters, indent=2),
         )
 
         response = self.llm_agent.generate_reply(
@@ -815,7 +820,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
         return RealizedFeature(
             name=candidate.name,
             code_str=code_str,
-            params=candidate.params,
+            params=candidate.parameters,
             passed_test=False,
             type=candidate.type or "code",
             source_candidate=candidate,
@@ -905,7 +910,7 @@ def {candidate.name}(df: pd.DataFrame, {", ".join(all_params.keys())}):
 
 ### `agents/strategy_team/optimization_agent_v2.py`
 
-**File size:** 23,063 bytes
+**File size:** 23,251 bytes
 
 ```python
 """
@@ -1109,6 +1114,9 @@ class VULCANOptimizer:
                 # Process each parameter in the feature configuration
                 for param_name, param_config in feature.get("parameters", {}).items():
                     full_param_name = f"{feature_name}__{param_name}"
+                    # Support both dict and ParameterSpec (Pydantic model)
+                    if hasattr(param_config, 'dict'):
+                        param_config = param_config.dict()
                     param_type = param_config.get("type", "float")
 
                     if param_type == "int":
@@ -2406,6 +2414,7 @@ LLM_CONFIG = {
     "cache_seed": None,
     "temperature": 0.7,
     "timeout": 120,
+    "max_tokens": 16384,
 }
 
 # Agent configuration
@@ -2420,7 +2429,6 @@ PLOT_PALETTE = "husl"
 # OpenAI configuration
 OPENAI_MODEL_VISION = "gpt-4o"
 OPENAI_MODEL_TEXT = "gpt-4o-mini"
-OPENAI_MAX_TOKENS = 1000
 
 # Database connection settings
 DB_READ_ONLY = False  # Allow writes for temporary views
@@ -4303,7 +4311,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 30,905 bytes
+**File size:** 31,602 bytes
 
 ```python
 import json
@@ -4509,7 +4517,7 @@ def get_llm_config_list() -> Optional[Dict[str, Any]]:
             raise ValueError("No valid LLM configurations found.")
 
         logger.info(f"Successfully loaded {len(config_list)} LLM configurations.")
-        return {"config_list": config_list, "cache_seed": None}
+        return {"config_list": config_list, "cache_seed": None, "max_tokens": 16384}
 
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load or parse LLM config: {e}", exc_info=True)
@@ -4534,6 +4542,19 @@ class SmartGroupChatManager(autogen.GroupChatManager):
         """Run the chat with additional tracking and feedback mechanisms."""
         self.round_count += 1
         session_state = globals().get("session_state")
+
+        # --- EARLY TERMINATION: If hypotheses are finalized, end the chat ---
+        if session_state and hasattr(session_state, "hypotheses") and len(session_state.hypotheses) > 0:
+            logger.info("Hypotheses have been finalized. Injecting TERMINATE and ending chat.")
+            self.groupchat.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "TERMINATE",
+                    "name": "SystemCoordinator",
+                }
+            )
+            # Call the parent class to process the termination message and return
+            return super().run_chat(self.groupchat.messages, sender, self.groupchat)
 
         # If we're at round 1, attach insights/discovery context
         if self.round_count == 1:
@@ -5056,13 +5077,13 @@ if __name__ == "__main__":
 
 ### `schemas/models.py`
 
-**File size:** 6,325 bytes
+**File size:** 7,019 bytes
 
 ```python
 # src/utils/schemas.py
 import ast
 import uuid
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
@@ -5104,7 +5125,7 @@ class Insight(BaseModel):
 
 class Hypothesis(BaseModel):
     """
-    Represents a simple hypothesis with only an id, summary, and rationale.
+    Represents a hypothesis for feature engineering, including explicit data dependencies.
     """
     id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
@@ -5115,6 +5136,9 @@ class Hypothesis(BaseModel):
     )
     rationale: str = Field(
         ..., description="A clear explanation of why this hypothesis is useful and worth testing."
+    )
+    depends_on: List[str] = Field(
+        ..., description="A list of fully qualified column names (e.g., 'reviews.user_id', 'books.genre') required to test this hypothesis."
     )
 
     @validator("rationale")
@@ -5135,26 +5159,28 @@ class PrioritizedHypothesis(BaseModel):
     notes: str = Field(..., description="A brief justification for the scores.")
 
 
+class ParameterSpec(BaseModel):
+    type: Literal["int", "float", "categorical"] = Field(..., description="Parameter type: int, float, or categorical.")
+    low: Optional[Union[int, float]] = Field(None, description="Lower bound (for int/float)")
+    high: Optional[Union[int, float]] = Field(None, description="Upper bound (for int/float)")
+    step: Optional[Union[int, float]] = Field(None, description="Step size (for int)")
+    log: Optional[bool] = Field(False, description="Log scale (for float)")
+    choices: Optional[List[Any]] = Field(None, description="Allowed choices (for categorical)")
+    default: Optional[Any] = Field(None, description="Default value")
+
 class CandidateFeature(BaseModel):
     name: str = Field(..., description="A unique, descriptive name for the feature.")
-    type: Optional[Literal["code", "llm", "composition"]] = Field(
-        default=None, description="The type of feature to be realized."
-    )
-    spec: Optional[str] = Field(
-        default=None,
-        description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
-    )
+    type: Literal["code"] = Field(..., description="The type of feature to be realized. Only 'code' is supported.")
+    spec: str = Field(..., description="The core logic of the feature: a Python expression or formula.")
     depends_on: List[str] = Field(
         default_factory=list,
         description="A list of other feature names this feature depends on (for compositions).",
     )
-    params: Dict[str, Any] = Field(
+    parameters: Dict[str, ParameterSpec] = Field(
         default_factory=dict,
-        description="A dictionary of tunable parameters for the feature.",
+        description="A dictionary specifying each tunable parameter and its constraints.",
     )
-    rationale: Optional[str] = Field(
-        default=None, description="A detailed explanation of why this feature is useful."
-    )
+    rationale: str = Field(..., description="A detailed explanation of why this feature is useful.")
 
     def validate_spec(self):
         """
@@ -5168,7 +5194,6 @@ class CandidateFeature(BaseModel):
                 raise ValueError(
                     f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
                 ) from e
-        # Add more validation for 'llm' or 'composition' types if needed
         return True
 
 
@@ -5180,12 +5205,11 @@ class RealizedFeature(BaseModel):
     """
     Represents a feature that has been converted into executable code.
     """
-
     name: str
     code_str: str
-    params: Dict[str, Any]
+    parameters: Dict[str, ParameterSpec]
     passed_test: bool
-    type: Literal["code", "llm", "composition"]
+    type: Literal["code"]
     source_candidate: CandidateFeature
 
     def validate_code(self) -> None:
@@ -5221,7 +5245,7 @@ class RealizedFeature(BaseModel):
 
         # Check for expected parameters in the function signature
         arg_names = {arg.arg for arg in func_def.args.args}
-        expected_params = set(self.params.keys())
+        expected_params = set(self.parameters.keys())
 
         # The function should accept 'df' plus all tunable params
         if "df" not in arg_names:
@@ -6296,7 +6320,7 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 28,885 bytes
+**File size:** 29,634 bytes
 
 ```python
 # -*- coding: utf-8 -*-
@@ -6422,75 +6446,15 @@ def save_plot(filename: str):
     return str(abs_path)
 
 
-def create_plot(
-    query: str,
-    plot_type: str = "scatter",
-    x: Union[str, None] = None,
-    y: Union[str, None] = None,
-    file_name: str = "plot.png",
-    analysis_prompt: Union[str, None] = None,
-) -> dict:
-    """
-    Executes a SQL query, generates a matplotlib plot, saves it, and analyzes it using vision_tool.
-    Args:
-        query: SQL SELECT query. Must return a DataFrame with named columns.
-        plot_type: One of ['scatter', 'bar', 'hist']
-        x: Name of the column for x-axis (required for scatter/bar)
-        y: Name of the column for y-axis (required for scatter/bar)
-        file_name: Desired file name for the output plot (should end with .png)
-        analysis_prompt: Prompt for vision_tool analysis (optional)
-    Returns:
-        Dict with keys: 'plot_path', 'vision_analysis', and 'error' if any.
-    """
-    try:
-        with duckdb.connect(database=str(DB_PATH), read_only=True) as conn:
-            df = conn.execute(query).fetchdf()
-        if df.empty:
-            return {"error": "Query returned no data to plot."}
-        import matplotlib.pyplot as plt
-
-        plt.figure(figsize=(8, 5))
-        if plot_type == "scatter":
-            if x is None or y is None:
-                return {"error": "'x' and 'y' must be specified for scatter plots."}
-            plt.scatter(df[x], df[y], alpha=0.7)
-            plt.xlabel(x)
-            plt.ylabel(y)
-        elif plot_type == "bar":
-            if x is None or y is None:
-                return {"error": "'x' and 'y' must be specified for bar plots."}
-            plt.bar(df[x], df[y])
-            plt.xlabel(x)
-            plt.ylabel(y)
-        elif plot_type == "hist":
-            if x is None:
-                return {"error": "'x' must be specified for histogram plots."}
-            plt.hist(df[x], bins=20, alpha=0.7)
-            plt.xlabel(x)
-            plt.ylabel("Frequency")
-        else:
-            return {"error": f"Unknown plot_type '{plot_type}'. Use 'scatter', 'bar', or 'hist'."}
-        plt.title(f"{plot_type.title()} plot of {y if y else x}")
-        abs_path = save_plot(file_name)
-        # Automatically call vision_tool
-        from src.utils.tools import vision_tool
-
-        if analysis_prompt is None:
-            analysis_prompt = "Analyze this plot and summarize key trends and anomalies."
-        vision_result = vision_tool(abs_path, analysis_prompt)
-        return {"plot_path": abs_path, "vision_analysis": vision_result}
-    except Exception as e:
-        logger.error(f"Failed to create plot: {e}")
-        return {"error": f"Could not create plot. {e}"}
-
-
 def create_analysis_view(view_name: str, sql_query: str, rationale: str, session_state=None):
     """
     Creates a permanent view for analysis. It opens a temporary write-enabled
     connection to do so, avoiding holding a lock.
     Logs all arguments, versioning, success, and failure.
     """
-    logger.info(f"[TOOL CALL] create_analysis_view called with arguments: view_name={view_name}, sql_query={sql_query}, rationale={rationale}, session_state_present={session_state is not None}")
+    logger.info(
+        f"[TOOL CALL] create_analysis_view called with arguments: view_name={view_name}, sql_query={sql_query}, rationale={rationale}, session_state_present={session_state is not None}"
+    )
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as write_conn:
             # Check if view exists to handle versioning
@@ -6503,13 +6467,15 @@ def create_analysis_view(view_name: str, sql_query: str, rationale: str, session
                 version += 1
 
             if actual_name != view_name:
-                logger.info(f"[TOOL INFO] View '{view_name}' already exists. Creating '{actual_name}' instead.")
+                logger.info(
+                    f"[TOOL INFO] View '{view_name}' already exists. Creating '{actual_name}' instead."
+                )
 
             # Create the view
             full_sql = f"CREATE OR REPLACE VIEW {actual_name} AS ({sql_query})"
             write_conn.execute(full_sql)
             logger.info(f"[TOOL SUCCESS] Created view {actual_name} with query: {sql_query}")
-            if session_state is not None and hasattr(session_state, 'log_view_creation'):
+            if session_state is not None and hasattr(session_state, "log_view_creation"):
                 session_state.log_view_creation(actual_name, sql_query, rationale)
             print(f"VIEW_CREATED:{actual_name}")
             return f"Successfully created view: {actual_name}"
@@ -6651,11 +6617,11 @@ def get_add_to_central_memory_tool(session_state):
 def get_finalize_hypotheses_tool(session_state):
     """
     Returns a function that can be used as an AutoGen tool to finalize hypotheses.
-    
+
     TOOL DESCRIPTION FOR AGENTS:
     ------------------------------------------------------------
     finalize_hypotheses(hypotheses_data: list) -> str
-    
+
     This tool is used to submit the final list of hypotheses for the current discovery round. Each hypothesis MUST be a dictionary with the following structure:
         {
             "summary": <str, required, non-empty>,
@@ -6668,7 +6634,7 @@ def get_finalize_hypotheses_tool(session_state):
     - All fields must be strings. Empty or missing required fields will cause the tool to fail.
     - The tool will return an explicit error message if any item does not match the schema, or if any required field is missing or invalid.
     - If your call fails, read the error message carefully and correct your output to match the schema contract exactly.
-    
+
     Example valid call:
         finalize_hypotheses([
             {"summary": "Users who review more books tend to give higher ratings.", "rationale": "Observed a positive correlation in the sample."},
@@ -6680,35 +6646,60 @@ def get_finalize_hypotheses_tool(session_state):
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
         Validates and finalizes the list of vetted hypotheses. Each item in the list MUST
-        conform to the Hypothesis schema (e.g., {"summary": "...", "rationale": "..."}).
+        conform to the Hypothesis schema (must include non-empty 'summary', 'rationale', and 'depends_on').
         - If any item is missing required fields or has an empty value, the tool will fail with a detailed error message.
         - If the call fails, carefully read the error and correct your output to match the schema contract.
         """
         logger.info(f"[TOOL CALL] finalize_hypotheses called with {len(hypotheses_data)} items.")
         validated_hypotheses = []
+        # --- DB schema validation for depends_on ---
+        # Get DB schema (tables and columns)
+        import duckdb
+        db_path = getattr(session_state, "db_path", None) or DB_PATH
+        # Gather schema info once for DRY validation
+        with duckdb.connect(database=str(db_path), read_only=True) as conn:
+            tables = set(row[0] for row in conn.execute("SHOW TABLES").fetchall())
+            table_columns = {
+                t: set(row[1] for row in conn.execute(f"PRAGMA table_info('{t}')").fetchall())
+                for t in tables
+            }
         for i, h_data in enumerate(hypotheses_data):
             try:
                 hypothesis = Hypothesis(**h_data)
-                validated_hypotheses.append(hypothesis)
             except Exception as e:
                 error_message = (
                     f"[SCHEMA VALIDATION ERROR] Hypothesis at index {i} failed validation.\n"
                     f"Input: {h_data}\n"
                     f"Error: {e}\n"
-                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary' and 'rationale'. 'id' is optional.\n"
+                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary', 'rationale', and a non-empty list 'depends_on'. 'id' is optional.\n"
                     "Please correct your output to match the schema contract exactly."
                 )
                 logger.error(f"[TOOL ERROR] {error_message}")
                 return error_message
+            # DRY: Use helper for depends_on validation
+            depends_on = getattr(hypothesis, "depends_on", None)
+            if depends_on:
+                valid, dep_error = _validate_depends_on_schema(
+                    depends_on, tables, table_columns, "Hypothesis", i
+                )
+                if not valid:
+                    logger.error(f"[TOOL ERROR] {dep_error}")
+                    return dep_error or "[DEPENDENCY VALIDATION ERROR] Unknown error."
+            validated_hypotheses.append(hypothesis)
         try:
             session_state.finalize_hypotheses(validated_hypotheses)
-            success_message = f"SUCCESS: Successfully validated and saved {len(validated_hypotheses)} hypotheses."
+            success_message = (
+                f"SUCCESS: Successfully validated and saved {len(validated_hypotheses)} hypotheses."
+            )
             logger.info(f"[TOOL SUCCESS] {success_message}")
             return success_message
         except Exception as e:
-            error_message = f"[INTERNAL ERROR] Failed to save hypotheses after validation. Reason: {e}"
+            error_message = (
+                f"[INTERNAL ERROR] Failed to save hypotheses after validation. Reason: {e}"
+            )
             logger.error(f"[TOOL ERROR] {error_message}")
             return error_message
+
     return finalize_hypotheses
 
 
@@ -6741,11 +6732,18 @@ def validate_hypotheses(hypotheses_data: List[Dict], insight_report: str) -> Tup
     return True, "All hypotheses are valid."
 
 
-def vision_tool(image_path: str, prompt: str) -> str:  # type: ignore[misc] # Known phantom lint # type: ignore[misc] # Known phantom lint
-    """Analyzes an image file using OpenAI's GPT-4o vision model."""
+def vision_tool(image_path: str, prompt: str) -> str:
+    """
+    Analyzes an image file using OpenAI's GPT-4o vision model.
+    Args:
+        image_path (str): Path to the image file (absolute or relative).
+        prompt (str): Prompt for the vision model.
+    Returns:
+        str: Model response, or error message.
+    """
     try:
         # Robust path resolution
-        full_path = Path(image_path)  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
+        full_path = Path(image_path)
         logger.info(
             f"vision_tool: Received image_path='{image_path}' (absolute? {full_path.is_absolute()})"
         )
@@ -6779,7 +6777,7 @@ def vision_tool(image_path: str, prompt: str) -> str:  # type: ignore[misc] # Kn
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},  # type: ignore[name-defined] # Known phantom lint # type: ignore[name-defined] # Known phantom lint
+                            {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {"url": f"data:image/png;base64,{base64_image}"},
@@ -6826,41 +6824,6 @@ def get_save_features_tool(session_state):
     return save_features
 
 
-def get_save_candidate_features_tool(session_state):
-    """
-    Returns a function to save candidate features, now with schema validation.
-    """
-    from src.schemas.models import CandidateFeature
-    def save_candidate_features(candidate_features_data: list) -> str:
-        """
-        Validates and saves a list of candidate feature specifications to the session state.
-        Each feature MUST conform to the CandidateFeature schema.
-        """
-        logger.info(f"[TOOL CALL] save_candidate_features called with {len(candidate_features_data)} items.")
-        validated_features = []
-        for i, f_data in enumerate(candidate_features_data):
-            try:
-                feature = CandidateFeature(**f_data)
-                validated_features.append(feature)
-            except Exception as e:
-                error_message = (
-                    f"ERROR: CandidateFeature at index {i} (name: '{f_data.get('name', '<missing>')}') failed validation. Error: {e}. "
-                    "Please ensure all required fields are provided and correctly formatted."
-                )
-                logger.error(f"[TOOL ERROR] {error_message}")
-                return error_message
-        try:
-            session_state.set_candidate_features([f.model_dump() for f in validated_features])
-            success_message = f"SUCCESS: Successfully validated and saved {len(validated_features)} candidate features."
-            logger.info(f"[TOOL SUCCESS] {success_message}")
-            return success_message
-        except Exception as e:
-            error_message = f"ERROR: Failed to save candidate features after validation. Reason: {e}"
-            logger.error(f"[TOOL ERROR] {error_message}")
-            return error_message
-    return save_candidate_features
-
-
 def _execute_python_run_code(pipe, code, run_dir):
     # Headless plotting
     import matplotlib
@@ -6893,11 +6856,7 @@ def _execute_python_run_code(pipe, code, run_dir):
             print(f"ERROR: Could not save plot: {e}")
             return None
 
-    # Dummy add_insight_to_report for now
-    def add_insight_to_report(title, finding, supporting_evidence, confidence):
-        print(
-            "INSIGHT_ADDED: {'title': title, 'finding': finding, 'supporting_evidence': supporting_evidence, 'confidence': confidence}"
-        )
+   
 
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
@@ -6906,7 +6865,6 @@ def _execute_python_run_code(pipe, code, run_dir):
         "save_plot": save_plot,
         "get_table_sample": get_table_sample,
         "conn": conn,
-        "add_insight_to_report": add_insight_to_report,
         "__builtins__": __builtins__,
     }
     import contextlib
@@ -6925,20 +6883,16 @@ def _execute_python_run_code(pipe, code, run_dir):
         conn.close()
 
 
-def execute_python(code: str, timeout: int = 60) -> str:
+def execute_python(code: str, timeout: int = 300) -> str:
     """
     NOTE: A pre-configured DuckDB connection object named `conn` is already provided in the execution environment. DO NOT create your own connection using duckdb.connect(). Use the provided `conn` for all SQL operations (e.g., conn.sql(...)).
 
     NOTE: After every major code block or SQL result, you should print the result using `print('!!!', result)` so outputs are clearly visible in logs and debugging is easier.
 
     Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
-    Injected helpers: save_plot, get_table_sample, conn (DuckDB connection), add_insight_to_report, etc.
-    - Plots are always generated in headless mode (matplotlib 'Agg').
-    - Each call is stateless: agents must reload data in each code block.
-    - If code execution exceeds the timeout, it is forcibly terminated.
     Args:
-        code: The Python code to execute.
-        timeout: The timeout in seconds for the subprocess.
+        code: Python code to execute
+        timeout: Maximum time (seconds) to allow execution (default: 300)
     Returns:
         The stdout of the executed code, or an error message if it fails.
     """
@@ -6956,13 +6910,110 @@ def execute_python(code: str, timeout: int = 60) -> str:
     if parent_conn.poll():
         return parent_conn.recv()
     return "ERROR: No output returned from code execution."
+
+
+def _validate_depends_on_schema(depends_on, tables, table_columns, entity_label, idx):
+    import re
+
+    for dep in depends_on:
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$", dep):
+            return (
+                False,
+                f"[DEPENDENCY VALIDATION ERROR] {entity_label} at index {idx} has invalid depends_on entry: '{dep}'.\n"
+                f"Each depends_on entry must be fully qualified as 'table.column'.\n"
+                f"Tables available: {sorted(tables)}\n"
+                f"Please correct your output to match the schema contract.",
+            )
+        table, column = dep.split(".")
+        if table not in tables:
+            return (
+                False,
+                f"[DEPENDENCY VALIDATION ERROR] {entity_label} at index {idx} references table '{table}' which does not exist.\n"
+                f"Available tables: {sorted(tables)}\n"
+                f"Please correct your output to match the actual database schema.",
+            )
+        if column not in table_columns.get(table, set()):
+            return (
+                False,
+                f"[DEPENDENCY VALIDATION ERROR] {entity_label} at index {idx} references column '{column}' in table '{table}' which does not exist.\n"
+                f"Available columns in '{table}': {sorted(table_columns[table])}\n"
+                f"Please correct your output to match the actual database schema.",
+            )
+    return (True, None)
+
+
+def get_save_candidate_features_tool(session_state):
+    """
+    Returns a function to save candidate features, now with schema validation.
+    The tool validates that each depends_on entry is fully qualified and exists in the DB.
+    """
+    from src.schemas.models import CandidateFeature
+
+    def save_candidate_features(candidate_features_data: list) -> str:
+        """
+        Validates and saves a list of candidate feature specifications to the session state.
+        Each feature MUST conform to the CandidateFeature schema.
+        Additionally, each depends_on entry must be a fully qualified column name (table.column), and both the table and column must exist in the database.
+        """
+        import duckdb
+
+        logger.info(
+            f"[TOOL CALL] save_candidate_features called with {len(candidate_features_data)} items."
+        )
+        validated_features = []
+        db_path = getattr(session_state, "db_path", None)
+        if not db_path:
+            error_message = "[INTERNAL ERROR] No db_path found in session_state."
+            logger.error(error_message)
+            return error_message
+        # Gather schema info
+        with duckdb.connect(database=str(db_path), read_only=True) as conn:
+            tables = set(row[0] for row in conn.execute("SHOW TABLES").fetchall())
+            table_columns = {
+                t: set(row[1] for row in conn.execute(f"PRAGMA table_info('{t}')").fetchall())
+                for t in tables
+            }
+        for i, f_data in enumerate(candidate_features_data):
+            try:
+                feature = CandidateFeature(**f_data)
+            except Exception as e:
+                error_message = (
+                    f"[SCHEMA VALIDATION ERROR] CandidateFeature at index {i} failed validation.\n"
+                    f"Input: {f_data}\n"
+                    f"Error: {e}\n"
+                    "==> ACTION REQUIRED: Each candidate feature must match the schema contract exactly.\n"
+                    "Please correct your output."
+                )
+                logger.error(f"[TOOL ERROR] {error_message}")
+                return error_message
+            # DRY: Use helper for depends_on validation
+            valid, dep_error = _validate_depends_on_schema(
+                feature.depends_on, tables, table_columns, "CandidateFeature", i
+            )
+            if not valid:
+                logger.error(f"[TOOL ERROR] {dep_error}")
+                return dep_error or "[DEPENDENCY VALIDATION ERROR] Unknown error."
+            validated_features.append(feature)
+        try:
+            session_state.set_candidate_features([f.model_dump() for f in validated_features])
+            success_message = f"SUCCESS: Successfully validated and saved {len(validated_features)} candidate features."
+            logger.info(f"[TOOL SUCCESS] {success_message}")
+            return success_message
+        except Exception as e:
+            error_message = (
+                f"ERROR: Failed to save candidate features after validation. Reason: {e}"
+            )
+            logger.error(f"[TOOL ERROR] {error_message}")
+            return error_message
+
+    return save_candidate_features
 ```
 
 ## 📊 Summary
 
 - **Total files processed:** 42
 - **Directory:** `src`
-- **Generated:** 2025-06-16 02:41:29
+- **Generated:** 2025-06-16 16:37:04
 
 ---
 
