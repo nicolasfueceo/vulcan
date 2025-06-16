@@ -379,7 +379,7 @@ def get_finalize_hypotheses_tool(session_state):
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
         Validates and finalizes the list of vetted hypotheses. Each item in the list MUST
-        conform to the Hypothesis schema (e.g., {"summary": "...", "rationale": "..."}).
+        conform to the Hypothesis schema (must include non-empty 'summary', 'rationale', and 'depends_on').
         - If any item is missing required fields or has an empty value, the tool will fail with a detailed error message.
         - If the call fails, carefully read the error and correct your output to match the schema contract.
         """
@@ -394,7 +394,7 @@ def get_finalize_hypotheses_tool(session_state):
                     f"[SCHEMA VALIDATION ERROR] Hypothesis at index {i} failed validation.\n"
                     f"Input: {h_data}\n"
                     f"Error: {e}\n"
-                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary' and 'rationale'. 'id' is optional.\n"
+                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary', 'rationale', and a non-empty list 'depends_on'. 'id' is optional.\n"
                     "Please correct your output to match the schema contract exactly."
                 )
                 logger.error(f"[TOOL ERROR] {error_message}")
@@ -626,6 +626,10 @@ def _execute_python_run_code(pipe, code, run_dir):
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
+    NOTE: A pre-configured DuckDB connection object named `conn` is already provided in the execution environment. DO NOT create your own connection using duckdb.connect(). Use the provided `conn` for all SQL operations (e.g., conn.sql(...)).
+
+    NOTE: After every major code block or SQL result, you should print the result using `print('!!!', result)` so outputs are clearly visible in logs and debugging is easier.
+
     Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
     Injected helpers: save_plot, get_table_sample, conn (DuckDB connection), add_insight_to_report, etc.
     - Plots are always generated in headless mode (matplotlib 'Agg').

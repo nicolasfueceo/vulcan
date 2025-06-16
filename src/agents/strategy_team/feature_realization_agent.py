@@ -50,14 +50,6 @@ class FeatureRealizationAgent:
             self.session_state.set_state("features", {})
             return
 
-        # Patch: fill missing fields with defaults to avoid validation errors
-        for f in candidate_features_data:
-            if "type" not in f or f["type"] is None:
-                f["type"] = "code"
-            if "spec" not in f or f["spec"] is None:
-                f["spec"] = ""
-            if "rationale" not in f or f["rationale"] is None:
-                f["rationale"] = f.get("description", "")
         candidate_features = [CandidateFeature(**f) for f in candidate_features_data]
         realized_features: List[RealizedFeature] = []
         MAX_RETRIES = 2
@@ -83,9 +75,9 @@ class FeatureRealizationAgent:
                 if attempt == 0:
                     template_kwargs = dict(
                         feature_name=candidate.name,
-                        description=candidate.description,
-                        dependencies=candidate.depends_on if hasattr(candidate, 'depends_on') else candidate.dependencies,
-                        params=list(candidate.params.keys()) if hasattr(candidate, 'params') else [],
+                        rationale=candidate.rationale,
+                        depends_on=candidate.depends_on,
+                        parameters=list(candidate.parameters.keys()),
                     )
                     message = load_prompt("agents/strategy_team/feature_realization_agent.j2", **template_kwargs)
                     prompt = (
@@ -93,6 +85,15 @@ class FeatureRealizationAgent:
                         "Do NOT add any extra markdown or explanations. Output ONLY the function code block."
                     )
                     message = f"{message}\n\n{prompt}"
+                    # === DEBUG: Log everything being sent to LLM ===
+                    logger.info("=== LLM CALL PAYLOAD ===")
+                    logger.info(f"System message: {self.llm_agent.system_message}")
+                    logger.info(f"Prompt message: {message}")
+                    # Print chat history if present (should be empty for new agent)
+                    if hasattr(self.llm_agent, 'chat_messages'):
+                        import pprint
+                        logger.info("Current chat history for llm_agent:")
+                        pprint.pprint(self.llm_agent.chat_messages)
                 else:
                     message = (
                         f"The previous code you wrote for the feature '{candidate.name}' failed validation with the following error:\n---\nERROR:\n{last_error}\n---\n"
@@ -109,7 +110,7 @@ class FeatureRealizationAgent:
                     code_str = response_msg.split("```python")[1].split("```", 1)[0].strip()
                 except IndexError:
                     code_str = response_msg.strip()
-                passed, last_error = self._validate_feature(candidate.name, code_str, candidate.params)
+                passed, last_error = self._validate_feature(candidate.name, code_str, candidate.parameters)
                 if passed:
                     logger.success(f"Successfully validated feature '{candidate.name}' on attempt {attempt + 1}.")
                     is_realized = True
@@ -117,7 +118,7 @@ class FeatureRealizationAgent:
             realized = RealizedFeature(
                 name=candidate.name,
                 code_str=code_str,
-                params=candidate.params,
+                params=candidate.parameters,
                 passed_test=is_realized,
                 type=candidate.type,
                 source_candidate=candidate,
@@ -190,7 +191,7 @@ class FeatureRealizationAgent:
     def _realize_code_feature(self, candidate: CandidateFeature) -> RealizedFeature:
         """Realizes a feature based on a code spec by wrapping it in a function."""
         logger.info(f"Realizing code feature: {candidate.name}")
-        param_string = ", ".join(candidate.params.keys())
+        param_string = ", ".join(candidate.parameters.keys())
         code_str = f"""
 import pandas as pd
 import numpy as np
@@ -208,7 +209,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
         return RealizedFeature(
             name=candidate.name,
             code_str=code_str,
-            params=candidate.params,
+            parameters=candidate.parameters,
             passed_test=False,  # Will be set after validation
             type=candidate.type,
             source_candidate=candidate,
@@ -222,7 +223,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
             feature_name=candidate.name,
             feature_rationale=candidate.rationale,
             feature_spec=candidate.spec,
-            feature_params=json.dumps(candidate.params, indent=2),
+            feature_params=json.dumps(candidate.parameters, indent=2),
         )
 
         response = self.llm_agent.generate_reply(
@@ -244,7 +245,7 @@ def {candidate.name}(df: pd.DataFrame, {param_string}):
         return RealizedFeature(
             name=candidate.name,
             code_str=code_str,
-            params=candidate.params,
+            params=candidate.parameters,
             passed_test=False,
             type=candidate.type or "code",
             source_candidate=candidate,

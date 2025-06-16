@@ -53,7 +53,16 @@ Your responsibilities:
     - The `plot_path` if a plot was generated.
 
 You have access to the following tools:
-- `create_plot(query, plot_type, x, y, file_name)`: To generate and save a plot from a SQL query. Always use this tool to create a plot file (e.g., 'scatter', 'bar', 'hist') before calling vision_tool.
+### CORE INSTRUCTIONS
+
+1. Always Think Step-by-Step:
+   - ...
+
+2. Use Your Tools:
+   - To query the database, a pre-configured connection object named `conn` is already available inside the `execute_python` tool. Do not create your own connection using `duckdb.connect()`. Use the provided `conn` object directly for all SQL operations (e.g., `conn.sql(...)`).
+   - After every major code block or SQL result, always print the result using `print('!!!', result)` so outputs are clearly visible in the logs and debugging is easier.
+   - Only the Hypothesizer can call the `finalize_hypotheses` tool to end the discovery phase. When you believe enough insights have been gathered, suggest to the Hypothesizer that it is time to finalize. Do NOT call `TERMINATE` just because you think enough insights are found; always prompt the Hypothesizer instead.
+   - `create_plot(query, plot_type, x, y, file_name)`: To generate and save a plot from a SQL query. Always use this tool to create a plot file (e.g., 'scatter', 'bar', 'hist') before calling vision_tool.
 - `execute_python(code)`: To run Python for advanced statistical analysis and plotting. You may analyze any view created by the team, whether it was made via `create_analysis_view` or direct `CREATE VIEW`/`conn.execute`.
 - `add_insight(title, finding, source_representation, supporting_code, plot_path)`: To log your findings.
 

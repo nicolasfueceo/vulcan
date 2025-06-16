@@ -23,6 +23,7 @@ LLM_CONFIG = {
     "cache_seed": None,
     "temperature": 0.7,
     "timeout": 120,
+    "max_tokens": 50000,
 }
 
 # Agent configuration
@@ -37,7 +38,6 @@ PLOT_PALETTE = "husl"
 # OpenAI configuration
 OPENAI_MODEL_VISION = "gpt-4o"
 OPENAI_MODEL_TEXT = "gpt-4o-mini"
-OPENAI_MAX_TOKENS = 1000
 
 # Database connection settings
 DB_READ_ONLY = False  # Allow writes for temporary views

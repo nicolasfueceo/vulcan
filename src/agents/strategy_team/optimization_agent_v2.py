@@ -199,6 +199,9 @@ class VULCANOptimizer:
                 # Process each parameter in the feature configuration
                 for param_name, param_config in feature.get("parameters", {}).items():
                     full_param_name = f"{feature_name}__{param_name}"
+                    # Support both dict and ParameterSpec (Pydantic model)
+                    if hasattr(param_config, 'dict'):
+                        param_config = param_config.dict()
                     param_type = param_config.get("type", "float")
 
                     if param_type == "int":

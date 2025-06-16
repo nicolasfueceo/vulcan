@@ -16,30 +16,31 @@ llm_config = {
     "api_key": os.environ.get("OPENAI_API_KEY", "sk-test")
 }
 
-def make_candidate_feature(name, description, dependencies, params=None):
+def make_candidate_feature(name, rationale, depends_on, parameters=None):
     return {
         "name": name,
-        "description": description,
-        "dependencies": dependencies,
-        "parameters": params or {}
+        "type": "code",
+        "spec": "# placeholder spec",
+        "depends_on": depends_on,
+        "parameters": parameters or {},
+        "rationale": rationale
     }
 
 def main():
+    # Initialize run context
+    from src.utils.run_utils import init_run
+    init_run()
     # Initialize session state
     session_state = SessionState()
     session_state.set_state("db_path", "data/goodreads_curated.duckdb")
 
     # Mock candidate features
     candidate_features = [
-        make_candidate_feature(
-            name="reader_engagement_rating_correlation",
-            description="Calculates the correlation between a reader's engagement level and their ratings.",
-            dependencies=["reader_id", "reading_frequency", "rating_score"]
-        ),
+     
         make_candidate_feature(
             name="authorship_diversity_score",
-            description="Evaluates the diversity score of authorship on a book.",
-            dependencies=["book_id", "author_ids"]
+            rationale="Evaluates the diversity score of authorship on a book.",
+            depends_on=["book_id", "author_ids"]
         ),
     ]
     session_state.set_state("candidate_features", candidate_features)

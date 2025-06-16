@@ -18,7 +18,8 @@ from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agen
 from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 from src.config.log_config import setup_logging
-from src.core.database import get_db_schema_string, refresh_global_db_schema
+from src.core.database import get_db_schema_string
+from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
 from src.utils.prompt_utils import load_prompt
 from src.utils.session_state import CoverageTracker, SessionState
@@ -66,44 +67,25 @@ Please reference these insights when building your features.
 
 
 def should_continue_exploration(session_state: SessionState, round_count: int) -> bool:
-    """Determines if exploration should continue based on insights and coverage."""
-    insights = session_state.insights
-    if not insights:
+    """Determines if exploration should continue. Main termination: hypotheses finalized. Fallback: max rounds/no new insights."""
+    # If hypotheses have been finalized, allow termination
+    if session_state.get_final_hypotheses():
+        logger.info("Hypotheses have been finalized. Discovery loop can terminate.")
+        return False
+
+    # Always continue if no insights yet (prevents empty runs)
+    if not session_state.insights:
         logger.info("Cannot terminate: No insights found yet. Forcing continuation.")
-        return True  # Never terminate with zero insights
+        return True
 
-    high_quality_insights = [
-        i for i in insights if i.quality_score is not None and i.quality_score >= 8
-    ]
-    if len(high_quality_insights) >= 5:
-        logger.info("Termination condition: Found 5+ high-quality insights.")
-        return False
-
-    if len(insights) >= 15:
-        logger.info("Termination condition: Found 15+ total insights.")
-        return False
-
+    # Fallback: prevent infinite loops if agents are stuck
     if round_count > 50:
-        last_insight_round = max((i.metadata.get("round_added", 0) for i in insights), default=0)
+        last_insight_round = max((i.metadata.get("round_added", 0) for i in session_state.insights), default=0)
         if round_count - last_insight_round > 20:
-            logger.info("Termination condition: No new insights in the last 20 rounds.")
+            logger.info("Termination condition: No new insights in the last 20 rounds (fallback). Hypotheses not finalized.")
             return False
 
-    if len(insights) > 5:
-        tables_in_insights = {t for i in insights for t in i.tables_used}
-        all_tables = set(session_state.get_all_table_names())
-        coverage = len(tables_in_insights) / len(all_tables) if all_tables else 0
-        if coverage < 0.3:
-            logger.info(
-                f"Continuation condition: Low table coverage ({coverage:.1%}). Encouraging more exploration."
-            )
-            return True
-        if coverage > 0.7 and len(insights) >= 8:
-            logger.info(
-                f"Termination condition: High table coverage ({coverage:.1%}) with sufficient insights."
-            )
-            return False
-
+    # Default: continue until hypotheses are finalized
     return True
 
 
@@ -219,7 +201,7 @@ def get_llm_config_list() -> Optional[Dict[str, Any]]:
             raise ValueError("No valid LLM configurations found.")
 
         logger.info(f"Successfully loaded {len(config_list)} LLM configurations.")
-        return {"config_list": config_list, "cache_seed": None}
+        return {"config_list": config_list, "cache_seed": None, "max_tokens": 50000}
 
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load or parse LLM config: {e}", exc_info=True)
@@ -437,8 +419,9 @@ def run_discovery_loop(session_state: SessionState) -> str:
     try:
         initial_message = (
             "Team, let's begin our analysis.\n"
-            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Your goal is to explore the data and use the `add_insight_to_report` tool to log your findings.\n"
-            "- **Hypothesizer:** Your role is to monitor the conversation. Once enough insights have been gathered, your job is to synthesize them and call the `finalize_hypotheses` tool.\n\n"
+            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Explore the data and use the `add_insight_to_report` tool to log findings. When you believe enough insights have been gathered, prompt the Hypothesizer to finalize hypotheses. Do NOT call `TERMINATE` yourself for this reason.\n"
+            "- **Hypothesizer:** Only you can end the discovery phase by calling the `finalize_hypotheses` tool. Listen for cues from the team, and when prompted (or when you believe enough insights are present), synthesize the insights and call `finalize_hypotheses`.\n\n"
+            "**IMPORTANT:** The discovery phase ends ONLY when the Hypothesizer calls `finalize_hypotheses`. All other agents should prompt the Hypothesizer when ready, but only the Hypothesizer can end the phase.\n\n"
             "Let the analysis begin."
         )
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)

@@ -1,7 +1,7 @@
 # src/utils/schemas.py
 import ast
 import uuid
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
@@ -43,7 +43,7 @@ class Insight(BaseModel):
 
 class Hypothesis(BaseModel):
     """
-    Represents a simple hypothesis with only an id, summary, and rationale.
+    Represents a hypothesis for feature engineering, including explicit data dependencies.
     """
     id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
@@ -54,6 +54,9 @@ class Hypothesis(BaseModel):
     )
     rationale: str = Field(
         ..., description="A clear explanation of why this hypothesis is useful and worth testing."
+    )
+    depends_on: List[str] = Field(
+        ..., description="A list of fully qualified column names (e.g., 'reviews.user_id', 'books.genre') required to test this hypothesis."
     )
 
     @validator("rationale")
@@ -74,26 +77,28 @@ class PrioritizedHypothesis(BaseModel):
     notes: str = Field(..., description="A brief justification for the scores.")
 
 
+class ParameterSpec(BaseModel):
+    type: Literal["int", "float", "categorical"] = Field(..., description="Parameter type: int, float, or categorical.")
+    low: Optional[Union[int, float]] = Field(None, description="Lower bound (for int/float)")
+    high: Optional[Union[int, float]] = Field(None, description="Upper bound (for int/float)")
+    step: Optional[Union[int, float]] = Field(None, description="Step size (for int)")
+    log: Optional[bool] = Field(False, description="Log scale (for float)")
+    choices: Optional[List[Any]] = Field(None, description="Allowed choices (for categorical)")
+    default: Optional[Any] = Field(None, description="Default value")
+
 class CandidateFeature(BaseModel):
     name: str = Field(..., description="A unique, descriptive name for the feature.")
-    type: Optional[Literal["code", "llm", "composition"]] = Field(
-        default=None, description="The type of feature to be realized."
-    )
-    spec: Optional[str] = Field(
-        default=None,
-        description="The core logic of the feature: a Python expression, an LLM prompt, or a composition formula.",
-    )
+    type: Literal["code"] = Field(..., description="The type of feature to be realized. Only 'code' is supported.")
+    spec: str = Field(..., description="The core logic of the feature: a Python expression or formula.")
     depends_on: List[str] = Field(
         default_factory=list,
         description="A list of other feature names this feature depends on (for compositions).",
     )
-    params: Dict[str, Any] = Field(
+    parameters: Dict[str, ParameterSpec] = Field(
         default_factory=dict,
-        description="A dictionary of tunable parameters for the feature.",
+        description="A dictionary specifying each tunable parameter and its constraints.",
     )
-    rationale: Optional[str] = Field(
-        default=None, description="A detailed explanation of why this feature is useful."
-    )
+    rationale: str = Field(..., description="A detailed explanation of why this feature is useful.")
 
     def validate_spec(self):
         """
@@ -107,7 +112,6 @@ class CandidateFeature(BaseModel):
                 raise ValueError(
                     f"Invalid Python syntax in 'spec' for feature '{self.name}': {e}"
                 ) from e
-        # Add more validation for 'llm' or 'composition' types if needed
         return True
 
 
@@ -119,12 +123,11 @@ class RealizedFeature(BaseModel):
     """
     Represents a feature that has been converted into executable code.
     """
-
     name: str
     code_str: str
-    params: Dict[str, Any]
+    parameters: Dict[str, ParameterSpec]
     passed_test: bool
-    type: Literal["code", "llm", "composition"]
+    type: Literal["code"]
     source_candidate: CandidateFeature
 
     def validate_code(self) -> None:
@@ -160,7 +163,7 @@ class RealizedFeature(BaseModel):
 
         # Check for expected parameters in the function signature
         arg_names = {arg.arg for arg in func_def.args.args}
-        expected_params = set(self.params.keys())
+        expected_params = set(self.parameters.keys())
 
         # The function should accept 'df' plus all tunable params
         if "df" not in arg_names:

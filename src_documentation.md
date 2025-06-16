@@ -1,6 +1,6 @@
 # Source Code Documentation
 
-Generated on: 2025-06-16 00:14:12
+Generated on: 2025-06-16 02:41:29
 
 This document contains the complete source code structure and contents of the `src` directory.
 
@@ -88,7 +88,9 @@ This document contains the complete source code structure and contents of the `s
 │   └── code_mindmap.mermaid
 ├── generate_src_docs.py
 ├── generated_prompts/
+│   ├── CandidateFeature.schema.json
 │   ├── DataRepresenter.txt
+│   ├── Hypothesis.schema.json
 │   ├── Hypothesizer.txt
 │   ├── PatternSeeker.txt
 │   ├── QuantitativeAnalyst.txt
@@ -143,13 +145,14 @@ This document contains the complete source code structure and contents of the `s
 │   ├── check_lightfm_openmp.py
 │   ├── create_interactions_view.sql
 │   ├── dump_agent_prompts.py
+│   ├── dump_json_schemas.py
 │   ├── inspect_cv_splits.py
-│   ├── setup_and_test_feature_realization.sh
 │   ├── setup_views.py
 │   ├── test_feature_realization.py
 │   ├── test_finalize_hypotheses.py
 │   ├── test_hypothesizer_agent.py
 │   ├── test_optimization_end_to_end.py
+│   ├── test_schema_validation.py
 │   ├── test_strategy_team.py
 │   └── test_view_persistence.py
 ├── src/
@@ -2514,7 +2517,7 @@ def check_db_schema() -> bool:
     if not db_file.exists() or db_file.stat().st_size == 0:
         return False
     try:
-        with duckdb.connect(database=DB_PATH, read_only=False) as conn:
+        with duckdb.connect(database=DB_PATH, read_only=True) as conn:
             tables = [t[0] for t in conn.execute("SHOW TABLES;").fetchall()]
             required_tables = {"books", "reviews", "users"}
 
@@ -2571,7 +2574,7 @@ def fetch_df(query: str) -> pd.DataFrame:
     """
     Connects to the database, executes a query, and returns a DataFrame.
     """
-    with duckdb.connect(DB_PATH, read_only=False) as conn:
+    with duckdb.connect(DB_PATH, read_only=True) as conn:
         return conn.execute(query).fetchdf()
 
 
@@ -3101,7 +3104,7 @@ class CVDataManager:
             # Determine access mode
             self.read_only = not os.access(self.db_path.parent, os.W_OK)
             connection_kwargs = {
-                "read_only": False,
+                "read_only": self.read_only,
                 "config": {"memory_limit": f"{self._cache_size_mb}MB"},
             }
 
@@ -4300,7 +4303,7 @@ def _extract_optimization_results(messages: List[Dict]) -> Dict:
 
 ### `orchestrator.py`
 
-**File size:** 30,883 bytes
+**File size:** 30,905 bytes
 
 ```python
 import json
@@ -4324,7 +4327,9 @@ from src.agents.strategy_team.feature_realization_agent import FeatureRealizatio
 from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 from src.config.log_config import setup_logging
 from src.core.database import get_db_schema_string
+from src.utils.prompt_utils import refresh_global_db_schema
 from src.utils.run_utils import config_list_from_json, get_run_dir, init_run
+from src.utils.prompt_utils import load_prompt
 from src.utils.session_state import CoverageTracker, SessionState
 from src.utils.tools import (
     cleanup_analysis_views,
@@ -4370,44 +4375,25 @@ Please reference these insights when building your features.
 
 
 def should_continue_exploration(session_state: SessionState, round_count: int) -> bool:
-    """Determines if exploration should continue based on insights and coverage."""
-    insights = session_state.insights
-    if not insights:
+    """Determines if exploration should continue. Main termination: hypotheses finalized. Fallback: max rounds/no new insights."""
+    # If hypotheses have been finalized, allow termination
+    if session_state.get_final_hypotheses():
+        logger.info("Hypotheses have been finalized. Discovery loop can terminate.")
+        return False
+
+    # Always continue if no insights yet (prevents empty runs)
+    if not session_state.insights:
         logger.info("Cannot terminate: No insights found yet. Forcing continuation.")
-        return True  # Never terminate with zero insights
+        return True
 
-    high_quality_insights = [
-        i for i in insights if i.quality_score is not None and i.quality_score >= 8
-    ]
-    if len(high_quality_insights) >= 5:
-        logger.info("Termination condition: Found 5+ high-quality insights.")
-        return False
-
-    if len(insights) >= 15:
-        logger.info("Termination condition: Found 15+ total insights.")
-        return False
-
+    # Fallback: prevent infinite loops if agents are stuck
     if round_count > 50:
-        last_insight_round = max((i.metadata.get("round_added", 0) for i in insights), default=0)
+        last_insight_round = max((i.metadata.get("round_added", 0) for i in session_state.insights), default=0)
         if round_count - last_insight_round > 20:
-            logger.info("Termination condition: No new insights in the last 20 rounds.")
+            logger.info("Termination condition: No new insights in the last 20 rounds (fallback). Hypotheses not finalized.")
             return False
 
-    if len(insights) > 5:
-        tables_in_insights = {t for i in insights for t in i.tables_used}
-        all_tables = set(session_state.get_all_table_names())
-        coverage = len(tables_in_insights) / len(all_tables) if all_tables else 0
-        if coverage < 0.3:
-            logger.info(
-                f"Continuation condition: Low table coverage ({coverage:.1%}). Encouraging more exploration."
-            )
-            return True
-        if coverage > 0.7 and len(insights) >= 8:
-            logger.info(
-                f"Termination condition: High table coverage ({coverage:.1%}) with sufficient insights."
-            )
-            return False
-
+    # Default: continue until hypotheses are finalized
     return True
 
 
@@ -4741,8 +4727,9 @@ def run_discovery_loop(session_state: SessionState) -> str:
     try:
         initial_message = (
             "Team, let's begin our analysis.\n"
-            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Your goal is to explore the data and use the `add_insight_to_report` tool to log your findings.\n"
-            "- **Hypothesizer:** Your role is to monitor the conversation. Once enough insights have been gathered, your job is to synthesize them and call the `finalize_hypotheses` tool.\n\n"
+            "- **Analysts (QuantitativeAnalyst, PatternSeeker, DataRepresenter):** Explore the data and use the `add_insight_to_report` tool to log findings. When you believe enough insights have been gathered, prompt the Hypothesizer to finalize hypotheses. Do NOT call `TERMINATE` yourself for this reason.\n"
+            "- **Hypothesizer:** Only you can end the discovery phase by calling the `finalize_hypotheses` tool. Listen for cues from the team, and when prompted (or when you believe enough insights are present), synthesize the insights and call `finalize_hypotheses`.\n\n"
+            "**IMPORTANT:** The discovery phase ends ONLY when the Hypothesizer calls `finalize_hypotheses`. All other agents should prompt the Hypothesizer when ready, but only the Hypothesizer can end the phase.\n\n"
             "Let the analysis begin."
         )
         user_proxy.initiate_chat(manager, message=initial_message, session_state=session_state)
@@ -4922,6 +4909,10 @@ def main(epochs: int = 1, fast_mode_frac: float = 0.15) -> str:
     try:
         for epoch in range(epochs):
             logger.info(f"=== Starting Epoch {epoch + 1} / {epochs} (fast_mode) ===")
+
+            # Refresh DB schema for prompt context ONCE per epoch
+            refresh_global_db_schema()
+
             session_state.set_state("fast_mode_sample_frac", fast_mode_frac)
             discovery_report = run_discovery_loop(session_state)
             logger.info(session_state.get_final_insight_report())
@@ -5468,7 +5459,7 @@ plot_manager = PlotManager()
 
 ### `utils/prompt_utils.py`
 
-**File size:** 2,809 bytes
+**File size:** 3,063 bytes
 
 ```python
 import logging
@@ -5505,11 +5496,21 @@ def _refresh_database_schema():
         _jinja_env.globals["db_schema"] = "ERROR: Could not load database schema"
         return None
 
+def refresh_global_db_schema():
+    """
+    Public API for refreshing the DB schema in the Jinja environment globals.
+    Call this ONCE per epoch/run, NOT per prompt.
+    """
+    return _refresh_database_schema()
+
+# Initialize db_schema at module load so it's present for all prompts
+_refresh_database_schema()
+
 
 def load_prompt(template_name: str, **kwargs) -> str:
     """
     Loads and renders a Jinja2 template from the prompts directory.
-    Refreshes database schema and logs the rendered prompt for debugging.
+    Uses the cached global DB schema (refreshed only once per epoch/run).
 
     Args:
         template_name: The name of the template file (e.g., 'agents/strategist.j2').
@@ -5519,10 +5520,7 @@ def load_prompt(template_name: str, **kwargs) -> str:
         The rendered prompt as a string.
     """
     try:
-        # Refresh database schema to ensure it's current
-        _refresh_database_schema()
-
-        # Load and render the template
+        # Do NOT refresh db schema here; it is now cached per epoch/run.
         template = _jinja_env.get_template(template_name)
         rendered_prompt = template.render(**kwargs)
 
@@ -6298,7 +6296,7 @@ def load_test_data(
 
 ### `utils/tools.py`
 
-**File size:** 25,976 bytes
+**File size:** 28,885 bytes
 
 ```python
 # -*- coding: utf-8 -*-
@@ -6390,8 +6388,7 @@ def truncate_output_to_word_limit(text: str, word_limit: int = 1000) -> str:
 
 def run_sql_query(query: str) -> str:
     """
-    Executes a read-only SQL query against the database and returns the result as a markdown string.
-    This tool should be used for all SELECT queries.
+    Executes an SQL query against the database and returns the result as a markdown .
     """
     try:
         with duckdb.connect(database=str(DB_PATH), read_only=False) as conn:
@@ -6652,40 +6649,66 @@ def get_add_to_central_memory_tool(session_state):
 
 
 def get_finalize_hypotheses_tool(session_state):
-    """Returns a function that can be used as an AutoGen tool to finalize hypotheses."""
+    """
+    Returns a function that can be used as an AutoGen tool to finalize hypotheses.
+    
+    TOOL DESCRIPTION FOR AGENTS:
+    ------------------------------------------------------------
+    finalize_hypotheses(hypotheses_data: list) -> str
+    
+    This tool is used to submit the final list of hypotheses for the current discovery round. Each hypothesis MUST be a dictionary with the following structure:
+        {
+            "summary": <str, required, non-empty>,
+            "rationale": <str, required, non-empty>,
+            "id": <str, optional, will be auto-generated if omitted>
+        }
+    - The "summary" is a concise, one-sentence statement of the hypothesis.
+    - The "rationale" is a clear explanation of why this hypothesis is useful and worth testing.
+    - The "id" field is optional; if not provided, it will be auto-generated.
+    - All fields must be strings. Empty or missing required fields will cause the tool to fail.
+    - The tool will return an explicit error message if any item does not match the schema, or if any required field is missing or invalid.
+    - If your call fails, read the error message carefully and correct your output to match the schema contract exactly.
+    
+    Example valid call:
+        finalize_hypotheses([
+            {"summary": "Users who review more books tend to give higher ratings.", "rationale": "Observed a positive correlation in the sample."},
+            {"summary": "Standalone books are rated higher than series books.", "rationale": "Series books have more variance and lower means in ratings."}
+        ])
+    ------------------------------------------------------------
+    """
 
     def finalize_hypotheses(hypotheses_data: list) -> str:
         """
-        Finalizes the list of vetted hypotheses after validation.
+        Validates and finalizes the list of vetted hypotheses. Each item in the list MUST
+        conform to the Hypothesis schema (e.g., {"summary": "...", "rationale": "..."}).
+        - If any item is missing required fields or has an empty value, the tool will fail with a detailed error message.
+        - If the call fails, carefully read the error and correct your output to match the schema contract.
         """
-        logger.info("[TOOL CALL] finalize_hypotheses called with arguments: {}", hypotheses_data)
-        # Step 1: Instantiate Hypothesis models (assigns IDs, validates fields)
+        logger.info(f"[TOOL CALL] finalize_hypotheses called with {len(hypotheses_data)} items.")
+        validated_hypotheses = []
+        for i, h_data in enumerate(hypotheses_data):
+            try:
+                hypothesis = Hypothesis(**h_data)
+                validated_hypotheses.append(hypothesis)
+            except Exception as e:
+                error_message = (
+                    f"[SCHEMA VALIDATION ERROR] Hypothesis at index {i} failed validation.\n"
+                    f"Input: {h_data}\n"
+                    f"Error: {e}\n"
+                    "==> ACTION REQUIRED: Each hypothesis must be a dictionary with non-empty string fields 'summary' and 'rationale'. 'id' is optional.\n"
+                    "Please correct your output to match the schema contract exactly."
+                )
+                logger.error(f"[TOOL ERROR] {error_message}")
+                return error_message
         try:
-            hyp_models = [Hypothesis(**h) for h in hypotheses_data]
+            session_state.finalize_hypotheses(validated_hypotheses)
+            success_message = f"SUCCESS: Successfully validated and saved {len(validated_hypotheses)} hypotheses."
+            logger.info(f"[TOOL SUCCESS] {success_message}")
+            return success_message
         except Exception as e:
-            logger.error(f"[TOOL ERROR] Failed to instantiate Hypothesis models: {e}")
-            return f"ERROR: Failed to instantiate Hypothesis models. Reason: {e}"
-
-        # Step 2: Validate for duplicate IDs and empty rationales
-        ids = set()
-        for h in hyp_models:
-            if h.id in ids:
-                logger.error(f"[TOOL ERROR] Duplicate hypothesis ID found: {h.id}")
-                return f"ERROR: Hypothesis validation failed. Duplicate hypothesis ID found: {h.id}"
-            ids.add(h.id)
-            if not h.rationale:
-                logger.error(f"[TOOL ERROR] Hypothesis {h.id} has an empty rationale.")
-                return f"ERROR: Hypothesis validation failed. Hypothesis {h.id} has an empty rationale."
-
-        # Step 3: Save to session state
-        try:
-            session_state.finalize_hypotheses(hyp_models)
-            logger.info(f"[TOOL SUCCESS] Finalized and saved {len(hyp_models)} valid hypotheses. Hypotheses: {hyp_models}")
-            return f"SUCCESS: Successfully finalized and saved {len(hyp_models)} hypotheses."
-        except Exception as e:
-            logger.error(f"[TOOL ERROR] Failed to save hypotheses after validation: {e}")
-            return f"ERROR: Failed to save hypotheses after validation. Reason: {e}"
-
+            error_message = f"[INTERNAL ERROR] Failed to save hypotheses after validation. Reason: {e}"
+            logger.error(f"[TOOL ERROR] {error_message}")
+            return error_message
     return finalize_hypotheses
 
 
@@ -6764,7 +6787,7 @@ def vision_tool(image_path: str, prompt: str) -> str:  # type: ignore[misc] # Kn
                         ],
                     }
                 ],
-                max_tokens=1000,
+                max_tokens=2000,
             )
             return response.choices[0].message.content
         except BadRequestError as e:
@@ -6805,24 +6828,36 @@ def get_save_features_tool(session_state):
 
 def get_save_candidate_features_tool(session_state):
     """
-    Returns a function that can be used as an AutoGen tool to save candidate features to the session state.
+    Returns a function to save candidate features, now with schema validation.
     """
-
+    from src.schemas.models import CandidateFeature
     def save_candidate_features(candidate_features_data: list) -> str:
         """
-        Saves a list of candidate features (as dicts) to session_state.candidate_features.
+        Validates and saves a list of candidate feature specifications to the session state.
+        Each feature MUST conform to the CandidateFeature schema.
         """
+        logger.info(f"[TOOL CALL] save_candidate_features called with {len(candidate_features_data)} items.")
+        validated_features = []
+        for i, f_data in enumerate(candidate_features_data):
+            try:
+                feature = CandidateFeature(**f_data)
+                validated_features.append(feature)
+            except Exception as e:
+                error_message = (
+                    f"ERROR: CandidateFeature at index {i} (name: '{f_data.get('name', '<missing>')}') failed validation. Error: {e}. "
+                    "Please ensure all required fields are provided and correctly formatted."
+                )
+                logger.error(f"[TOOL ERROR] {error_message}")
+                return error_message
         try:
-            # Optionally validate each candidate feature dict here (e.g. required keys)
-            session_state.set_candidate_features(candidate_features_data)
-            logger.info(
-                f"Saved {len(candidate_features_data)} candidate features to session state."
-            )
-            return f"SUCCESS: Successfully saved {len(candidate_features_data)} candidate features to session state."
+            session_state.set_candidate_features([f.model_dump() for f in validated_features])
+            success_message = f"SUCCESS: Successfully validated and saved {len(validated_features)} candidate features."
+            logger.info(f"[TOOL SUCCESS] {success_message}")
+            return success_message
         except Exception as e:
-            logger.error(f"Failed to save candidate features: {e}")
-            return f"ERROR: Failed to save candidate features. Reason: {e}"
-
+            error_message = f"ERROR: Failed to save candidate features after validation. Reason: {e}"
+            logger.error(f"[TOOL ERROR] {error_message}")
+            return error_message
     return save_candidate_features
 
 
@@ -6882,15 +6917,20 @@ def _execute_python_run_code(pipe, code, run_dir):
     try:
         with contextlib.redirect_stdout(stdout):
             exec(code, local_ns, local_ns)
-        conn.close()
         pipe.send(stdout.getvalue().strip())
     except Exception as e:
         tb = traceback.format_exc()
         pipe.send(f"ERROR: An unexpected error occurred: {e}\n{tb}")
+    finally:
+        conn.close()
 
 
 def execute_python(code: str, timeout: int = 60) -> str:
     """
+    NOTE: A pre-configured DuckDB connection object named `conn` is already provided in the execution environment. DO NOT create your own connection using duckdb.connect(). Use the provided `conn` for all SQL operations (e.g., conn.sql(...)).
+
+    NOTE: After every major code block or SQL result, you should print the result using `print('!!!', result)` so outputs are clearly visible in logs and debugging is easier.
+
     Executes a string of Python code in a controlled, headless, and time-limited environment with injected helper functions.
     Injected helpers: save_plot, get_table_sample, conn (DuckDB connection), add_insight_to_report, etc.
     - Plots are always generated in headless mode (matplotlib 'Agg').
@@ -6922,7 +6962,7 @@ def execute_python(code: str, timeout: int = 60) -> str:
 
 - **Total files processed:** 42
 - **Directory:** `src`
-- **Generated:** 2025-06-16 00:14:12
+- **Generated:** 2025-06-16 02:41:29
 
 ---
 
