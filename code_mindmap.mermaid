@@ -1,0 +1,87 @@
+mindmap
+  root((VULCAN Pipeline))
+    ▶️ **orchestrator.py**
+      (main() loop)
+      🛠️ init_run()
+      💾 **SessionState** (Initialized)
+      
+      %% --- Phase 1: Insight Discovery ---
+      **Phase 1: Insight Discovery Loop**
+        💡 **Discovery Team GroupChat**
+          (Managed by `SmartGroupChatManager`)
+          📝 Uses `discovery_team/*.j2` prompts
+          
+          💡 **DataRepresenter**
+            🛠️ create_analysis_view()
+            💾 Writes to generated_views.json
+          
+          💡 **QuantitativeAnalyst**
+            🛠️ run_sql_query()
+            🛠️ vision_tool()
+            🛠️ save_plot() (via tools.py)
+            🛠️ add_insight_to_report()
+              💾 Writes Insight to SessionState
+              
+          💡 **PatternSeeker**
+            🛠️ run_sql_query()
+            🛠️ add_insight_to_report()
+            
+      %% --- Phase 2: Strategy & Generation ---
+      **Phase 2: Strategy & Generation**
+        💡 **Strategy Team GroupChat**
+          📝 Uses `strategy_team/*.j2` prompts
+          
+          💡 **HypothesisAgent**
+            (Proposes hypotheses)
+            
+          💡 **StrategistAgent**
+            (Critiques for value)
+            
+          💡 **EngineerAgent**
+            (Critiques for feasibility)
+            🛠️ finalize_hypotheses()
+              💾 Writes Hypothesis to SessionState
+              
+        ▶️ **orchestration/ideation.py**
+          💡 **FeatureIdeationAgent**
+            📝 Uses `feature_ideator.j2`
+            💾 Reads Hypotheses from SessionState
+            💾 Writes CandidateFeatures to SessionState
+            
+        ▶️ **orchestration/realization.py**
+          💡 **FeatureRealizationAgent**
+            📝 Uses `feature_realization.j2`
+            💾 Reads CandidateFeatures from SessionState
+            💾 Writes RealizedFeatures to SessionState
+            🛠️ Uses its own sandboxed test
+            
+        💡 **OptimizationAgent (V2)**
+          💾 Reads RealizedFeatures from SessionState
+          🛠️ Uses Optuna & CVDataManager
+          📝 Uses TensorBoard for logging
+          💾 Writes OptimizationResults to SessionState
+
+      %% --- Phase 3: Evaluation & Reflection ---
+      **Phase 3: Final Evaluation & Reflection**
+        💡 **EvaluationAgent**
+          💾 Reads OptimizationResults from SessionState
+          💾 Writes Final Metrics to SessionState
+          
+        💡 **ReflectionAgent**
+          📝 Uses `reflection_agent.j2`
+          💾 Reads *entire* SessionState
+          (Decides to loop or terminate)
+      
+      🛠️ cleanup_analysis_views()
+      
+  %% --- Unused / Legacy Files ---
+  **⚠️ Unused / Legacy Files**
+    (To be refactored or deleted)
+    **`src/utils/memory.py`**
+      (Superseded by `SessionState`)
+    **`src/utils/pubsub.py`**
+      (Orchestrator is now procedural)
+    **`src/agents/strategy_team/reasoning_agent.py`**
+      (Role covered by Strategy Team GroupChat)
+    **`src/agents/strategy_team/optimization_agent.py`**
+      (Superseded by `optimization_agent_v2.py`)
