@@ -11,7 +11,7 @@ from src.evaluation.ranking_metrics import evaluate_ranking_metrics
 from .ranking_utils import get_top_n_recommendations
 
 
-def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, k_list=[5, 10, 20]) -> dict:
     """
     Runs the DeepFM baseline for recommendation.
 
@@ -97,7 +97,7 @@ def run_deepfm_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     # Convert to {user_id: [item_id, ...]}
     recommendations = {user: [item for item, _ in items] for user, items in top_n.items()}
     ground_truth = test.groupby('user_id')['book_id'].apply(list).to_dict()
-    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+    ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=k_list)
     logger.info(f"DeepFM ranking metrics: {ranking_metrics}")
 
     # 6. Evaluate for Accuracy (MSE)

@@ -27,75 +27,26 @@ def get_strategy_team_agents(
     # Load agent prompts from Jinja2 templates - removed HypothesisAgent and
     # replaced FeatureIdeator & FeatureRealizer with a single FeatureEngineer
     # Pass the database schema to each agent's prompt template
+    project_context = (
+        "You are working on a book recommender system. "
+        "The downstream task is to engineer and realize features that improve the accuracy and diversity of book recommendations. "
+        "All features and code should be designed for this context."
+    )
     agent_prompts = {
-        "StrategistAgent": load_prompt("agents/strategy_team/strategist_agent.j2", db_schema=db_schema),
-        "EngineerAgent": load_prompt("agents/strategy_team/engineer_agent.j2", db_schema=db_schema),
-        "FeatureEngineer": load_prompt("agents/feature_realization.j2"),
+        "StrategistAgent": load_prompt(
+            "agents/strategy_team/strategist_agent.j2",
+            db_schema=db_schema,
+            project_context=project_context,
+        ),
     }
 
-    # Define the schema for the save_candidate_features tool
-    save_candidate_features_tool_schema = {
-        "type": "function",
-        "function": {
-            "name": "save_candidate_features",
-            "description": "Saves a list of candidate feature specifications. Each feature spec should be a dictionary.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "candidate_features_data": {
-                        "type": "array",
-                        "description": "A list of candidate features, where each feature is a dictionary defining its 'name', 'description', 'dependencies', and 'parameters'.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string", "description": "Unique, snake_case name."},
-                                "description": {"type": "string", "description": "Explanation of the feature."},
-                                "dependencies": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "List of source column names."
-                                },
-                                "parameters": {
-                                    "type": "object",
-                                    "description": "Dictionary of tunable parameters (name: {type, description}). Empty if no params."
-                                }
-                            },
-                            "required": ["name", "description", "dependencies", "parameters"]
-                        }
-                    }
-                },
-                "required": ["candidate_features_data"]
-            }
-        }
-    }
-
-    # Create agents with loaded prompts
     agents = {}
     for name, prompt in agent_prompts.items():
         current_llm_config = llm_config.copy()
-        if name == "FeatureEngineer":
-            current_llm_config["tools"] = [save_candidate_features_tool_schema]
-        
         agents[name] = autogen.AssistantAgent(
             name=name,
             system_message=prompt,
             llm_config=current_llm_config,
         )
 
-
-    # Add user proxy for code execution with faster termination condition
-    user_proxy = autogen.UserProxyAgent(
-        name="UserProxy_Strategy",
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=15,  # Increased to allow more iterations within a single chat
-        is_termination_msg=lambda x: "FINAL_FEATURES" in x.get("content", ""),  # Updated termination message
-        code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
-    )
-
-    # Register save_candidate_features tool for user_proxy
-    # Assume session_state will be passed in or made available at runtime
-    # This is a placeholder; actual registration should occur where session_state is available
-    # user_proxy.register_tool(get_save_candidate_features_tool(session_state))
-
-    agents["user_proxy"] = user_proxy
     return agents

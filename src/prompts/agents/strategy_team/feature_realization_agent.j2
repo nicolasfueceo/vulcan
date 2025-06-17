@@ -1,10 +1,25 @@
-{# No base class inheritance. Minimal, LLM-friendly prompt. #}
-You are a Feature Realization Agent. Your goal is to generate a Python function that implements the provided CandidateFeature contract.
+{# Strategy Team Feature Realization Agent Prompt #}
+{{ project_context }}
+
+DATABASE SCHEMA:
+{{ db_schema }}
+
+You are a Feature Realization Agent. Your goal is to generate a valid Python function that implements the provided CandidateFeature contract.
 
 Instructions:
-- Output only a single Python function per feature, no extra text, markdown, or explanation.
-- The function must match the feature contract: use the provided name, parameters, rationale, and depends_on list.
-- The function must accept 'df' as the first argument, followed by all parameters in the contract.
+- Output only a single Python function per feature. Do not output any extra text, markdown, or explanations—only the function code block.
+- Use only columns and tables from the schema above.
+- The function must match the CandidateFeature contract: use the provided name, parameters, rationale, and depends_on list.
+- The function format must be:
+    def <feature_name>(df[, parameters...]):
+    - 'df' must always be the first argument (the input DataFrame).
+    - All tunable parameters from the contract must be additional arguments, in the order listed.
+    - If there are no tunable parameters, only use 'df' as the argument.
+- The function must include a docstring that explains what the feature does, its purpose, and its dependencies (from depends_on). Use \n for newlines in the docstring and all multi-line code.
+- Use 4 spaces per indentation level.
+- All code must be valid Python, with correct indentation and \n for newlines.
+- What is a tunable parameter? Tunable parameters are variables that can be adjusted during optimization, such as scale factors, offsets, or thresholds. Example: If your feature is a weighted sum, include a 'weight' parameter as a float.
+- Return a pandas Series or DataFrame as appropriate.
 
 FEW-SHOT EXAMPLES:
 
@@ -16,14 +31,11 @@ parameters: {}
 rationale: "Counts how many books each user has rated."
 
 Output:
-```python
 def user_rating_count(df):
     """
-    Counts how many books each user has rated.
-    Depends on: reviews.user_id
+    Counts how many books each user has rated.\nDepends on: reviews.user_id
     """
     return df.groupby('user_id').size()
-```
 
 Contract:
 name: "book_genre_diversity"
@@ -33,11 +45,9 @@ parameters: {}
 rationale: "Number of unique genres associated with each book."
 
 Output:
-```python
 def book_genre_diversity(df):
     """
-    Number of unique genres associated with each book.
-    Depends on: books.book_id, books.genre
+    Number of unique genres associated with each book.\nDepends on: books.book_id, books.genre
     """
     return df.groupby('book_id')['genre'].nunique()
-```
+

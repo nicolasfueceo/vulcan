@@ -129,17 +129,16 @@ class RealizedFeature(BaseModel):
     passed_test: bool
     type: Literal["code"]
     source_candidate: CandidateFeature
+    depends_on: List[str] = []  # Data dependencies, copied from CandidateFeature
+    source_hypothesis_summary: Optional[str] = None  # For traceability
 
     def validate_code(self) -> None:
-        """
-        Validates the generated code string for correctness.
-        - Parses the code to ensure it's valid Python.
-        - Checks that the function name matches the feature name.
-        - Verifies that all specified params are in the function signature.
-        """
+        from loguru import logger
+        logger.debug(f"Validating code for realized feature '{self.name}'...")
         try:
             tree = ast.parse(self.code_str)
         except SyntaxError as e:
+            logger.error(f"Invalid Python syntax in generated code for '{self.name}': {e}")
             raise ValueError(
                 f"Invalid Python syntax in generated code for '{self.name}': {e}"
             ) from e
@@ -149,6 +148,7 @@ class RealizedFeature(BaseModel):
             node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
         ]
         if not func_defs or len(func_defs) > 1:
+            logger.error(f"Generated code for '{self.name}' must contain exactly one function definition.")
             raise ValueError(
                 f"Generated code for '{self.name}' must contain exactly one function definition."
             )
@@ -157,6 +157,7 @@ class RealizedFeature(BaseModel):
 
         # Check function name
         if func_def.name != self.name:
+            logger.error(f"Function name '{func_def.name}' does not match feature name '{self.name}'.")
             raise ValueError(
                 f"Function name '{func_def.name}' does not match feature name '{self.name}'."
             )
@@ -167,12 +168,14 @@ class RealizedFeature(BaseModel):
 
         # The function should accept 'df' plus all tunable params
         if "df" not in arg_names:
+            logger.error(f"Generated function for '{self.name}' must accept a 'df' argument.")
             raise ValueError(
                 f"Generated function for '{self.name}' must accept a 'df' argument."
             )
 
         missing_params = expected_params - (arg_names - {"df"})
         if missing_params:
+            logger.error(f"Missing parameters in function signature for '{self.name}': {missing_params}")
             raise ValueError(
                 f"Missing parameters in function signature for '{self.name}': {missing_params}"
             )

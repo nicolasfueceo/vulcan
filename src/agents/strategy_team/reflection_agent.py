@@ -1,4 +1,4 @@
-# src/agents/reflection_agent.py
+ src/agents/reflection_agent.py
 import json
 from typing import Dict
 
@@ -53,12 +53,12 @@ class ReflectionAgent:
         """
         logger.info("Starting reflection process...")
 
-        # Gather current state
+         Gather current state
         insights = session_state.get_final_insight_report()
         hypotheses = session_state.get_final_hypotheses()
         views = session_state.get_available_views()
 
-        # Load reflection prompt
+         Load reflection prompt
         reflection_prompt = load_prompt(
             "agents/reflection_agent.j2",
             insights=insights,
@@ -66,13 +66,13 @@ class ReflectionAgent:
             views=json.dumps(views, indent=2),
         )
 
-        # Run reflection chat
+         Run reflection chat
         self.user_proxy.initiate_chat(
             self.assistant,
             message=reflection_prompt,
         )
 
-        # Get the last message from the reflection agent
+         Get the last message from the reflection agent
         last_message_obj = self.user_proxy.last_message()
         last_message_content = last_message_obj.get("content") if last_message_obj else None
 
@@ -85,7 +85,7 @@ class ReflectionAgent:
             }
 
         try:
-            # Parse the response from the reflection agent
+             Parse the response from the reflection agent
             response = json.loads(last_message_content)
             should_continue = response.get("should_continue", False)
             reasoning = response.get("reasoning", "")
@@ -93,7 +93,7 @@ class ReflectionAgent:
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing reflection agent response: {e}")
             logger.error(f"Raw response: {last_message_content}")
-            # Provide a default response
+             Provide a default response
             should_continue = False
             reasoning = "Error parsing response from reflection agent."
             next_steps = "Investigate the error in the reflection agent."

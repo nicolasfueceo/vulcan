@@ -1,9 +1,9 @@
 import featuretools as ft
 import pandas as pd
-
+from loguru import logger 
 
 def run_featuretools_baseline(
-    train_df: pd.DataFrame, books_df: pd.DataFrame, users_df: pd.DataFrame, test_df: pd.DataFrame = None
+    train_df: pd.DataFrame, books_df: pd.DataFrame, users_df: pd.DataFrame, test_df: pd.DataFrame = None, k_list=[5, 10, 20]
 ) -> dict:
     # Featuretools requires nanosecond precision for datetime columns.
     # Convert all relevant columns to ensure compatibility.
@@ -157,7 +157,7 @@ def run_featuretools_baseline(
             recommendations[user_id] = rec_items
         ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
         from src.evaluation.ranking_metrics import evaluate_ranking_metrics
-        ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20])
+        ranking_metrics = evaluate_ranking_metrics(recommendations, ground_truth, k_list=k_list)
         metrics = dict(ranking_metrics)
         # Beyond-accuracy metrics
         global_recs = {user_id: recommendations.get(user_id, [])[:10] for user_id in test_user_ids}
@@ -168,7 +168,7 @@ def run_featuretools_baseline(
         metrics["novelty"] = novelty
         metrics["diversity"] = diversity
         metrics["catalog_coverage"] = coverage
-        logger.success(f"Featuretools+LightFM metrics: {metrics}")
+        logger.info(f"Featuretools+LightFM metrics: {metrics}")
         return metrics
     logger.success("Featuretools baseline finished successfully.")
     return feature_matrix

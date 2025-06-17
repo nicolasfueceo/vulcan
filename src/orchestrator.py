@@ -14,7 +14,6 @@ from loguru import logger
 
 import scripts.setup_views
 from src.agents.discovery_team.insight_discovery_agents import get_insight_discovery_agents
-from src.agents.strategy_team.feature_realization_agent import FeatureRealizationAgent
 from src.agents.strategy_team.optimization_agent_v2 import VULCANOptimizer
 from src.agents.strategy_team.strategy_team_agents import get_strategy_team_agents
 from src.config.log_config import setup_logging
@@ -472,8 +471,6 @@ def run_strategy_loop(
 
     # Extract agents from the pre-initialized dictionary
     strategist = strategy_agents_with_proxy["StrategistAgent"]
-    engineer = strategy_agents_with_proxy["EngineerAgent"]
-    feature_engineer = strategy_agents_with_proxy["FeatureEngineer"]
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
     # --- Tool Registration ---
@@ -484,9 +481,9 @@ def run_strategy_loop(
         }
     )
 
-    # Create the group chat with the necessary agents
+    # Create the group chat with only the StrategistAgent and UserProxy
     groupchat = autogen.GroupChat(
-        agents=[user_proxy, strategist, engineer, feature_engineer],
+        agents=[user_proxy, strategist],
         messages=[],
         max_round=1000,
         speaker_selection_method="auto",
@@ -500,8 +497,8 @@ def run_strategy_loop(
     )
 
     # Construct the initial message to kick off the conversation.
-    # This message is a direct command to the FeatureEngineer to ensure it acts first.
-    initial_message = f"""You are the FeatureEngineer. Your task is to design a set of `CandidateFeature` contracts based on the following hypotheses.
+    # This message is a direct command to the StrategistAgent.
+    initial_message = f"""You are the StrategistAgent. Your task is to design a set of `CandidateFeature` contracts based on the following hypotheses.
 
 **Hypotheses:**
 ```json
@@ -513,7 +510,7 @@ def run_strategy_loop(
 2.  Design a list of `CandidateFeature` contracts. Each contract must be a dictionary with `name`, `description`, `dependencies`, and `parameters`.
 3.  Use the `save_candidate_features` tool to submit your designs. Your response MUST be a call to this tool.
 
-The StrategistAgent and EngineerAgent will then review your work. Begin now.
+Begin now.
 """
 
 
@@ -532,20 +529,11 @@ The StrategistAgent and EngineerAgent will then review your work. Begin now.
         hypotheses = session_state.get_final_hypotheses()
         insights = getattr(session_state, "insights", [])
         logger.info(f"Exploration completed after {manager.round_count} rounds with {len(insights)} insights")
-        # --- Feature Realization Step ---
-        if features:
-            feature_realization_agent = FeatureRealizationAgent(llm_config=llm_config, session_state=session_state)
-            feature_realization_agent.run()
-            realized_features = getattr(session_state, "features", {})
-            realized_features_list = list(realized_features.values()) if isinstance(realized_features, dict) else realized_features
-        else:
-            realized_features_list = []
-
         report = {
             "features_generated": len(features),
             "hypotheses_processed": len(hypotheses),
             "features": features,  # candidate_features are dicts, not Pydantic models
-            "realized_features": [f["name"] if isinstance(f, dict) and "name" in f else getattr(f, "name", None) for f in realized_features_list],
+            "realized_features": [],  # No realization step in simplified workflow
             "hypotheses": [h.model_dump() for h in hypotheses],
         }
 
@@ -598,6 +586,14 @@ def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
 
     # Initialize strategy agents once with the schema
     strategy_agents = get_strategy_team_agents(llm_config=llm_config, db_schema=db_schema)
+    # Add UserProxy agent for the strategy loop
+    user_proxy_strategy = autogen.UserProxyAgent(
+        name="UserProxy_Strategy",
+        human_input_mode="NEVER",
+        max_consecutive_auto_reply=10,
+        code_execution_config={"use_docker": False},
+    )
+    strategy_agents_for_loop = {"StrategistAgent": strategy_agents["StrategistAgent"], "user_proxy": user_proxy_strategy}
 
     all_epoch_reports = []
     coverage_tracker = CoverageTracker()
@@ -627,7 +623,7 @@ def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
                 strategy_report = "Strategy loop skipped: No hypotheses were generated."
             else:
                 # Pass the pre-initialized strategy agents to the strategy loop
-                reflection_results = run_strategy_loop(session_state, strategy_agents, llm_config)
+                reflection_results = run_strategy_loop(session_state, strategy_agents_for_loop, llm_config)
                 if reflection_results:
                     strategy_report = json.dumps(reflection_results, indent=2)
                 else:
@@ -649,22 +645,9 @@ def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
                 }
             )
 
-        # === Optimization Step ===
-        logger.info("Starting optimization step with realized features...")
-        realized_features = list(session_state.features.values()) if hasattr(session_state, 'features') and session_state.features else []  # pylint: disable=no-member
-        if not realized_features:
-            logger.warning("No realized features found for optimization. Skipping optimization step.")
-            optimization_report = "No realized features found. Optimization skipped."
-        else:
-            optimizer = VULCANOptimizer(session=session_state)
-            try:
-                optimization_result = optimizer.optimize(features=realized_features, n_trials=10, use_fast_mode=True)
-                optimization_report = optimization_result.json(indent=2)
-                logger.info(f"Optimization completed. Best score: {optimization_result.best_score}")
-            except Exception as opt_e:
-                logger.error(f"Optimization failed: {opt_e}")
-                optimization_report = f"Optimization failed: {opt_e}"
-
+        # === Optimization Step Skipped in Simplified Workflow ===
+        logger.info("Optimization step skipped in simplified workflow.")
+        optimization_report = "Optimization step skipped in simplified workflow."
     except Exception as e:
         logger.error(
             f"An uncaught exception occurred during orchestration: {type(e).__name__}: {e}"

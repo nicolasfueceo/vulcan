@@ -1,4 +1,4 @@
-# src/agents/evaluation_agent.py
+ src/agents/evaluation_agent.py
 from typing import Optional
 from loguru import logger
 from tensorboardX import SummaryWriter
@@ -41,17 +41,17 @@ class EvaluationAgent:
             logger.warning("No optimization results found. Skipping evaluation.")
             return
         best_params = best_trial.params
-        # --- 1. Load hold-out data ---
+         --- 1. Load hold-out data ---
         data_manager = CVDataManager(
             db_path=session_state.db_path,
             splits_dir="data/processed/cv_splits",
         )
         n_folds = data_manager.get_fold_summary().get("n_folds", 1)
         full_train_df, test_df = data_manager.get_fold_data(fold_idx=n_folds-1, split_type="full_train")
-        # --- 2. Generate feature matrices ---
+         --- 2. Generate feature matrices ---
         X_train = VULCANOptimizer._generate_feature_matrix(full_train_df, realized_features, best_params)
         X_test = VULCANOptimizer._generate_feature_matrix(test_df, realized_features, best_params)
-        # --- 3. Global LightFM model ---
+         --- 3. Global LightFM model ---
         from lightfm.data import Dataset
         dataset = Dataset()
         all_users = pd.concat([full_train_df["user_id"], test_df["user_id"]]).unique()
@@ -72,7 +72,7 @@ class EvaluationAgent:
             global_metrics[f"precision_at_{k}"] = scores.get(f"precision_at_{k}", 0)
             global_metrics[f"recall_at_{k}"] = scores.get(f"recall_at_{k}", 0)
             global_metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
-        # --- 4. Clustering and Intra-Cluster Models ---
+         --- 4. Clustering and Intra-Cluster Models ---
         from sklearn.metrics import silhouette_score
         from sklearn.cluster import KMeans
         def select_optimal_clusters(X, min_k=2, max_k=10):
@@ -91,7 +91,7 @@ class EvaluationAgent:
         n_clusters = select_optimal_clusters(X_train, min_k=2, max_k=10)
         cluster_labels = cluster_users_kmeans(X_train, n_clusters=n_clusters, random_state=42)
         logger.info(f"Selected n_clusters={n_clusters} for user clustering.")
-        # Log the number of clusters to TensorBoard and metrics
+         Log the number of clusters to TensorBoard and metrics
         global_metrics["n_clusters"] = n_clusters
         self.writer.add_scalar("clustering/n_clusters", n_clusters, self.run_count)
         clusters = {}
@@ -118,9 +118,9 @@ class EvaluationAgent:
                 metrics[f"hit_rate_at_{k}"] = scores.get(f"hit_rate_at_{k}", 0)
             cluster_metrics[label] = metrics
             clusters[label] = user_ids
-        # --- 5. Beyond-Accuracy Metrics ---
+         --- 5. Beyond-Accuracy Metrics ---
         def get_recommendations(model, dataset, user_ids, k):
-            # Recommend top-k for each user (returns a sparse matrix)
+             Recommend top-k for each user (returns a sparse matrix)
             recs = {}
             for i, user_id in enumerate(user_ids):
                 scores = model.predict(i, np.arange(len(all_items)), user_features=None)
@@ -128,8 +128,8 @@ class EvaluationAgent:
                 rec_items = [all_items[j] for j in top_items]
                 recs[user_id] = rec_items
             return recs
-        # Global recommendations for beyond-accuracy
-        # (Assume last trained model is global)
+         Global recommendations for beyond-accuracy
+         (Assume last trained model is global)
         from lightfm import LightFM
         model = LightFM(loss="warp", random_state=42)
         (train_interactions, _) = dataset.build_interactions(
@@ -142,19 +142,19 @@ class EvaluationAgent:
         catalog = set(all_items)
         coverage = compute_catalog_coverage(global_recs, catalog)
         global_metrics.update({"novelty": novelty, "diversity": diversity, "catalog_coverage": coverage})
-        # Cluster beyond-accuracy
+         Cluster beyond-accuracy
         for label, user_ids in clusters.items():
             recs = get_recommendations(model, dataset, user_ids, k=10)
             cluster_metrics[label]["novelty"] = compute_novelty(recs, full_train_df)
             cluster_metrics[label]["diversity"] = compute_diversity(recs)
             cluster_metrics[label]["catalog_coverage"] = compute_catalog_coverage(recs, catalog)
-        # --- 6. Logging and Artifact Saving ---
+         --- 6. Logging and Artifact Saving ---
         self.writer.add_hparams(best_params, global_metrics)
         session_state.set_state("final_evaluation_metrics", {
             "global": global_metrics,
             "clusters": cluster_metrics
         })
-        # Save final report
+         Save final report
         report = {
             "best_params": best_params,
             "global_metrics": global_metrics,

@@ -3,7 +3,7 @@
 import numpy as np
 from rankereval import Rankings, BinaryLabels, NumericLabels
 from rankereval.metrics import NDCG, Precision, Recall, F1, HitRate, FirstRelevantRank
-
+from loguru import logger
 
 def evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20]):
     """
@@ -15,7 +15,6 @@ def evaluate_ranking_metrics(recommendations, ground_truth, k_list=[5, 10, 20]):
     Returns:
         metrics: dict with keys like 'ndcg@10', 'precision@5', etc.
     """
-    logger = logging.getLogger("ranking_metrics")
     # Only evaluate users present in both dicts
     user_ids = sorted(set(recommendations) & set(ground_truth))
     if not user_ids:

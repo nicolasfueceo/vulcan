@@ -8,12 +8,11 @@ from src.baselines.feature_engineer.featuretools_baseline import run_featuretool
 from src.baselines.recommender.svd_baseline import run_svd_baseline
 from torch.utils.tensorboard import SummaryWriter
 
-# ... (other imports remain unchanged)
 
 from src.data.cv_data_manager import CVDataManager
 
 
-def main():
+def main(sampling_fraction=0.1, k_list=[5]):
     """
     Main function to run all baseline models and save their results.
 
@@ -63,7 +62,7 @@ def main():
 
         # Featuretools Baseline
         try:
-            metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df)
+            metrics = run_featuretools_baseline(train_df, books_df, users_df, test_df, k_list=k_list)
             per_fold_results["featuretools_lightfm"].append(metrics)
             logger.success(f"Featuretools+LightFM baseline completed. Metrics: {metrics}")
             if "precision_at_10" in metrics:
@@ -77,7 +76,7 @@ def main():
 
         # SVD Baseline
         try:
-            metrics = run_svd_baseline(train_df, test_df)
+            metrics = run_svd_baseline(train_df, test_df, k_list=k_list)
             per_fold_results["svd"].append(metrics)
             logger.success(f"SVD baseline completed. Metrics: {metrics}")
             if "rmse" in metrics:
@@ -89,7 +88,7 @@ def main():
 
         # Popularity Baseline
         try:
-            metrics = run_popularity_baseline(train_df, test_df)
+            metrics = run_popularity_baseline(train_df, test_df, k_list=k_list)
             per_fold_results["popularity"].append(metrics)
             logger.success(f"Popularity baseline completed. Metrics: {metrics}")
         except Exception as e:
@@ -99,7 +98,7 @@ def main():
 
         # DeepFM Baseline
         try:
-            metrics = run_deepfm_baseline(train_df, test_df)
+            metrics = run_deepfm_baseline(train_df, test_df, k_list=k_list)
             per_fold_results["deepfm"].append(metrics)
             logger.success(f"DeepFM baseline completed. Metrics: {metrics}")
         except Exception as e:
@@ -121,6 +120,8 @@ def main():
                 metrics_by_key.setdefault(k, []).append(v)
         baseline_agg = {}
         for k, v_list in metrics_by_key.items():
+            if not k.startswith('ndcg@5'):
+                continue  # Only keep ndcg@5
             arr = np.array(v_list)
             baseline_agg[f"{k}_mean"] = float(np.mean(arr))
             baseline_agg[f"{k}_std"] = float(np.std(arr))
@@ -156,4 +157,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sampling_fraction=0.1, k_list=[5])

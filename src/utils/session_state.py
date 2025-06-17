@@ -399,7 +399,7 @@ class SessionState:
             "feature_realization_run_count": self.feature_realization_run_count,
             "reflection_run_count": self.reflection_run_count,
         }
-        output_path = self.run_dir / "session_state.json"
+        output_path = Path(self.run_dir) / Path("session_state.json")
         with open(output_path, "w") as f:
             json.dump(output, f, indent=4)
 

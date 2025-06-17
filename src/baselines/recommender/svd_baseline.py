@@ -7,7 +7,7 @@ from src.evaluation.ranking_metrics import evaluate_ranking_metrics
 from .ranking_utils import get_top_n_recommendations
 
 
-def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
+def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, k_list=[5, 10, 20]) -> dict:
     """
     Runs the SVD baseline, evaluating with RMSE, MAE, and NDCG@10.
     """
@@ -38,22 +38,35 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict:
     logger.info("Evaluating model for ranking metrics (RankerEval)...")
     import numpy as np
     user_ids = test_df['user_id'].unique()
-    item_ids = train_df['book_id'].unique()
     top_n = {}
+    # Build mapping from inner item id to raw item id
+    item_inner_id_to_raw = {iid: model.trainset.to_raw_iid(iid) for iid in range(len(model.qi))}
     for user_id in user_ids:
-        seen_items = set(train_df[train_df['user_id'] == user_id]['book_id'])
-        candidate_items = [iid for iid in item_ids if iid not in seen_items]
-        preds = []
-        for book_id in candidate_items:
-            try:
-                pred = model.predict(user_id, book_id)
-                preds.append((book_id, pred.est))
-            except Exception:
-                continue
-        preds.sort(key=lambda x: -x[1])
-        top_n[user_id] = [bid for bid, _ in preds[:20]]  # up to 20 for all K
+        try:
+            inner_uid = model.trainset.to_inner_uid(user_id)
+        except ValueError:
+            continue  # user not in training set
+        # Get seen items in internal ids
+        seen_inner_iids = set()
+        for iid in train_df[train_df['user_id'] == user_id]['book_id']:
+            if model.trainset.knows_item(iid):
+                try:
+                    seen_inner_iids.add(model.trainset.to_inner_iid(iid))
+                except ValueError:
+                    continue
+        user_vec = model.pu[inner_uid]
+        scores = model.qi @ user_vec  # shape (n_items,)
+        # Mask seen items
+        if seen_inner_iids:
+            scores[list(seen_inner_iids)] = -np.inf
+        # Get top-20 indices efficiently
+        top_indices = np.argpartition(scores, -20)[-20:]
+        top_indices_sorted = top_indices[np.argsort(scores[top_indices])[::-1]]
+        # Map back to raw ids
+        top_n[user_id] = [item_inner_id_to_raw[iid] for iid in top_indices_sorted]
+
     ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
-    ranking_metrics = evaluate_ranking_metrics(top_n, ground_truth, k_list=[5, 10, 20])
+    ranking_metrics = evaluate_ranking_metrics(top_n, ground_truth, k_list=k_list)
     logger.info(f"SVD baseline ranking metrics: {ranking_metrics}")
 
     # 5. Return Metrics
