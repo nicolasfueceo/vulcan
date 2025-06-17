@@ -23,6 +23,15 @@
 \RequirePackage{graphicx}
 \RequirePackage{setspace}
 \RequirePackage{kantlipsum}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, fit, matrix, shapes,arrows,positioning,decorations.pathreplacing,shadows, shapes.geometric, arrows.meta, positioning, decorations.pathmorphing}
+\usepackage{fontawesome5}
+\usepackage{tikz}
+\usepackage{tikz-3dplot}
+\usepackage{pgfplots}
+\usepackage{xcolor}
+\usetikzlibrary{shapes,arrows,positioning,fit,backgrounds,decorations.pathreplacing,patterns,shadows,calc}
 
 \RequirePackage{fontspec}
 
@@ -32,7 +41,7 @@
 \RequirePackage{minitoc}
 
 \makeatletter
-\def\input@path{{chapters/}}
+\def\input@path{{report/latex/chapters}}
 \makeatother
 
 \RequirePackage[printonlyused]{acronym}

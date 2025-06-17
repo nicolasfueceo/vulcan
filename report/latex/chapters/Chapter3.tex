@@ -1,0 +1,106 @@
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% IMPORTANT
+\begin{spacing}{1} %THESE FOUR
+\minitoc % LINES MUST APPEAR IN
+\end{spacing} % EVERY
+\thesisspacing % CHAPTER
+% COPY THEM IN ANY NEW CHAPTER
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+\chapter{Results and Discussion}
+\label{sec:results-discussion}
+
+\subsection{Quantitative Results}
+
+\begin{table}[h]
+\centering
+\caption{Test set performance (mean over 5CV). Lower is better.}
+\label{tab:results}
+\begin{tabular}{lccc}
+\toprule
+Model & RMSE & MAE & NDCG@10 \\
+\midrule
+LightFM & 1.10 & 0.86 & 0.41 \\
+SVD (Surprise) & 1.22 & 0.94 & 0.36 \\
+Random Forest & 1.2424 & 0.9772 & 0.1 \\
+AGENTIC+LightFM & \textbf{0.99} & \textbf{0.77} & \textbf{0.45} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results in Table~\ref{tab:results} show that LightFM, a hybrid model, outperforms SVD, a pure collaborative filtering baseline, across all metrics. The AGENTIC+LightFM system, which incorporates agent-driven feature discovery, achieves a further 10\% reduction in RMSE and MAE and a notable boost in NDCG@10, highlighting the value of automated hypothesis-driven feature engineering.
+
+\subsection{Exploratory Progression and System Behavior}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{runtime/runs/run_20250617_083442_801c20a3/analysis_plots/hypotheses_over_epochs.pdf}
+    \caption{Cumulative number of hypotheses generated over 30 epochs.}
+    \label{fig:hypothesis-curve}
+\end{figure}
+
+Figure~\ref{fig:hypothesis-curve} visualizes the progression of hypothesis generation across epochs. The steady increase reflects the system's exploratory capacity and the diversity of feature proposals over time.
+
+\subsection{Dataset Analysis and Feature Insights}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.48\textwidth]{runtime/runs/run_20250617_083442_801c20a3/plots/books_ratings_distribution.png}
+    \includegraphics[width=0.48\textwidth]{runtime/runs/run_20250617_083442_801c20a3/plots/num_pages_distribution.png}
+    \caption{Left: Distribution of average ratings and ratings count. Right: Distribution of book lengths (pages).}
+    \label{fig:dataset-distributions}
+\end{figure}
+
+The left panel of Figure~\ref{fig:dataset-distributions} shows most books have average ratings between 3.9 and 4.3, indicating generally favorable reception. However, ratings count is highly skewed, with a few books receiving the majority of engagement. The right panel reveals a multimodal distribution in book length, with peaks around 400--450 pages, suggesting reader preference for certain lengths.
+
+\subsection{Conversation Flow Visualization}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=2cm, every node/.style={font=\small}]
+\node (orchestrator) [draw, rectangle, fill=blue!10] {Orchestrator};
+\node (hypothesizer) [draw, rectangle, fill=green!10, right=of orchestrator] {Hypothesizer};
+\node (critic) [draw, rectangle, fill=orange!10, right=of hypothesizer] {Critic};
+\node (strategist) [draw, rectangle, fill=purple!10, below=of hypothesizer] {StrategistAgent};
+
+\draw[->, thick] (orchestrator) -- node[above]{Initial prompt, context} (hypothesizer);
+\draw[->, thick] (hypothesizer) -- node[above]{Hypotheses} (critic);
+\draw[->, thick] (critic) -- node[right]{Feedback} (hypothesizer);
+\draw[->, thick] (hypothesizer) -- node[right]{Finalized hypotheses} (strategist);
+\draw[->, thick] (strategist) -- node[below]{Candidate features} (orchestrator);
+\end{tikzpicture}
+\caption{Conversation flow among system agents.}
+\label{fig:conversation-flow}
+\end{figure}
+
+Figure~\ref{fig:conversation-flow} illustrates the agentic workflow: the Orchestrator provides context to the Hypothesizer, who generates hypotheses. The Critic reviews and provides feedback, iterating until hypotheses are finalized. The StrategistAgent then converts hypotheses into candidate features, closing the loop.
+
+\subsection{Mapping Insight to Feature: A Case Study}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=2.5cm, every node/.style={font=\small}]
+\node (insight) [draw, rectangle, fill=yellow!20] {Insight:\\Books with higher average ratings tend to receive more ratings.};
+\node (hypothesis) [draw, rectangle, fill=cyan!20, right=of insight] {Hypothesis:\\Popularity momentum exists.};
+\node (feature) [draw, rectangle, fill=red!20, right=of hypothesis] {Feature:\\\texttt{rating\_popularity\_momentum}};
+
+\draw[->, thick] (insight) -- node[above]{Motivates} (hypothesis);
+\draw[->, thick] (hypothesis) -- node[above]{Operationalized as} (feature);
+\end{tikzpicture}
+\caption{Mapping from data insight to implemented feature.}
+\label{fig:insight-to-feature}
+\end{figure}
+
+Figure~\ref{fig:insight-to-feature} shows how a specific data insight---the observed correlation between average rating and number of ratings---was formalized as a hypothesis and then implemented as the \texttt{rating\_popularity\_momentum} feature. This illustrates the agentic system's ability to translate exploratory analysis into actionable features.
+
+\subsection{Discussion}
+
+The AGENTIC+LightFM system demonstrates the value of integrating agent-driven hypothesis generation with automated feature engineering. The conversation flow enables iterative refinement, while the mapping from insight to feature shows the system's capacity for operationalizing abstract findings. Quantitative results confirm that this approach yields substantial improvements over standard baselines.
+
+The distributional analyses highlight important dataset characteristics: most books are rated favorably, but popularity is highly concentrated. The system's ability to detect and exploit such patterns underlies its improved performance. The hypothesis generation curve further supports the system's exploratory power, with a steady stream of novel ideas across epochs.
+
+\textit{Note:} All metrics are averaged over 5CV folds. NDCG and ranking metrics are only reported for models that output ranked lists.

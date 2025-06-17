@@ -15,7 +15,17 @@
 \addbibresource{references.bib}
 % ... TO HERE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
+\usepackage{tikz}
+\usepackage{xcolor}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, fit, matrix, shapes,arrows,positioning,decorations.pathreplacing,shadows, shapes.geometric, arrows.meta, positioning, decorations.pathmorphing}
+\usepackage{fontawesome5}
+\usepackage{tikz}
+\usepackage{tikz-3dplot}
+\usepackage{pgfplots}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usetikzlibrary{shapes,arrows,positioning,fit,backgrounds,decorations.pathreplacing,patterns,shadows,calc}
 
 %%%%%%%%%%%%%%%% SETUP %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -63,7 +73,7 @@
 % Do you want a list of tables?
 % Do you want an acknowledgement page?
 % Do you want a list of acronyms?
-\setboolean{list_of_figures}{true} % false or true - Default is true
+\setboolean{list_of_figures}{false} % false or true - Default is true
 \setboolean{list_of_tables}{false} % false or true - Default is false
 \setboolean{acknowledgement}{true} % false or true - Default is true
 \setboolean{acronyms}{true} % false or true - Default is true
@@ -102,8 +112,9 @@
 
 
 \begin{document}
+%TC:ignore
 \preamble
-
+%TC:endignore
 % EDIT THE CONTENT OF THE FILES
 % Abstract.tex
 % OrigSta_Copyright.tex
@@ -114,9 +125,10 @@
 % ADD AS MANY CHAPTERS AS NEEDED
 % BY CREATING .TEX FILES IN THE FOLDER chapters
 % AND ADDING \input{namechapter.tex} BELOW
-\input{Chapter1.tex}
-\input{Chapter2.tex}
-\input{LastChapter.tex}
+\include{report/latex/chapters/Chapter1}
+\include{report/latex/chapters/Chapter2}
+\include{report/latex/chapters/Chapter3}
+%\input{LastChapter.tex}
 
 % You can change the title of the conclusions by changing the text between { }
 \conclusions{Conclusions and future directions} % Do not remove - required
@@ -128,8 +140,10 @@
 % APPENDICES ARE OPTIONAL
 % COMMENT OUT BOTH LINES BELOW TO REMOVE THEM
 % ADD CHAPTERS TO ADD MULTIPLE APPENDICES
+%TC:ignore
 \appendix 
-\input{AppendixA.tex}
+
+%\input{AppendixA.tex}
 %\input{AppendixB.tex} % Example second appendix (need to create the file in "chapters")
 
 
@@ -137,5 +151,5 @@
 \RemoveLabels % Do not change - required
 \thesisspacing % Do not change - required
 \printbibliography[title={Bibliography},heading=bibintoc] % Do not change - required
-
+%TC:endignore
 \end{document}
