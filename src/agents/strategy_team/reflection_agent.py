@@ -1,4 +1,4 @@
- src/agents/reflection_agent.py
+
 import json
 from typing import Dict
 
@@ -52,30 +52,21 @@ class ReflectionAgent:
             - next_steps: list of suggested areas to explore
         """
         logger.info("Starting reflection process...")
-
-         Gather current state
         insights = session_state.get_final_insight_report()
         hypotheses = session_state.get_final_hypotheses()
         views = session_state.get_available_views()
-
-         Load reflection prompt
         reflection_prompt = load_prompt(
             "agents/reflection_agent.j2",
             insights=insights,
             hypotheses=json.dumps(hypotheses, indent=2),
             views=json.dumps(views, indent=2),
         )
-
-         Run reflection chat
         self.user_proxy.initiate_chat(
             self.assistant,
             message=reflection_prompt,
         )
-
-         Get the last message from the reflection agent
         last_message_obj = self.user_proxy.last_message()
         last_message_content = last_message_obj.get("content") if last_message_obj else None
-
         if not last_message_content:
             logger.error("Could not retrieve a response from the reflection agent.")
             return {
@@ -83,17 +74,14 @@ class ReflectionAgent:
                 "reasoning": "Failed to get a response from the reflection agent.",
                 "next_steps": "Investigate the reflection agent's chat history for errors.",
             }
-
         try:
-             Parse the response from the reflection agent
             response = json.loads(last_message_content)
-            should_continue = response.get("should_continue", False)
-            reasoning = response.get("reasoning", "")
-            next_steps = response.get("next_steps", "")
+            should_continue = True
+            reasoning = ""
+            next_steps = ""
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing reflection agent response: {e}")
             logger.error(f"Raw response: {last_message_content}")
-             Provide a default response
             should_continue = False
             reasoning = "Error parsing response from reflection agent."
             next_steps = "Investigate the error in the reflection agent."

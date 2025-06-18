@@ -36,6 +36,8 @@ def run_featuretools_baseline(
         for col in timestamp_cols:
             vals = pd.to_datetime(df[col], errors='coerce')
             mask &= (vals >= pd.Timestamp.min) & (vals <= pd.Timestamp.max)
+            # remove cals more than today's date
+            mask &= (vals <= pd.Timestamp.today())
             mask &= vals.notna()
         cleaned = df[mask].copy()
         dropped = before - len(cleaned)

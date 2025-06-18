@@ -503,7 +503,7 @@ def get_save_features_tool(session_state):
     return save_features
 
 
-def _execute_python_run_code(pipe, code, run_dir):
+def _execute_python_run_code(pipe, code, run_dir, session_state=None):
     # Headless plotting
     import matplotlib
 
@@ -535,7 +535,22 @@ def _execute_python_run_code(pipe, code, run_dir):
             print(f"ERROR: Could not save plot: {e}")
             return None
 
-   
+    # Create save_candidate_features function if session_state is available
+    def save_candidate_features(candidate_features_data):
+        if session_state is None:
+            print("ERROR: save_candidate_features called but no session_state available")
+            return "ERROR: No session state available"
+        
+        try:
+            # Use the same logic as the registered tool
+            from src.utils.tools import get_save_candidate_features_tool
+            tool_func = get_save_candidate_features_tool(session_state)
+            result = tool_func(candidate_features_data)
+            print(f"SUCCESS: Saved {len(candidate_features_data)} candidate features")
+            return result
+        except Exception as e:
+            print(f"ERROR: Failed to save candidate features: {e}")
+            return f"ERROR: {e}"
 
     # Provide a real DuckDB connection for the code
     conn = duckdb.connect(database=str(DB_PATH), read_only=False)
@@ -546,6 +561,7 @@ def _execute_python_run_code(pipe, code, run_dir):
     local_ns = {
         "save_plot": save_plot,
         "get_table_sample": get_table_sample,
+        "save_candidate_features": save_candidate_features,
         "conn": conn,
         "__builtins__": __builtins__,
         "plt": plt,
@@ -567,7 +583,7 @@ def _execute_python_run_code(pipe, code, run_dir):
         conn.close()
 
 
-def execute_python(code: str, timeout: int = 300) -> str:
+def execute_python(code: str, timeout: int = 300, session_state=None) -> str:
     """
     NOTE: A pre-configured DuckDB connection object named `conn` is already provided in the execution environment. DO NOT create your own connection using duckdb.connect(). Use the provided `conn` for all SQL operations (e.g., conn.sql(...)).
 
@@ -578,6 +594,7 @@ def execute_python(code: str, timeout: int = 300) -> str:
     Args:
         code: Python code to execute
         timeout: Maximum time (seconds) to allow execution (default: 300)
+        session_state: Optional session state to make save_candidate_features available
     Returns:
         The stdout of the executed code, or an error message if it fails.
     """
@@ -585,7 +602,7 @@ def execute_python(code: str, timeout: int = 300) -> str:
 
     run_dir = str(get_run_dir())
     parent_conn, child_conn = multiprocessing.Pipe()
-    p = multiprocessing.Process(target=_execute_python_run_code, args=(child_conn, code, run_dir))
+    p = multiprocessing.Process(target=_execute_python_run_code, args=(child_conn, code, run_dir, session_state))
     p.start()
     p.join(timeout)
     if p.is_alive():
@@ -690,5 +707,3 @@ def get_save_candidate_features_tool(session_state):
             )
             logger.error(f"[TOOL ERROR] {error_message}")
             return error_message
-
-    return save_candidate_features

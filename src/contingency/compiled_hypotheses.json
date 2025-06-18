@@ -1,0 +1,901 @@
+{
+  "total_hypotheses": 77,
+  "total_runs_processed": 17,
+  "runs_with_hypotheses": 9,
+  "compilation_timestamp": "2025-06-17T11:30:00+02:00",
+  "run_metadata": [
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "hypotheses_count": 12,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "test_strategy_team_v2",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 1,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_092624_07d4df98",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "hypotheses_count": 15,
+      "insights_count": 6,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "hypotheses_count": 5,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "hypotheses_count": 8,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_042705_066c2790",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 1,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "hypotheses_count": 15,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_042827_f8dc32ad",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 1,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_043033_61f4f99b",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 1,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "hypotheses_count": 5,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "hypotheses_count": 9,
+      "insights_count": 2,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_092044_2730c199",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_074730_e81776b7",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_093601_ae6eca46",
+      "hypotheses_count": 3,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "hypotheses_count": 5,
+      "insights_count": 0,
+      "candidate_features_count": 5,
+      "has_data": true
+    },
+    {
+      "run_id": "run_20250617_000332_07441b96",
+      "hypotheses_count": 0,
+      "insights_count": 0,
+      "candidate_features_count": 0,
+      "has_data": true
+    }
+  ],
+  "hypotheses": [
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "13af6b11-081c-4940-a4cc-81c4c481e220",
+      "summary": "Users who read more books tend to provide higher average ratings.",
+      "rationale": "This indicates a positive relationship between engagement and satisfaction in reading, which can guide personalized recommendations.",
+      "depends_on": [
+        "user_reading_trends.books_read",
+        "user_reading_trends.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "a8a69379-c9ec-4d88-a3bd-0ed31945b6ce",
+      "summary": "Users prefer specific genres that have consistently high average ratings.",
+      "rationale": "Identifying these genres can enhance recommendation systems by tailoring suggestions to user preferences, increasing engagement.",
+      "depends_on": [
+        "avg_rating_by_genre.genre",
+        "avg_rating_by_genre.average_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "df51544b-6df9-405a-8d38-8167f9fd8437",
+      "summary": "Shelf categories that accumulate more books indicate user interest in those areas.",
+      "rationale": "Analyzing shelf popularity can guide curators and recommend titles effectively, especially for new users looking for suggestions.",
+      "depends_on": [
+        "book_shelves.shelf",
+        "book_shelves.cnt"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "4c47ef5c-ad65-4d5e-bea3-cdb97e82b9fb",
+      "summary": "Readers show a preference for certain book formats based on average ratings.",
+      "rationale": "This insight can help personalize recommendations based on the specific format a user tends to favor, enhancing user satisfaction.",
+      "depends_on": [
+        "book_genre_format_ratings.format",
+        "book_genre_format_ratings.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "cdc7d343-0650-4e28-a54e-4fb9817f6907",
+      "summary": "Users who read more books tend to provide higher average ratings.",
+      "rationale": "This indicates a relationship between engagement and satisfaction in reading, which can guide personalized recommendations.",
+      "depends_on": [
+        "user_reading_trends.books_read",
+        "user_reading_trends.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "b818439d-a05e-4650-bc74-141657728f36",
+      "summary": "Users prefer specific genres that have consistently high average ratings.",
+      "rationale": "Identifying these genres can enhance recommendation systems by tailoring suggestions to user preferences, increasing engagement.",
+      "depends_on": [
+        "avg_rating_by_genre.genre",
+        "avg_rating_by_genre.average_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "4dc82d65-0f39-49a5-90ef-a252e4f98dbe",
+      "summary": "Shelf categories that accumulate more books indicate user interest in those areas.",
+      "rationale": "Analyzing shelf popularity can guide curators and recommend titles effectively, especially for new users looking for suggestions.",
+      "depends_on": [
+        "book_shelves.shelf",
+        "book_shelves.cnt"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "d65bba37-cbd2-4c87-9edd-af0f521786c9",
+      "summary": "Readers show a preference for certain book formats based on average ratings.",
+      "rationale": "This insight can help personalize recommendations based on the specific format a user tends to favor, enhancing user satisfaction.",
+      "depends_on": [
+        "book_genre_format_ratings.format",
+        "book_genre_format_ratings.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "dc360ce4-f286-4960-878c-a6df062f3188",
+      "summary": "Users who read more books tend to provide higher average ratings.",
+      "rationale": "This indicates a relationship between engagement and satisfaction in reading, which can guide personalized recommendations.",
+      "depends_on": [
+        "user_reading_trends.books_read",
+        "user_reading_trends.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "318bfbc0-ef8d-4b36-bdde-4bbf21d6c62d",
+      "summary": "Users prefer specific genres that have consistently high average ratings.",
+      "rationale": "Identifying these genres can enhance recommendation systems by tailoring suggestions to user preferences, increasing engagement.",
+      "depends_on": [
+        "avg_rating_by_genre.genre",
+        "avg_rating_by_genre.average_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "32dffbfb-04ee-4216-b592-124072448424",
+      "summary": "Shelf categories that accumulate more books indicate user interest in those areas.",
+      "rationale": "Analyzing shelf popularity can guide curators and recommend titles effectively, especially for new users looking for suggestions.",
+      "depends_on": [
+        "book_shelves.shelf",
+        "book_shelves.cnt"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093150_14db6164",
+      "id": "10e08f46-b3c3-4900-b3f1-ab1ccb6b4722",
+      "summary": "Readers show a preference for certain book formats based on average ratings.",
+      "rationale": "This insight can help personalize recommendations based on the specific format a user tends to favor, enhancing user satisfaction.",
+      "depends_on": [
+        "book_genre_format_ratings.format",
+        "book_genre_format_ratings.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "72ff3917-8c3d-42ef-ad1d-1331b8aca456",
+      "summary": "Readers exhibit distinct preferences across genres, with significant interest in fantasy and romance.",
+      "rationale": "Understanding genre popularity can enhance targeted recommendations and improve user engagement.",
+      "depends_on": [
+        "book_genre_format_ratings.genre",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "81dce0f6-fac7-4e2f-ae38-e498a03a7a39",
+      "summary": "Users demonstrate a range of reading behaviors, influencing how books are rated and reviewed.",
+      "rationale": "Identifying user behavior clusters can tailor recommendations to specific user segments, enhancing user satisfaction.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "1ed5f386-211e-43d0-b883-73be8b60cfe9",
+      "summary": "Users who rate steampunk and fantasy literature higher may also enjoy other genres with similar thematic elements.",
+      "rationale": "Exploring genre interconnectivity could refine recommendation strategies for users with diverse tastes.",
+      "depends_on": [
+        "curated_reviews.rating",
+        "curated_books.title"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "b8be3f1f-e683-4e80-8fba-6ec3c6f519f8",
+      "summary": "Books with authors who collaborate frequently may be rated higher due to perceived quality or continuous thematic alignment.",
+      "rationale": "Understanding the impact of author collaborations can enhance recommendations based on thematic consistency or quality.",
+      "depends_on": [
+        "book_authors.author_id",
+        "curated_books.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "b9f0a4a3-0176-4fa7-aa45-2a7dea3bbe8e",
+      "summary": "Users displaying certain reading behaviors (few books but high ratings) may benefit from curated personalized recommendations.",
+      "rationale": "Targeting user segments with specific reading patterns could optimize engagement through tailored suggestions.",
+      "depends_on": [
+        "user_reading_trends.books_read",
+        "user_reading_trends.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "e8878f2d-f729-47f6-ba65-fa5787625ff4",
+      "summary": "Books with more pages may affect user ratings differently compared to shorter books.",
+      "rationale": "Longer books may provide more depth in storytelling, which can appeal to readers, or they may overwhelm readers, impacting ratings adversely.",
+      "depends_on": [
+        "curated_books.num_pages",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "d76c2b69-7eea-478c-803c-8dee1852b51f",
+      "summary": "Ratings and descriptions might correlate strongly, suggesting that well-articulated descriptions entice higher ratings.",
+      "rationale": "Descriptive quality may engage readers more effectively, boosting their ratings as their expectations are met or exceeded.",
+      "depends_on": [
+        "curated_books.title",
+        "curated_books.description",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "803fa0f4-7918-46bf-adcb-2c48d9ceeca4",
+      "summary": "Positive sentiment in reviews could predict higher book ratings.",
+      "rationale": "Emotional connections in reviews reflect reader satisfaction, which is likely to impact ratings positively.",
+      "depends_on": [
+        "curated_reviews.review_text",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "03540c1c-5348-4de6-afae-80ff7c59120a",
+      "summary": "Users who enjoy a particular book may also prefer others from the same author or similar thematic books.",
+      "rationale": "Cross-recommendation between similar books could enhance user experience and interactions.",
+      "depends_on": [
+        "book_similars.book_id",
+        "book_similars.similar_book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "9ad09702-314b-4850-8aa8-490f469c3d9d",
+      "summary": "Increased user interaction correlates positively with higher ratings.",
+      "rationale": "More interactions suggest greater engagement and satisfaction, typically reflected in higher ratings.",
+      "depends_on": [
+        "interactions.review_id",
+        "interactions.n_votes",
+        "interactions.n_comments"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "7652cba5-dd9c-4226-8b60-82f22365fbbb",
+      "summary": "Books with more pages may affect user ratings differently compared to shorter books.",
+      "rationale": "Longer books may provide more depth in storytelling, which can appeal to readers, or they may overwhelm readers, impacting ratings adversely.",
+      "depends_on": [
+        "curated_books.num_pages",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "4f633c54-f92f-45c5-bd89-6b693fabb7ae",
+      "summary": "Ratings and descriptions might correlate strongly, suggesting that well-articulated descriptions entice higher ratings.",
+      "rationale": "Descriptive quality may engage readers more effectively, boosting their ratings as their expectations are met or exceeded.",
+      "depends_on": [
+        "curated_books.title",
+        "curated_books.description",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "46ae6501-451c-4396-b4e5-77a2b591cfcb",
+      "summary": "Positive sentiment in reviews could predict higher book ratings.",
+      "rationale": "Emotional connections in reviews reflect reader satisfaction, which is likely to impact ratings positively.",
+      "depends_on": [
+        "curated_reviews.review_text",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "67e7537b-3f3f-4542-a356-f365da70a6fe",
+      "summary": "Users who enjoy a particular book may also prefer others from the same author or similar thematic books.",
+      "rationale": "Cross-recommendation between similar books could enhance user experience and interactions.",
+      "depends_on": [
+        "book_similars.book_id",
+        "book_similars.similar_book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_085529_ccbae235",
+      "id": "f11ffd38-0e31-49ad-a1df-84116b3444e2",
+      "summary": "Increased user interaction correlates positively with higher ratings.",
+      "rationale": "More interactions suggest greater engagement and satisfaction, typically reflected in higher ratings.",
+      "depends_on": [
+        "interactions.review_id",
+        "interactions.n_votes",
+        "interactions.n_comments"
+      ]
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "id": "ac6f818c-406e-40eb-9e6b-b73092897f87",
+      "summary": "Books published by a larger number of unique publishers tend to have higher average ratings.",
+      "rationale": "A diverse range of publishers may indicate higher quality and more substantial investment in the books, which could translate into better ratings.",
+      "depends_on": [
+        "curated_books.publisher_name",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "id": "0ab61ad9-c368-4e15-8b7e-82de97b158ac",
+      "summary": "Books that have been published more recently tend to have higher average ratings.",
+      "rationale": "Newer books may benefit from more modern writing standards, trends, and reader preferences than older books, affecting their ratings positively.",
+      "depends_on": [
+        "curated_books.publication_date",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "id": "eb75df81-ef83-4440-a1d6-a00f8de70aee",
+      "summary": "Ebook formats tend to receive higher average ratings compared to physical formats.",
+      "rationale": "Ebooks may offer more accessibility and convenience, appealing to a broader audience, which could lead to better ratings.",
+      "depends_on": [
+        "curated_books.format",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "id": "17545600-ee77-4212-9adc-80afe1326f5a",
+      "summary": "Books with higher ratings tend to attract more reviews.",
+      "rationale": "Higher rated books are more likely to engage readers and prompt them to leave feedback, resulting in more reviews overall.",
+      "depends_on": [
+        "curated_books.avg_rating",
+        "curated_books.ratings_count"
+      ]
+    },
+    {
+      "run_id": "run_20250617_090838_a65fb946",
+      "id": "7ccab827-e740-4a0d-b5f6-f56f895b151c",
+      "summary": "Books with descriptions that reflect unique or engaging themes tend to have higher average ratings.",
+      "rationale": "Engaging themes may attract more readers and generate higher ratings based on reader enjoyment and connection to the content.",
+      "depends_on": [
+        "curated_books.description",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "4d14e12f-1fb8-46b1-a5bf-d352b7d02af2",
+      "summary": "Authors with more collaborations tend to create books with higher average ratings.",
+      "rationale": "Collaboration may lead to improved quality through shared expertise.",
+      "depends_on": [
+        "author_collaborations.author_id",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "3cae48b6-dc5e-428d-b4b6-ff1fe1749364",
+      "summary": "Books with more pages tend to receive a higher average rating.",
+      "rationale": "Longer books may offer deeper stories and character development, leading to higher ratings.",
+      "depends_on": [
+        "curated_books.num_pages",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "4443353e-2d03-4a64-811d-ff42b1d4940c",
+      "summary": "Ebooks tend to have lower average ratings compared to physical books.",
+      "rationale": "Physical books may be more desirable due to tactile experiences and availability of more detailed information before purchase.",
+      "depends_on": [
+        "curated_books.is_ebook",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "ef0d3ec5-6f3e-499e-a289-387ca9727cce",
+      "summary": "Genres with more books tend to have higher average ratings.",
+      "rationale": "Genres that attract more authors and books may indicate positive reader engagement and rating patterns.",
+      "depends_on": [
+        "genre_counts_view.genre",
+        "avg_rating_by_genre.average_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "a2ffbb63-b555-4610-bc24-9390545060d1",
+      "summary": "Authors with more collaborations tend to create books with higher average ratings.",
+      "rationale": "Collaboration may lead to improved quality through shared expertise.",
+      "depends_on": [
+        "author_collaborations.author_id",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "2ca98b5c-7e90-4084-b97c-e79189cca06f",
+      "summary": "Books with more pages tend to receive a higher average rating.",
+      "rationale": "Longer books may offer deeper stories and character development, leading to higher ratings.",
+      "depends_on": [
+        "curated_books.num_pages",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "91be0265-ba06-46bd-bf21-eca8fc5f295f",
+      "summary": "Ebooks tend to have lower average ratings compared to physical books.",
+      "rationale": "Physical books may be more desirable due to tactile experiences and availability of more detailed information before purchase.",
+      "depends_on": [
+        "curated_books.is_ebook",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_111935_2f1eb61d",
+      "id": "6dd348ab-f96d-43e0-bbda-5b456001135f",
+      "summary": "Genres with more books tend to have higher average ratings.",
+      "rationale": "Genres that attract more authors and books may indicate positive reader engagement and rating patterns.",
+      "depends_on": [
+        "genre_counts_view.genre",
+        "avg_rating_by_genre.average_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "3ca42a7c-4ce9-410b-8c6f-4d16a54c935e",
+      "summary": "Users who engage with more books tend to provide more reviews.",
+      "rationale": "Increased reading activity likely leads to more opportunities for users to express their thoughts, resulting in higher review counts.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "dd7d10a1-ae95-4a4d-bacb-9381b455c1ab",
+      "summary": "Books with higher average ratings tend to have more reviews written about them.",
+      "rationale": "Higher quality ratings may incentivize more users to share their experiences through reviews, highlighting a correlation between book quality and engagement.",
+      "depends_on": [
+        "curated_books.book_id",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "fce47266-9073-45ee-83f5-2a40141e02e9",
+      "summary": "Different audience demographics engage differently with book formats.",
+      "rationale": "Demographics may resonate differently with various reading formats, leading to fluctuations in engagement levels and variations by readership.",
+      "depends_on": [
+        "curated_reviews.book_id",
+        "curated_reviews.user_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "c5b84ff8-bd87-4545-b581-e86eab7d8396",
+      "summary": "Popular authors tend to have higher review rates for their books.",
+      "rationale": "Established authors often generate a loyal readership that is more likely to provide feedback, contributing to a higher volume of reviews for their works.",
+      "depends_on": [
+        "book_authors.author_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "57fe7365-4549-42b8-a915-56d73b04d6ff",
+      "summary": "The sentiments expressed in reviews vary significantly by user engagement.",
+      "rationale": "The richness and depth of reviews can reflect the level of emotional or intellectual engagement a user has with a book, offering insight into their reading experience.",
+      "depends_on": [
+        "curated_reviews.review_text",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "40b81efd-582d-4604-9328-de875d107569",
+      "summary": "Users who engage with more books tend to provide more reviews.",
+      "rationale": "Increased reading activity likely leads to more opportunities for users to express their thoughts, resulting in higher review counts.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "574e625d-a6e5-4c41-9575-9305258d620b",
+      "summary": "Books with higher average ratings tend to have more reviews written about them.",
+      "rationale": "Higher quality ratings may incentivize more users to share their experiences through reviews, highlighting a correlation between book quality and engagement.",
+      "depends_on": [
+        "curated_books.book_id",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "adb78c94-ed3c-47f3-8458-c1d61c659843",
+      "summary": "Different audience demographics engage differently with book formats.",
+      "rationale": "Demographics may resonate differently with various reading formats, leading to fluctuations in engagement levels and variations by readership.",
+      "depends_on": [
+        "curated_reviews.book_id",
+        "curated_reviews.user_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "f7e885b4-1009-4223-80e1-ec4aef552db5",
+      "summary": "Popular authors tend to have higher review rates for their books.",
+      "rationale": "Established authors often generate a loyal readership that is more likely to provide feedback, contributing to a higher volume of reviews for their works.",
+      "depends_on": [
+        "book_authors.author_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "c15f468f-0c4e-4f47-8271-99eaef3e3b43",
+      "summary": "The sentiments expressed in reviews vary significantly by user engagement.",
+      "rationale": "The richness and depth of reviews can reflect the level of emotional or intellectual engagement a user has with a book, offering insight into their reading experience.",
+      "depends_on": [
+        "curated_reviews.review_text",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "1cda2f4b-c7ce-4b0e-bcda-f71edf5c4d1f",
+      "summary": "Users who engage with more books tend to provide more reviews.",
+      "rationale": "Increased reading activity likely leads to more opportunities for users to express their thoughts, resulting in higher review counts.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "468ea54f-2cc1-4483-92b7-f2c8cac657c9",
+      "summary": "Books with higher average ratings tend to have more reviews written about them.",
+      "rationale": "Higher quality ratings may incentivize more users to share their experiences through reviews, highlighting a correlation between book quality and engagement.",
+      "depends_on": [
+        "curated_books.book_id",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "84208898-ce10-4565-82fa-2bc8ac173f1d",
+      "summary": "Different audience demographics engage differently with book formats.",
+      "rationale": "Demographics may resonate differently with various reading formats, leading to fluctuations in engagement levels and variations by readership.",
+      "depends_on": [
+        "curated_reviews.book_id",
+        "curated_reviews.user_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "52f41945-27f1-4a6a-9fe1-2fe1458607d4",
+      "summary": "Popular authors tend to have higher review rates for their books.",
+      "rationale": "Established authors often generate a loyal readership that is more likely to provide feedback, contributing to a higher volume of reviews for their works.",
+      "depends_on": [
+        "book_authors.author_id",
+        "curated_reviews.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091920_2d524456",
+      "id": "c43c2d24-9126-4d1a-8a24-43a1f7492843",
+      "summary": "The sentiments expressed in reviews vary significantly by user engagement.",
+      "rationale": "The richness and depth of reviews can reflect the level of emotional or intellectual engagement a user has with a book, offering insight into their reading experience.",
+      "depends_on": [
+        "curated_reviews.review_text",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "id": "9333d190-af02-472c-af17-646ac67245f8",
+      "summary": "Books with higher average ratings tend to have more formats available.",
+      "rationale": "Offering multiple formats (e.g., eBook, paperback, audiobook) increases accessibility and can lead to higher user satisfaction, reflected in ratings.",
+      "depends_on": [
+        "book_genre_format_ratings.avg_rating",
+        "book_genre_format_ratings.format"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "id": "0a7a84d9-792c-4ec8-81cd-a4c10017c909",
+      "summary": "Books that are listed in more genres receive higher ratings.",
+      "rationale": "Diversity in genre could attract a wider audience, thus increasing the potential for higher ratings as more readers engage with the book.",
+      "depends_on": [
+        "book_genre_format_ratings.avg_rating",
+        "book_genre_format_ratings.genre"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "id": "6014b1a6-b190-49af-b11f-c34081ae966e",
+      "summary": "Users who leave reviews with more detailed text tend to provide higher ratings.",
+      "rationale": "Longer reviews might indicate a more engaged reader, leading to a more favorable evaluation of the book based on their experience.",
+      "depends_on": [
+        "curated_reviews.rating",
+        "curated_reviews.review_text"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "id": "bc90ed63-834d-4c74-b081-9e4beac6f1fb",
+      "summary": "Books categorized as 'wish-list' tend to receive lower ratings than those in 'book-club' or 'ya' genres.",
+      "rationale": "The category might imply that readers are more exploratory or less committed to 'wish-list' books, which could be reflected in their ratings.",
+      "depends_on": [
+        "book_genre_format_ratings.avg_rating",
+        "book_genre_format_ratings.genre"
+      ]
+    },
+    {
+      "run_id": "run_20250617_091504_28f70390",
+      "id": "28c49565-eb41-4580-a085-6efd23fe58f3",
+      "summary": "Readers who rate more books tend to have a positive influence on their average ratings.",
+      "rationale": "Frequent engagement with books by readers could indicate higher engagement and a tendency to rate books more favorably over time.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "86e95b4c-49e9-4900-a6f2-0946af15dead",
+      "summary": "Books with higher average ratings tend to receive more ratings.",
+      "rationale": "Analysis suggests a connection where books with higher ratings generally exhibit a higher count of reader reviews.",
+      "depends_on": [
+        "curated_books.avg_rating",
+        "curated_books.ratings_count"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "b1fe0390-aee7-4b67-a4f8-d21933e6e00f",
+      "summary": "Books with a length of 400-450 pages are more popular.",
+      "rationale": "The analysis shows a clustering of popular books around the 400-450 pages mark, indicating reader preference for these lengths.",
+      "depends_on": [
+        "curated_books.num_pages"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "cf52137f-6d57-44fc-931c-7650b2170e14",
+      "summary": "Certain books have significantly higher ratings counts, indicating outlier popularity.",
+      "rationale": "Observations reveal a stark contrast in popularity among books, with select titles receiving significantly more reviews, impacting overall trends.",
+      "depends_on": [
+        "curated_books.ratings_count"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "d75696af-e739-43a8-97e5-a882e23dd69f",
+      "summary": "Books with lower average ratings may have niche audiences.",
+      "rationale": "Findings include examples of low-rated books that suggest a specialty or niche appeal, warranting further inquiry for targeted strategies.",
+      "depends_on": [
+        "curated_books.avg_rating",
+        "curated_books.ratings_count"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "c056e446-a3f6-44fe-b9cf-cdf93dbdd044",
+      "summary": "Books in the 'mystery-suspense' genre have higher average ratings than those in other genres.",
+      "rationale": "Identifying high-performing genres can guide marketing and recommendation strategies to boost user engagement.",
+      "depends_on": [
+        "book_genre_format_ratings.genre",
+        "book_genre_format_ratings.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "1b03793c-8c35-4a1d-94a1-e3487b78ae59",
+      "summary": "Users who read more books tend to give higher average ratings.",
+      "rationale": "Understanding reading patterns and user engagement can refine personalized recommendations and increase user satisfaction.",
+      "depends_on": [
+        "curated_reviews.user_id",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "d1c0deef-eb7c-4721-960a-f4d583a54d69",
+      "summary": "Author collaborations are linked to an increase in shared readership and book success.",
+      "rationale": "Detecting collaborative patterns can leverage cross-promotion opportunities and diversify author exposure.",
+      "depends_on": [
+        "book_authors.author_id",
+        "book_authors.book_id"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "dae69914-229f-4dd4-9fab-ac5338b72da7",
+      "summary": "Books with more than 10 ratings provide reliable average ratings and insights.",
+      "rationale": "Focusing on books with substantial ratings can enhance the accuracy of analysis on book performance.",
+      "depends_on": [
+        "curated_reviews.book_id",
+        "curated_reviews.rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_083442_801c20a3",
+      "id": "07fe12a8-784e-47e1-beb4-359f9029da15",
+      "summary": "The distribution of books across genres and formats reveals market trends and reader preferences.",
+      "rationale": "Understanding genre and format distributions aids in anticipating user needs and informing inventory decisions.",
+      "depends_on": [
+        "book_genre_format_ratings.genre",
+        "book_genre_format_ratings.format"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093601_ae6eca46",
+      "id": "9eb12361-95f2-43d9-9a30-08df006409a9",
+      "summary": "Books with higher average ratings are more likely to have a greater number of ratings.",
+      "rationale": "A larger number of ratings may indicate a broader readership which could lead to higher average ratings.",
+      "depends_on": [
+        "curated_books_view.avg_rating",
+        "curated_books_view.ratings_count"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093601_ae6eca46",
+      "id": "d5b2263b-546e-4007-b0e6-1489324361b1",
+      "summary": "eBooks tend to have higher average ratings compared to physical books.",
+      "rationale": "The eBook format may attract more engaged readers who provide ratings, leading to a higher average rating.",
+      "depends_on": [
+        "curated_books_view.is_ebook",
+        "curated_books_view.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_093601_ae6eca46",
+      "id": "14f49da7-3891-493a-872c-e1baa903e65c",
+      "summary": "Books published by known publishers receive higher ratings.",
+      "rationale": "Books from established publishers may be of higher quality and better marketed, contributing to better reception and ratings.",
+      "depends_on": [
+        "curated_books_view.publisher_name",
+        "curated_books_view.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "id": "36c4e94f-a98a-4a17-ac4c-74ce532ca4ee",
+      "summary": "Higher book ratings correlate with more user engagement indicators.",
+      "rationale": "Books with higher ratings tend to receive more ratings and user interactions, suggesting that quality impacts engagement.",
+      "depends_on": [
+        "book_shelves.cnt",
+        "user_stats_daily.mean_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "id": "c3c50574-dbe3-47d3-9247-fbc88a3e5775",
+      "summary": "Books in series have higher average ratings than standalone books.",
+      "rationale": "Series may develop richer character arcs and plotlines, encouraging readers to invest more, which correlates with higher ratings.",
+      "depends_on": [
+        "book_series.series_name",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "id": "9ea2077f-cde5-4f9d-9ac1-0aab493d4a06",
+      "summary": "Translated books achieve lower ratings compared to original language publications.",
+      "rationale": "Perceptions of translation quality can impact user ratings, indicating that original works may resonate more.",
+      "depends_on": [
+        "book_authors.role",
+        "curated_books.avg_rating"
+      ]
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "id": "5a96a7d9-fb75-4489-89ae-1f4bd14ff41e",
+      "summary": "Readers who engage with multiple genres display broader engagement metrics.",
+      "rationale": "Genre diversity might indicate varied interests leading to more comprehensive reading habits and higher engagement.",
+      "depends_on": [
+        "book_genre_format_ratings.genre",
+        "user_stats_daily.n_ratings"
+      ]
+    },
+    {
+      "run_id": "run_20250617_000445_396c4332",
+      "id": "59e13a74-766a-4edc-8042-6dc9e6a7f4e1",
+      "summary": "Books published with more extensive marketing (e.g., large publisher backing) receive higher user ratings.",
+      "rationale": "Visibility and perceived legitimacy from larger publishers may influence reader perceptions and ratings.",
+      "depends_on": [
+        "curated_books.publisher_name",
+        "curated_books.avg_rating"
+      ]
+    }
+  ]
+}

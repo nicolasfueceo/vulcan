@@ -1,0 +1,54 @@
+{
+  "folds": [
+    {
+      "fold": 0,
+      "random_seed": 42,
+      "train_users": 62307,
+      "val_users": 20769,
+      "test_users": 20769,
+      "train_ratio": 0.6,
+      "val_ratio": 0.2,
+      "test_ratio": 0.2
+    },
+    {
+      "fold": 1,
+      "random_seed": 43,
+      "train_users": 62307,
+      "val_users": 20769,
+      "test_users": 20769,
+      "train_ratio": 0.6,
+      "val_ratio": 0.2,
+      "test_ratio": 0.2
+    },
+    {
+      "fold": 2,
+      "random_seed": 44,
+      "train_users": 62307,
+      "val_users": 20769,
+      "test_users": 20769,
+      "train_ratio": 0.6,
+      "val_ratio": 0.2,
+      "test_ratio": 0.2
+    },
+    {
+      "fold": 3,
+      "random_seed": 45,
+      "train_users": 62307,
+      "val_users": 20769,
+      "test_users": 20769,
+      "train_ratio": 0.6,
+      "val_ratio": 0.2,
+      "test_ratio": 0.2
+    },
+    {
+      "fold": 4,
+      "random_seed": 46,
+      "train_users": 62307,
+      "val_users": 20769,
+      "test_users": 20769,
+      "train_ratio": 0.6,
+      "val_ratio": 0.2,
+      "test_ratio": 0.2
+    }
+  ]
+}

@@ -251,10 +251,31 @@ class SmartGroupChatManager(autogen.GroupChatManager):
             except Exception as e:
                 logger.warning("Context compression failed: {}", e)
 
-        # --- TERMINATION BLOCKER: Enforce hypothesis finalization ---
+        # --- TERMINATION HANDLING: Check for Hypothesizer TERMINATE signal ---
         last_msg_content = messages[-1]["content"].strip().upper() if messages else ""
-        if "TERMINATE" in last_msg_content and session_state and not session_state.get_final_hypotheses():
-            logger.warning("Termination signal received, but no hypotheses finalized. Blocking termination.")
+        last_msg_sender = messages[-1].get("name", "") if messages else ""
+        
+        # If Hypothesizer sends TERMINATE and hypotheses are finalized, allow termination
+        if "TERMINATE" in last_msg_content and last_msg_sender == "Hypothesizer":
+            if session_state and session_state.get_final_hypotheses():
+                logger.info("Hypothesizer sent TERMINATE and hypotheses are finalized. Terminating discovery loop.")
+                return True, "TERMINATE"
+            elif session_state:
+                logger.warning("Hypothesizer sent TERMINATE but no hypotheses finalized. Prompting for finalization.")
+                messages.append(
+                    {
+                        "role": "user",
+                        "name": "SystemCoordinator",
+                        "content": (
+                            "Hypothesizer, you sent a termination signal but no hypotheses have been finalized. "
+                            "Please call the `finalize_hypotheses` tool with your synthesized hypotheses before terminating."
+                        ),
+                    }
+                )
+        
+        # Block any other TERMINATE signals if hypotheses aren't finalized
+        elif "TERMINATE" in last_msg_content and session_state and not session_state.get_final_hypotheses():
+            logger.warning("Termination signal received from non-Hypothesizer, but no hypotheses finalized. Blocking termination.")
             messages.append(
                 {
                     "role": "user",
@@ -323,7 +344,6 @@ def run_discovery_loop(session_state: SessionState) -> str:
         name="UserProxy_ToolExecutor",
         human_input_mode="NEVER",
         max_consecutive_auto_reply=100,
-        is_termination_msg=lambda x: "TERMINATE" in x.get("content", "").strip(),
         code_execution_config={"work_dir": str(get_run_dir()), "use_docker": False},
     )
 
@@ -374,11 +394,18 @@ def run_discovery_loop(session_state: SessionState) -> str:
         description="Finalize and submit a list of all validated hypotheses. This is the mandatory final step before the discovery loop can end.",
     )
 
-    agents: Sequence[Agent] = [user_proxy, analyst, researcher, critic, hypothesizer]
+    agents: Sequence[autogen.Agent] = [user_proxy, analyst, researcher, critic, hypothesizer]
+    
     group_chat = autogen.GroupChat(
-        agents=agents, messages=[], max_round=100, allow_repeat_speaker=True
+        agents=agents, 
+        messages=[], 
+        max_round=100, 
+        allow_repeat_speaker=True
     )
-    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
+    manager = SmartGroupChatManager(
+        groupchat=group_chat, 
+        llm_config=llm_config
+    )
 
     logger.info("Closing database connection for agent execution...")
     session_state.close_connection()
@@ -474,12 +501,41 @@ def run_strategy_loop(
     user_proxy = strategy_agents_with_proxy["user_proxy"]
 
     # --- Tool Registration ---
-    user_proxy.register_function(
-        function_map={
-            "save_candidate_features": get_save_candidate_features_tool(session_state),
-            "execute_python": execute_python,
-        }
-    )
+    # Create a wrapper for execute_python that includes session_state
+    def execute_python_with_state(code: str, timeout: int = 300) -> str:
+        return execute_python(code, timeout, session_state)
+    
+    # Get the save_candidate_features tool
+    save_features_tool = get_save_candidate_features_tool(session_state)
+    
+    # Ensure both functions are not None to avoid autogen library bug
+    if save_features_tool is None:
+        logger.error("save_candidate_features tool is None, cannot register")
+        raise RuntimeError("Failed to get save_candidate_features tool")
+    
+    # Register functions with explicit error handling for autogen bug
+    try:
+        user_proxy.register_function(
+            function_map={
+                "save_candidate_features": save_features_tool,
+                "execute_python": execute_python_with_state,
+            }
+        )
+        logger.info("Successfully registered tools with UserProxy")
+    except TypeError as e:
+        if "category must be a Warning subclass" in str(e):
+            logger.warning(f"Encountered autogen library bug: {e}")
+            # Try to register functions one by one to isolate the issue
+            try:
+                user_proxy._function_map = user_proxy._function_map or {}
+                user_proxy._function_map["save_candidate_features"] = save_features_tool
+                user_proxy._function_map["execute_python"] = execute_python_with_state
+                logger.info("Successfully registered tools using direct assignment workaround")
+            except Exception as fallback_error:
+                logger.error(f"Fallback registration failed: {fallback_error}")
+                raise
+        else:
+            raise
 
     # Create the group chat with only the StrategistAgent and UserProxy
     groupchat = autogen.GroupChat(
@@ -489,30 +545,68 @@ def run_strategy_loop(
         speaker_selection_method="auto",
     )
 
-    manager = SmartGroupChatManager(groupchat=groupchat, llm_config=llm_config)
+    manager = SmartGroupChatManager(groupchat=group_chat, llm_config=llm_config)
 
     # Format hypotheses for the initial message
     hypotheses_json = json.dumps(
         [h.model_dump() for h in session_state.get_final_hypotheses()], indent=2
     )
 
+    # Get previously discovered features from prior epochs
+    previous_features = session_state.get_candidate_features()
+    previous_features_context = ""
+    
+    if previous_features:
+        previous_features_json = json.dumps(previous_features, indent=2)
+        previous_features_context = f"""
+**Previously Discovered Features from Prior Epochs:**
+```json
+{previous_features_json}
+```
+
+**Important Context:**
+- The above features were discovered in previous epochs of this VULCAN run.
+- You should be aware of these existing features to avoid redundancy.
+- Your goal is to discover NEW, NOVEL, and COMPLEMENTARY features that go beyond what has already been found.
+- Consider how your new features can build upon, enhance, or provide alternatives to the existing ones.
+- Strive for creative and innovative feature engineering that explores unexplored aspects of the data.
+
+"""
+    else:
+        previous_features_context = """
+**Previously Discovered Features:**
+- This is the first epoch, so no features have been discovered yet.
+- You have the opportunity to establish the foundation for feature discovery in this run.
+
+"""
+
     # Construct the initial message to kick off the conversation.
     # This message is a direct command to the StrategistAgent.
     initial_message = f"""You are the StrategistAgent. Your task is to design a set of `CandidateFeature` contracts based on the following hypotheses.
 
-**Hypotheses:**
+{previous_features_context}**Hypotheses:**
 ```json
 {hypotheses_json}
 ```
 
 **Your Instructions:**
-1.  Analyze the hypotheses.
-2.  Design a list of `CandidateFeature` contracts. Each contract must be a dictionary with `name`, `description`, `dependencies`, and `parameters`.
-3.  Use the `save_candidate_features` tool to submit your designs. Your response MUST be a call to this tool.
+1.  Analyze the hypotheses and any previously discovered features.
+2.  Design a list of `CandidateFeature` contracts that are NOVEL and go beyond existing features. Each contract must be a dictionary with `name`, `description`, `dependencies`, and `parameters`.
+3.  Focus on creative feature engineering that explores new aspects of the data relationships and patterns.
+4.  Call the `save_candidate_features` function with your list of candidate features.
 
-Begin now.
+**Important:** You must call the function directly like this:
+save_candidate_features([
+    {{
+        "name": "feature_name",
+        "description": "feature description", 
+        "dependencies": ["table.column1", "table.column2"],
+        "parameters": {{}}
+    }}
+])
+
+Do NOT output JSON or any other format. Call the function directly with your designed features.
 """
-
 
     # --- NEW: Ensure DB connection is refreshed before strategy loop ---
     logger.info("Refreshing DB connection before strategy loop to ensure all views are visible...")
@@ -547,7 +641,7 @@ Begin now.
     return report
 
 
-def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
+def main(epochs: int = 30, fast_mode_frac: float = 0.15) -> str:
     optimization_report = "Optimization step did not run."
     """
     Main orchestration function for the VULCAN pipeline.
@@ -564,9 +658,10 @@ def main(epochs: int = 20, fast_mode_frac: float = 0.15) -> str:
     setup_logging()
     
     # --- Start TensorBoard for experiment tracking (after run context is initialized) ---
-    from src.config.tensorboard import start_tensorboard
-    logger.info("Launching TensorBoard server on port 6006 with global logdir: runtime/tensorboard_global")
-    start_tensorboard()
+    logger.info("TensorBoard temporarily disabled for testing")
+    # from src.config.tensorboard import start_tensorboard
+    # logger.info("Launching TensorBoard server on port 6006 with global logdir: runtime/tensorboard_global")
+    # start_tensorboard()
 
     session_state = SessionState(run_dir)
     session_state.set_state("fast_mode_sample_frac", fast_mode_frac)

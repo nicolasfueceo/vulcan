@@ -168,6 +168,7 @@ class CVDataManager:
         cache_size_mb: int = 1024,
         max_connections: int = 10,
         read_only: bool = False,
+        undersample_frac: float = 1.0,
     ):
         """Initialize the CV data manager with caching and connection pooling.
 
@@ -178,6 +179,7 @@ class CVDataManager:
             cache_size_mb: Size of DuckDB's memory cache in MB
             max_connections: Maximum number of database connections in the pool
             read_only: Whether the database should be opened in read-only mode
+            undersample_frac: Fraction of users to sample for each fold (default: 1.0)
         """
         self.db_path = Path(db_path)
         self.splits_dir = Path(splits_dir)
@@ -186,6 +188,7 @@ class CVDataManager:
         self._cv_folds = None
         self._cache_size_mb = cache_size_mb
         self.read_only = read_only
+        self.undersample_frac = undersample_frac
 
         # Cache for loaded data
         self._data_cache: Dict[str, Any] = {}
@@ -363,6 +366,9 @@ class CVDataManager:
         Tuple[pd.DataFrame, pd.DataFrame],
         Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
     ]:
+        # Use undersample_frac if sample_frac not provided
+        if sample_frac is None:
+            sample_frac = getattr(self, 'undersample_frac', 1.0);
         # Clear any previous data first
         self._clear_previous_fold_data()
 
@@ -556,6 +562,9 @@ class CVDataManager:
         random_state: int = 42,
         split_type: str = "train_val",
     ) -> Generator[
+        # Use undersample_frac if sample_frac not provided
+        # (this is safe because get_fold_data will also handle it)
+        
         Union[
             Tuple[pd.DataFrame, pd.DataFrame],
             Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
@@ -583,7 +592,7 @@ class CVDataManager:
             yield self.get_fold_data(
                 fold_idx=i,
                 columns=columns,
-                sample_frac=sample_frac,
+                sample_frac=sample_frac if sample_frac is not None else getattr(self, 'undersample_frac', 1.0),
                 random_state=random_state,
                 split_type=split_type,
             )

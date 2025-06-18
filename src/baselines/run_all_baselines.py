@@ -88,7 +88,7 @@ def main(sampling_fraction=0.1, k_list=[5]):
 
         # Popularity Baseline
         try:
-            metrics = run_popularity_baseline(train_df, test_df, k_list=k_list)
+            metrics = run_popularity_baseline(train_df, test_df)
             per_fold_results["popularity"].append(metrics)
             logger.success(f"Popularity baseline completed. Metrics: {metrics}")
         except Exception as e:
@@ -157,4 +157,4 @@ def main(sampling_fraction=0.1, k_list=[5]):
 
 
 if __name__ == "__main__":
-    main(sampling_fraction=0.1, k_list=[5])
+    main(sampling_fraction=0.01, k_list=[5])

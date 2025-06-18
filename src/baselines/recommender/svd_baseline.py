@@ -2,14 +2,14 @@ import pandas as pd
 from loguru import logger
 from surprise import SVD, Dataset, Reader
 from surprise.accuracy import mae, rmse
+from sklearn.metrics import ndcg_score
+import numpy as np
 
-from src.evaluation.ranking_metrics import evaluate_ranking_metrics
-from .ranking_utils import get_top_n_recommendations
 
 
 def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, k_list=[5, 10, 20]) -> dict:
     """
-    Runs the SVD baseline, evaluating with RMSE, MAE, and NDCG@10.
+    Runs the SVD baseline, evaluating with RMSE, MAE.
     """
     logger.info("Starting SVD baseline...")
 
@@ -34,44 +34,41 @@ def run_svd_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, k_list=[5, 1
     mae_score = mae(accuracy_predictions, verbose=False)
     logger.info(f"SVD baseline RMSE: {rmse_score:.4f}, MAE: {mae_score:.4f}")
 
-    # 4. Evaluate for Ranking (NDCG, Precision@K, Recall@K) using RankerEval
-    logger.info("Evaluating model for ranking metrics (RankerEval)...")
-    import numpy as np
-    user_ids = test_df['user_id'].unique()
-    top_n = {}
-    # Build mapping from inner item id to raw item id
-    item_inner_id_to_raw = {iid: model.trainset.to_raw_iid(iid) for iid in range(len(model.qi))}
-    for user_id in user_ids:
-        try:
-            inner_uid = model.trainset.to_inner_uid(user_id)
-        except ValueError:
-            continue  # user not in training set
-        # Get seen items in internal ids
-        seen_inner_iids = set()
-        for iid in train_df[train_df['user_id'] == user_id]['book_id']:
-            if model.trainset.knows_item(iid):
-                try:
-                    seen_inner_iids.add(model.trainset.to_inner_iid(iid))
-                except ValueError:
-                    continue
-        user_vec = model.pu[inner_uid]
-        scores = model.qi @ user_vec  # shape (n_items,)
-        # Mask seen items
-        if seen_inner_iids:
-            scores[list(seen_inner_iids)] = -np.inf
-        # Get top-20 indices efficiently
-        top_indices = np.argpartition(scores, -20)[-20:]
-        top_indices_sorted = top_indices[np.argsort(scores[top_indices])[::-1]]
-        # Map back to raw ids
-        top_n[user_id] = [item_inner_id_to_raw[iid] for iid in top_indices_sorted]
-
-    ground_truth = test_df.groupby('user_id')['book_id'].apply(list).to_dict()
-    ranking_metrics = evaluate_ranking_metrics(top_n, ground_truth, k_list=k_list)
-    logger.info(f"SVD baseline ranking metrics: {ranking_metrics}")
-
-    # 5. Return Metrics
+    # 4. Compute NDCG@10
     metrics = {"rmse": rmse_score, "mae": mae_score}
-    metrics.update(ranking_metrics)
+    try:
+        # Build user->items mapping from test set
+        user_items = test_df.groupby('user_id')['book_id'].apply(list)
+        all_items = np.array(train_df['book_id'].unique())
+        batch_size = 1000
+        ndcg_at_10 = []
+        precision_at_5_list = []
+        for i in range(0, len(user_items), batch_size):
+            batch_user_ids = list(user_items.index[i:i+batch_size])
+            batch_user_items = user_items.iloc[i:i+batch_size]
+            # Predicted scores for all items
+            scores = np.array([model.predict(user_id, item_id).est for user_id in batch_user_ids for item_id in all_items]).reshape(-1, len(all_items))
+            # Relevance: 1 if in test set, 0 otherwise
+            true_relevance = np.array([np.isin(all_items, np.array(true_items)).astype(int) for true_items in batch_user_items])
+            # Compute NDCG for all users in the batch
+            batch_ndcg = ndcg_score(true_relevance, scores, k=5)
+            ndcg_at_5.extend(batch_ndcg)
+            # Compute precision@5 for all users in the batch
+            top5_indices = np.argpartition(-scores, 5, axis=1)[:, :5]
+            for idx, user_true_items in enumerate(batch_user_items):
+                top5_items = all_items[top5_indices[idx]]
+                hits = np.isin(top5_items, np.array(user_true_items))
+                precision = np.sum(hits) / 5
+                precision_at_5_list.append(precision)
+        ndcg_at_5 = float(np.mean(ndcg_at_5)) if ndcg_at_5 else float('nan')
+        precision_at_5 = float(np.mean(precision_at_5_list)) if precision_at_5_list else float('nan')
+        metrics['ndcg_at_5'] = ndcg_at_5
+        metrics['precision_at_5'] = precision_at_5
+        logger.info(f"SVD NDCG@5: {ndcg_at_5:.4f}, Precision@5: {precision_at_5:.4f}")
+    except Exception as ndcg_e:
+        logger.warning(f"Could not compute NDCG@10: {ndcg_e}")
+        metrics['ndcg_at_10'] = float('nan')
+
     logger.info(f"SVD metrics: {metrics}")
     logger.success("SVD baseline finished successfully.")
     return metrics

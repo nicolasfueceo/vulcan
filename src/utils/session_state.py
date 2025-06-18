@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import duckdb
 from loguru import logger
+from typing import Optional
+from src.data.cv_data_manager import CVDataManager
 
 from src.schemas.models import Hypothesis, Insight
 from src.utils.run_utils import get_run_dir
@@ -99,6 +101,9 @@ class SessionState:
         self.feature_realization_run_count: int = 0
         self.reflection_run_count: int = 0
 
+        # Cross-validation data manager (lazy)
+        self._cv_manager: Optional[CVDataManager] = None
+        
         # Load existing state if available
         self._load_from_disk()
 
@@ -379,6 +384,37 @@ class SessionState:
         """Empties central memory list."""
         self.central_memory.clear()
 
+    # ------------------------------------------------------------------
+    # CV DATA ACCESS HELPERS
+    # ------------------------------------------------------------------
+    def _get_cv_manager(self) -> CVDataManager:
+        """Lazy-initialize and return a CVDataManager instance."""
+        if self._cv_manager is None:
+            splits_dir = Path("data/cv_splits")
+            if not splits_dir.exists():
+                logger.warning("CV splits directory not found; please generate CV splits first.")
+            self._cv_manager = CVDataManager(
+                db_path=self.db_path,
+                splits_dir=splits_dir,
+                read_only=True,
+            )
+        return self._cv_manager
+
+    def get_train_df(self, fold_idx: int = 0):
+        """Return the (train+val) DataFrame for a given fold (default 0)."""
+        cv = self._get_cv_manager()
+        train_val_df, _ = cv.get_fold_data(fold_idx=fold_idx, split_type="full_train")
+        return train_val_df
+
+    def get_test_df(self, fold_idx: int = 0):
+        """Return the test DataFrame for a given fold (default 0)."""
+        cv = self._get_cv_manager()
+        _, test_df = cv.get_fold_data(fold_idx=fold_idx, split_type="full_train")
+        return test_df
+
+    # ------------------------------------------------------------------
+    # Existing persistence helpers
+    # ------------------------------------------------------------------
     def save_to_disk(self):
         """Saves the current session state to disk."""
         output = {
